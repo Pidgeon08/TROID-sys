@@ -1,19 +1,23 @@
 import { NavLink } from 'react-router-dom';
-import { Home, Map, FileText, Settings as SettingsIcon, LogOut, Shield, ClipboardList, Users, Truck, Bot, InboxIcon } from 'lucide-react';
+import { Home, Map, FileText, Settings as SettingsIcon, LogOut, Shield, ClipboardList, Users, Bot, InboxIcon, Send, CalendarClock, MapPin, Recycle } from 'lucide-react';
 
 const navItems = {
   admin: [
     { to: '/admin/dashboard', icon: Home, label: 'Dashboard' },
+    { to: '/admin/requests', icon: InboxIcon, label: 'Requests' },
+    { to: '/admin/deployment', icon: CalendarClock, label: 'Deployment Schedule' },
+    { to: '/admin/collection-schedule', icon: CalendarClock, label: 'Collection Schedule' },
     { to: '/admin/manage-bots', icon: Bot, label: 'Bot Management' },
     { to: '/admin/users', icon: Users, label: 'User Management' },
-    { to: '/admin/requests', icon: InboxIcon, label: 'Requests' },
-    { to: '/admin/collection', icon: Truck, label: 'Collection Schedule' },
+    { to: '/admin/landfill', icon: MapPin, label: 'Landfill Tracking' },
+    { to: '/admin/recycling', icon: Recycle, label: 'Recycling Center' },
     { to: '/admin/heatmap', icon: Map, label: 'Heatmap' },
     { to: '/admin/reports', icon: FileText, label: 'Report Generation' },
     { to: '/admin/audit', icon: ClipboardList, label: 'Audit Logs' },
     { to: '/admin/settings', icon: SettingsIcon, label: 'Settings' },
   ],
   mayorsoffice: [
+    { to: '/mayorsoffice/dashboard', icon: Home, label: 'Dashboard' },
     { to: '/mayorsoffice/requests', icon: InboxIcon, label: 'Requests' },
   ],
   spearhead: [
@@ -21,31 +25,29 @@ const navItems = {
     { to: '/spearhead/heatmap', icon: Map, label: 'Heatmap' },
     { to: '/spearhead/reports', icon: FileText, label: 'Report Generation' },
   ],
+  barangay: [
+    { to: '/barangay/dashboard', icon: Home, label: 'Dashboard' },
+    { to: '/barangay/requests', icon: InboxIcon, label: 'My Requests' },
+    { to: '/barangay/request', icon: Send, label: 'Submit Request' },
+    { to: '/barangay/segregation', icon: Recycle, label: 'Trash Segregation' },
+    { to: '/barangay/heatmap', icon: Map, label: 'Bot Tracking' },
+  ],
 };
 
-const getInitials = (name) => {
-  if (!name) return '??';
-  const parts = name.trim().split(' ');
-  if (parts.length >= 2) {
-    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-  }
-  return name.slice(0, 2).toUpperCase();
-};
-
-const getRoleLabel = (role) => {
-  const map = {
-    admin: 'Admin',
+  const roleLabel = {
+    admin: 'CENRO',
+    mayorsoffice: 'Mayor\'s Office',
     spearhead: 'Spearhead',
-    mayorsoffice: 'Office Mayor',
+    barangay: 'Barangay',
   };
-  return map[role] || role;
-};
+  const roleInitial = {
+    admin: 'CE',
+    mayorsoffice: 'MO',
+    spearhead: 'SH',
+    barangay: 'BG',
+  };
 
-const Sidebar = ({ onLogout, user = null }) => {
-  const userRole = user?.role || 'admin';
-  const fullName = user?.full_name || 'John Admin';
-  const username = user?.username || 'johndoe';
-
+  const Sidebar = ({ onLogout, userType = 'admin', currentUser = null }) => {
   const getNavLinkClass = (isActive) =>
     `flex items-center px-4 py-3 text-slate-300 hover:text-white hover:bg-white/5 rounded-xl transition-all duration-200 font-medium text-[15px] group ${isActive ? 'bg-[#1b4de4] text-white shadow-[0_4px_12px_rgba(27,77,228,0.25)]' : ''
     }`;
@@ -70,31 +72,19 @@ const Sidebar = ({ onLogout, user = null }) => {
         </div>
       </div>
 
-{/* Navigation */}
-       <nav className="flex-1 py-8 px-4 flex flex-col gap-2">
-         {navItems[userRole]?.map((item) => {
-           const isChild = item.isChild;
-           const baseClass = isChild 
-             ? 'flex items-center px-4 py-2 text-slate-300 hover:text-white hover:bg-white/5 rounded-xl transition-all duration-200 font-medium text-[14px] group pl-12'
-             : 'flex items-center px-4 py-3 text-slate-300 hover:text-white hover:bg-white/5 rounded-xl transition-all duration-200 font-medium text-[15px] group';
-           
-           return (
-             <NavLink key={item.to} to={item.to} className={({ isActive }) => 
-               `${baseClass} ${isActive ? 'bg-[#1b4de4] text-white shadow-[0_4px_12px_rgba(27,77,228,0.25)]' : ''}`
-             } style={!isChild ? { paddingLeft: '16px' } : {}}>
-               {({ isActive }) => (
-                 <>
-                   <item.icon className={isChild 
-                     ? `w-4 h-4 mr-2.5 transition-colors duration-200 ${isActive ? 'text-white' : 'text-slate-400 group-hover:text-white'}`
-                     : `w-5 h-5 mr-3.5 transition-colors duration-200 ${isActive ? 'text-white' : 'text-slate-400 group-hover:text-white'}`
-                   } />
-                   <span>{item.label}</span>
-                 </>
-               )}
-             </NavLink>
-           );
-         })}
-       </nav>
+      {/* Navigation */}
+      <nav className="flex-1 py-8 px-4 flex flex-col gap-2">
+        {navItems[userType]?.map((item) => (
+          <NavLink key={item.to} to={item.to} className={({ isActive }) => getNavLinkClass(isActive)}>
+            {({ isActive }) => (
+              <>
+                <item.icon className={getIconClass(isActive)} />
+                <span>{item.label}</span>
+              </>
+            )}
+          </NavLink>
+        ))}
+      </nav>
 
       {/* Footer Block */}
       <div className="p-4 border-t border-white/5 flex flex-col gap-4">
@@ -111,12 +101,12 @@ const Sidebar = ({ onLogout, user = null }) => {
         <div className="bg-white/[0.06] border border-white/[0.03] rounded-xl p-3.5 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-full bg-slate-500/30 flex items-center justify-center text-slate-300 font-semibold text-sm">
-              {getInitials(fullName)}
+              {roleInitial[userType] || 'AD'}
             </div>
             <div className="flex flex-col">
-              <span className="text-sm font-semibold text-white">{fullName}</span>
+              <span className="text-sm font-semibold text-white">{currentUser?.name || 'John Admin'}</span>
               <span className="text-xs text-slate-400 font-medium mt-0.5 flex items-center gap-1">
-                <Shield className="w-3 h-3" /> {getRoleLabel(userRole)}
+                <Shield className="w-3 h-3" /> {roleLabel[userType] || 'Admin'}
               </span>
             </div>
           </div>
@@ -128,4 +118,3 @@ const Sidebar = ({ onLogout, user = null }) => {
 };
 
 export default Sidebar;
-

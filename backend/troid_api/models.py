@@ -7,7 +7,6 @@ class Boat(models.Model):
     last_longitude = models.FloatField(null=True, blank=True)
     battery_level = models.FloatField(null=True, blank=True)
     last_seen = models.DateTimeField(auto_now=True)
-    operator = models.ForeignKey('Operator', on_delete=models.SET_NULL, null=True, blank=True, related_name='boats')
 
     def __str__(self):
         return self.name
@@ -25,33 +24,25 @@ class DetectionEvent(models.Model):
 class User(models.Model):
     ROLE_CHOICES = [
         ('admin', 'Admin'),
+        ('mayorsoffice', "Mayor's Office"),
         ('spearhead', 'Spearhead'),
-        ('officemayor', 'Office Mayor'),
+        ('barangay', 'Barangay'),
     ]
-
-    user_id = models.CharField(max_length=8, primary_key=True)
-    username = models.CharField(max_length=50, unique=True)
-    password_hash = models.CharField(max_length=255)
-    email = models.CharField(max_length=100, unique=True)
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('active', 'Active'),
+        ('offline', 'Offline'),
+        ('archived', 'Archived'),
+    ]
+    name = models.CharField(max_length=100)
+    email = models.EmailField(unique=True)
     role = models.CharField(max_length=20, choices=ROLE_CHOICES)
-    full_name = models.CharField(max_length=100)
-    is_active = models.BooleanField(default=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    last_login = models.DateTimeField(null=True, blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='active')
+    location = models.CharField(max_length=100, blank=True)
+    date_created = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return self.username
-
-class Barangay(models.Model):
-    barangay_id = models.AutoField(primary_key=True)
-    barangay_name = models.CharField(max_length=100)
-    latitude = models.DecimalField(max_digits=9, decimal_places=6)
-    longitude = models.DecimalField(max_digits=9, decimal_places=6)
-    spearhead_id = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='barangays')
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    def __str__(self):
-        return self.barangay_name
+        return self.name
 
 class Operator(models.Model):
     STATUS_CHOICES = [
@@ -60,55 +51,159 @@ class Operator(models.Model):
         ('onleave', 'On Leave'),
     ]
     AVAILABILITY_CHOICES = [
-        ('Assigned', 'Assigned'),
-        ('Available', 'Available'),
-        ('Unavailable', 'Unavailable'),
+        ('assigned', 'Assigned'),
+        ('available', 'Available'),
+        ('unavailable', 'Unavailable'),
     ]
     name = models.CharField(max_length=100)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='online')
-    availability = models.CharField(max_length=20, choices=AVAILABILITY_CHOICES, default='Available')
+    assigned_bot = models.ForeignKey(Boat, on_delete=models.SET_NULL, null=True, blank=True, related_name='operators')
+    availability = models.CharField(max_length=20, choices=AVAILABILITY_CHOICES, default='available')
 
     def __str__(self):
         return self.name
 
-class CleanupRequest(models.Model):
+class Request(models.Model):
     STATUS_CHOICES = [
         ('pending', 'Pending'),
-        ('accepted', 'Accepted'),
-        ('rejected', 'Rejected'),
-        ('scheduled', 'Scheduled'),
+        ('approved', 'Approved'),
+        ('declined', 'Declined'),
+        ('processing', 'Processing'),
+        ('completed', 'Completed'),
+        ('segregated', 'Segregated'),
     ]
-    MEDIA_TYPE_CHOICES = [
-        ('image', 'Image'),
-        ('video', 'Video'),
-    ]
-    request_id = models.AutoField(primary_key=True)
-    spearhead = models.ForeignKey(User, on_delete=models.CASCADE, related_name='cleanup_requests')
-    barangay = models.ForeignKey(Barangay, on_delete=models.CASCADE)
-    description = models.TextField()
-    media_type = models.CharField(max_length=20, choices=MEDIA_TYPE_CHOICES, default='image')
-    media = models.FileField(upload_to='cleanup_requests/', null=True, blank=True)
+    request_id = models.CharField(max_length=20, unique=True)
+    request_type = models.CharField(max_length=50)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    date_submitted = models.DateTimeField(auto_now_add=True)
+    requested_by_name = models.CharField(max_length=100)
+    requested_by_role = models.CharField(max_length=50)
+    requested_by_barangay = models.CharField(max_length=100)
+    contact = models.CharField(max_length=20)
+    email = models.EmailField()
+    location_name = models.CharField(max_length=100)
+    barangay = models.CharField(max_length=100)
+    municipality = models.CharField(max_length=100)
+    province = models.CharField(max_length=100)
+    notes = models.TextField(blank=True)
+    letter_file_name = models.CharField(max_length=100, blank=True)
+    letter_size = models.CharField(max_length=20, blank=True)
+    bot_id = models.ForeignKey(Boat, on_delete=models.SET_NULL, null=True, blank=True, related_name='requests', db_column='bot_id')
+    operator = models.ForeignKey(Operator, on_delete=models.SET_NULL, null=True, blank=True, related_name='requests')
+    bags = models.IntegerField(null=True, blank=True)
+    weight_kg = models.FloatField(null=True, blank=True)
+    non_usable_kg = models.FloatField(null=True, blank=True)
+    recyclable_kg = models.FloatField(null=True, blank=True)
+
+    def __str__(self):
+        return self.request_id
+
+class StatusHistory(models.Model):
+    request = models.ForeignKey(Request, on_delete=models.CASCADE, related_name='status_history')
+    label = models.CharField(max_length=50)
+    date = models.DateTimeField()
+    actor = models.CharField(max_length=100)
+    role = models.CharField(max_length=50)
+    state = models.CharField(max_length=20, default='done')
+
+    def __str__(self):
+        return f"{self.request.request_id} - {self.label}"
+
+class Photo(models.Model):
+    request = models.ForeignKey(Request, on_delete=models.CASCADE, related_name='photos')
+    label = models.CharField(max_length=100)
+    date = models.CharField(max_length=50)
+    photo_id = models.IntegerField()
+
+    def __str__(self):
+        return f"{self.request.request_id} - Photo {self.photo_id}"
+
+class DeploymentSchedule(models.Model):
+    STATUS_CHOICES = [
+        ('scheduled', 'Scheduled'),
+        ('available', 'Available'),
+        ('maintenance', 'Maintenance'),
+        ('none', 'None'),
+    ]
+    bot = models.ForeignKey(Boat, on_delete=models.CASCADE, related_name='deployments')
+    day = models.CharField(max_length=10)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='none')
+    label = models.CharField(max_length=20, default='Available')
+    zone = models.CharField(max_length=100, blank=True)
+
+    class Meta:
+        unique_together = ['bot', 'day']
+
+    def __str__(self):
+        return f"{self.bot.name} - {self.day}"
+
+class LandfillRecord(models.Model):
+    record_id = models.CharField(max_length=20, unique=True)
+    barangay = models.CharField(max_length=100)
+    date = models.CharField(max_length=20)
+    bags = models.IntegerField()
+    weight_kg = models.FloatField()
+    bot = models.ForeignKey(Boat, on_delete=models.SET_NULL, null=True, related_name='landfill_records')
+    operator = models.ForeignKey(Operator, on_delete=models.SET_NULL, null=True, related_name='landfill_records')
+    vehicle = models.CharField(max_length=20)
+    disposed_by = models.CharField(max_length=100)
+
+    def __str__(self):
+        return self.record_id
+
+class RecyclingRecord(models.Model):
+    record_id = models.CharField(max_length=20, unique=True)
+    barangay = models.CharField(max_length=100)
+    date = models.CharField(max_length=20)
+    bags = models.IntegerField()
+    weight_kg = models.FloatField()
+    category = models.CharField(max_length=50)
+    bot = models.ForeignKey(Boat, on_delete=models.SET_NULL, null=True, related_name='recycling_records')
+    operator = models.ForeignKey(Operator, on_delete=models.SET_NULL, null=True, related_name='recycling_records')
+    buyer = models.CharField(max_length=100)
+    sold_at = models.CharField(max_length=20)
+
+    def __str__(self):
+        return self.record_id
+
+class SegregationRecord(models.Model):
+    zone = models.CharField(max_length=100)
+    date = models.CharField(max_length=20)
+    total_bags = models.IntegerField()
+    total_weight_kg = models.FloatField()
+    non_usable_weight_kg = models.FloatField()
+    recyclable_weight_kg = models.FloatField()
+    notes = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
-    accepted_at = models.DateTimeField(null=True, blank=True)
-    admin_note = models.TextField(blank=True)
 
     def __str__(self):
-        return f"Request #{self.request_id} by {self.spearhead.username}"
+        return f"{self.zone} - {self.date}"
 
-class ScheduledCleanup(models.Model):
-    schedule_id = models.AutoField(primary_key=True)
-    request = models.ForeignKey(CleanupRequest, on_delete=models.CASCADE, related_name='schedules')
-    scheduled_date = models.DateField()
-    created_at = models.DateTimeField(auto_now_add=True)
+class AuditLog(models.Model):
+    STATUS_CHOICES = [
+        ('success', 'Success'),
+        ('failed', 'Failed'),
+        ('warning', 'Warning'),
+    ]
+
+    time = models.CharField(max_length=50)
+    user = models.CharField(max_length=100)
+    role = models.CharField(max_length=50)
+    action = models.CharField(max_length=100)
+    details = models.CharField(max_length=200)
+    module = models.CharField(max_length=50)
+    ip = models.CharField(max_length=20)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='success')
 
     def __str__(self):
-        return f"Schedule #{self.schedule_id} for Request #{self.request_id}"
+        return f"{self.time} - {self.action}"
 
-class ScheduledBot(models.Model):
-    id = models.AutoField(primary_key=True)
-    schedule = models.ForeignKey(ScheduledCleanup, on_delete=models.CASCADE, related_name='scheduled_bots')
-    bot = models.ForeignKey(Boat, on_delete=models.CASCADE)
+class HeatmapData(models.Model):
+    latitude = models.FloatField()
+    longitude = models.FloatField()
+    weight = models.FloatField()
+    source_type = models.CharField(max_length=20, default='waste')
+    timestamp = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return f"{self.bot.name} in Schedule #{self.schedule_id}"
+        return f"{self.latitude}, {self.longitude}"

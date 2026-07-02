@@ -1,141 +1,83 @@
-import React, { useState, useMemo } from 'react';
+import { useEffect, useState, useMemo } from 'react';
+import api from '../../services/api';
 import {
     Plus,
     Wrench,
     Calendar,
     Archive,
+    X,
     Search,
     Battery,
     BatteryCharging,
     User,
-    UserPlus,
-    MapPin,
-    Clock,
-    Check,
     Trash2,
     AlertTriangle,
     Info,
-    Sliders,
-    Shield,
-    X
 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
-import { AddBotModal, ArchiveConfirmModal } from './ManageBotsModals';
-
-// --- Default Mock Data ---
-
-const defaultBots = [
-    {
-        id: 'TRD-001',
-        status: 'Idle', // Idle, Active, Offline, Charging
-        battery: 70,
-        assignedLocation: 'None',
-        assignedOperator: 'Lorem Ipsum',
-        lastActive: '9:10 AM',
-        barangay: 'None',
-        scheduledCleanup: 'None',
-        runtimeToday: '2h 15m',
-        totalTrash: '4 bags',
-        archived: false,
-    },
-    {
-        id: 'TRD-002',
-        status: 'Active',
-        battery: 100,
-        assignedLocation: 'Lorem Ipsum',
-        assignedOperator: 'Lorem Ipsum',
-        lastActive: '7:10 AM',
-        barangay: 'Lorem Ipsum',
-        scheduledCleanup: '2:30 PM',
-        runtimeToday: '4h 45m',
-        totalTrash: '18 bags',
-        archived: false,
-    },
-    {
-        id: 'TRD-003',
-        status: 'Idle',
-        battery: 40,
-        assignedLocation: 'Lorem Ipsum',
-        assignedOperator: 'Lorem Ipsum',
-        lastActive: '8:54 AM',
-        barangay: 'Lorem Ipsum',
-        scheduledCleanup: 'None',
-        runtimeToday: '1h 30m',
-        totalTrash: '3 bags',
-        archived: false,
-    },
-    {
-        id: 'TRD-004',
-        status: 'Offline',
-        battery: 0,
-        assignedLocation: 'N/A',
-        assignedOperator: 'Lorem Ipsum',
-        lastActive: '11:43 AM',
-        barangay: 'Lorem Ipsum',
-        scheduledCleanup: 'N/A',
-        runtimeToday: '5h 2m',
-        totalTrash: '13 bags',
-        archived: false,
-    },
-    {
-        id: 'TRD-005',
-        status: 'Charging',
-        battery: 60,
-        assignedLocation: 'None',
-        assignedOperator: 'Lorem Ipsum',
-        lastActive: '4:23 PM',
-        barangay: 'None',
-        scheduledCleanup: 'None',
-        runtimeToday: '0h 0m',
-        totalTrash: '0 bags',
-        archived: false,
-    }
-];
-
-const defaultOperators = [
-    {
-        id: 'OP-001',
-        name: 'Lorem Ipsum',
-        status: 'online', // online, offline, onleave
-        assignedBot: 'TRD-001',
-        availability: 'Assigned', // Assigned, Available, Unavailable
-    },
-    {
-        id: 'OP-002',
-        name: 'Lorem Ipsum',
-        status: 'offline',
-        assignedBot: null,
-        availability: 'Available',
-    },
-    {
-        id: 'OP-003',
-        name: 'Lorem Ipsum',
-        status: 'online',
-        assignedBot: 'TRD-004',
-        availability: 'Assigned',
-    },
-    {
-        id: 'OP-004',
-        name: 'Lorem Ipsum',
-        status: 'onleave',
-        assignedBot: 'TRD-067',
-        availability: 'Unavailable',
-    },
-    {
-        id: 'OP-005',
-        name: 'Lorem Ipsum',
-        status: 'online',
-        assignedBot: null,
-        availability: 'Available',
-    }
-];
 
 export default function ManageBots() {
     // --- States ---
-    const [bots, setBots] = useState(defaultBots);
-    const [operators, setOperators] = useState(defaultOperators);
-    const [selectedBotId, setSelectedBotId] = useState('TRD-004');
-    const navigate = useNavigate();
+    const [bots, setBots] = useState([]);
+    const [operators, setOperators] = useState([]);
+    const [selectedBotId, setSelectedBotId] = useState('');
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        const fetchData = async () => {
+            try {
+                const [boatsRes, operatorsRes] = await Promise.all([
+                    api.boats(),
+                    api.operators(),
+                ]);
+
+                const boatMap = {};
+                boatsRes.forEach(b => {
+                    const botId = b.name || `Boat-${b.id}`;
+                    boatMap[b.id] = botId;
+                });
+
+                const mappedBots = Array.isArray(boatsRes) ? boatsRes.map((b) => {
+                    const op = operatorsRes.find(o => o.assigned_bot === b.id);
+                    return {
+                        id: boatMap[b.id] || `Boat-${b.id}`,
+                        status: b.is_active ? 'Active' : 'Offline',
+                        battery: b.battery_level ?? 0,
+                        assignedLocation: 'None',
+                        assignedOperator: op ? op.name : 'None',
+                        lastActive: b.last_seen
+                            ? new Date(b.last_seen).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                            : '—',
+                        barangay: 'None',
+                        scheduledCleanup: 'None',
+                        runtimeToday: '0h 0m',
+                        totalTrash: '0 bags',
+                        archived: !b.is_active,
+                    };
+                }) : [];
+
+                const mappedOperators = Array.isArray(operatorsRes) ? operatorsRes.map((o) => ({
+                    id: `OP-${String(o.id).padStart(3, '0')}`,
+                    name: o.name,
+                    status: o.status,
+                    assignedBot: o.assigned_bot ? (boatMap[o.assigned_bot] || `Boat-${o.assigned_bot}`) : null,
+                    availability: o.availability,
+                })) : [];
+
+                setBots(mappedBots);
+                setOperators(mappedOperators);
+
+                if (mappedBots.length > 0 && !mappedBots.find(b => b.id === selectedBotId)) {
+                    setSelectedBotId(mappedBots[0].id);
+                }
+            } catch (err) {
+                console.error('Failed to fetch bot/operator data:', err);
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        fetchData();
+    }, [selectedBotId]);
 
     // --- Modals State ---
     const [isAddBotOpen, setIsAddBotOpen] = useState(false);
@@ -144,12 +86,14 @@ export default function ManageBots() {
     const [isMaintenanceOpen, setIsMaintenanceOpen] = useState(false);
     const [isManageScheduleOpen, setIsManageScheduleOpen] = useState(false);
     const [isArchiveConfirmOpen, setIsArchiveConfirmOpen] = useState(false);
+    const [isViewAllBotsOpen, setIsViewAllBotsOpen] = useState(false);
     const [isViewAllOpsOpen, setIsViewAllOpsOpen] = useState(false);
 
     // --- Form States ---
     const [newBot, setNewBot] = useState({
         id: '',
         status: 'Idle',
+        battery: 100,
         barangay: 'None',
         assignedOperator: 'None',
         scheduledCleanup: 'None',
@@ -176,7 +120,9 @@ export default function ManageBots() {
         date: ''
     });
 
-    // --- Filter/Search States for "View All Operators" Modal ---
+    // --- Filter/Search States for "View All" Modals ---
+    const [botSearch, setBotSearch] = useState('');
+    const [botFilterStatus, setBotFilterStatus] = useState('All');
     const [opSearch, setOpSearch] = useState('');
     const [opFilterAvail, setOpFilterAvail] = useState('All');
 
@@ -191,11 +137,16 @@ export default function ManageBots() {
         e.preventDefault();
         if (!newBot.id.trim()) return;
 
+        // Check if ID already exists
+        if (bots.some(b => b.id.toUpperCase() === newBot.id.toUpperCase())) {
+            alert('Bot ID already exists!');
+            return;
+        }
+
         const botToAdd = {
             ...newBot,
             id: newBot.id.toUpperCase(),
             assignedLocation: newBot.barangay !== 'None' ? newBot.barangay : 'None',
-            battery: 100,
             lastActive: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
             archived: false
         };
@@ -220,6 +171,7 @@ export default function ManageBots() {
         setNewBot({
             id: '',
             status: 'Idle',
+            battery: 100,
             barangay: 'None',
             assignedOperator: 'None',
             scheduledCleanup: 'None',
@@ -375,6 +327,17 @@ export default function ManageBots() {
     };
 
     // --- Filtering Logic for View All Modals ---
+    const filteredBots = useMemo(() => {
+        return bots.filter(b => {
+            if (b.archived) return false;
+            const matchesSearch = b.id.toLowerCase().includes(botSearch.toLowerCase()) ||
+                b.assignedLocation.toLowerCase().includes(botSearch.toLowerCase()) ||
+                b.assignedOperator.toLowerCase().includes(botSearch.toLowerCase());
+            const matchesStatus = botFilterStatus === 'All' || b.status === botFilterStatus;
+            return matchesSearch && matchesStatus;
+        });
+    }, [bots, botSearch, botFilterStatus]);
+
     const filteredOperators = useMemo(() => {
         return operators.filter(op => {
             const matchesSearch = op.name.toLowerCase().includes(opSearch.toLowerCase()) ||
@@ -426,6 +389,14 @@ export default function ManageBots() {
         }
     };
 
+    if (loading) {
+        return (
+            <div className="max-w-[1400px] mx-auto animate-fade-in pb-12 flex items-center justify-center min-h-[400px]">
+                <p className="text-lg font-semibold text-slate-500">Loading...</p>
+            </div>
+        );
+    }
+
     return (
         <div className="max-w-[1400px] mx-auto animate-fade-in pb-12">
 
@@ -449,6 +420,13 @@ export default function ManageBots() {
                             {/* Card Header */}
                             <div className="p-5 pb-3 flex justify-between items-center border-b border-slate-50">
                                 <h2 className="text-[17px] font-bold text-slate-950">Available Bots</h2>
+                                <button
+                                    onClick={() => setIsAddBotOpen(true)}
+                                    className="bg-[#1b4de4] hover:bg-[#153eb8] text-white text-xs font-semibold py-1.5 px-3 rounded-lg shadow-sm flex items-center gap-1.5 transition-all cursor-pointer"
+                                >
+                                    <Plus className="w-3.5 h-3.5" />
+                                    <span>Add Bot</span>
+                                </button>
                             </div>
 
                             {/* Table */}
@@ -499,7 +477,7 @@ export default function ManageBots() {
                         {/* Footer */}
                         <div className="p-4 border-t border-slate-50 flex justify-center">
                             <button
-                                onClick={() => navigate('/admin/managebots/allbots')}
+                                onClick={() => setIsViewAllBotsOpen(true)}
                                 className="text-[#1b4de4] hover:text-[#153eb8] text-xs font-semibold transition-colors cursor-pointer"
                             >
                                 View all Bots
@@ -692,22 +670,102 @@ export default function ManageBots() {
 
             {/* ── MODALS SECTION ── */}
 
-            <AddBotModal
-                isOpen={isAddBotOpen}
-                onClose={() => setIsAddBotOpen(false)}
-                onSubmit={handleAddBot}
-                newBot={newBot}
-                setNewBot={setNewBot}
-                bots={bots}
-                operators={operators}
-            />
+            {/* 1. ADD BOT MODAL */}
+            {isAddBotOpen && (
+                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-2xl shadow-xl w-full max-w-md border border-slate-100 overflow-hidden animate-fade-in">
+                        <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                            <h3 className="text-base font-bold text-slate-900">Add New Bot</h3>
+                            <button onClick={() => setIsAddBotOpen(false)} className="text-slate-400 hover:text-slate-600 transition-colors">
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
 
-            <ArchiveConfirmModal
-                isOpen={isArchiveConfirmOpen}
-                onClose={() => setIsArchiveConfirmOpen(false)}
-                onConfirm={handleArchiveBot}
-                selectedBot={selectedBot}
-            />
+                        <form onSubmit={handleAddBot} className="p-5 flex flex-col gap-4">
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Bot ID</label>
+                                <input
+                                    type="text"
+                                    required
+                                    placeholder="e.g. TRD-006"
+                                    value={newBot.id}
+                                    onChange={(e) => setNewBot({ ...newBot, id: e.target.value })}
+                                    className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-[#1b4de4] focus:ring-1 focus:ring-[#1b4de4]"
+                                />
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Status</label>
+                                    <select
+                                        value={newBot.status}
+                                        onChange={(e) => setNewBot({ ...newBot, status: e.target.value })}
+                                        className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl bg-white focus:outline-none focus:border-[#1b4de4]"
+                                    >
+                                        <option value="Idle">Idle</option>
+                                        <option value="Active">Active</option>
+                                        <option value="Charging">Charging</option>
+                                        <option value="Offline">Offline</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Battery (%)</label>
+                                    <input
+                                        type="number"
+                                        min="0"
+                                        max="100"
+                                        required
+                                        value={newBot.battery}
+                                        onChange={(e) => setNewBot({ ...newBot, battery: parseInt(e.target.value) || 0 })}
+                                        className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-[#1b4de4]"
+                                    />
+                                </div>
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Assigned Barangay</label>
+                                <input
+                                    type="text"
+                                    placeholder="e.g. Carlatan"
+                                    value={newBot.barangay}
+                                    onChange={(e) => setNewBot({ ...newBot, barangay: e.target.value })}
+                                    className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-[#1b4de4]"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Assign Operator</label>
+                                <select
+                                    value={newBot.assignedOperator}
+                                    onChange={(e) => setNewBot({ ...newBot, assignedOperator: e.target.value })}
+                                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl bg-white focus:outline-none focus:border-[#1b4de4]"
+                                >
+                                    <option value="None">None</option>
+                                    {operators.map(op => (
+                                        <option key={op.id} value={op.name}>{op.name} ({op.id})</option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            <div className="flex gap-3 justify-end mt-4 pt-4 border-t border-slate-100">
+                                <button
+                                    type="button"
+                                    onClick={() => setIsAddBotOpen(false)}
+                                    className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50 rounded-xl border border-slate-200 cursor-pointer"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="submit"
+                                    className="px-4 py-2 text-xs font-bold text-white bg-[#1b4de4] hover:bg-[#153eb8] rounded-xl shadow-sm cursor-pointer"
+                                >
+                                    Add Bot
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
 
             {/* 2. ADD OPERATOR MODAL */}
             {isAddOpOpen && (
@@ -973,7 +1031,155 @@ export default function ManageBots() {
                 </div>
             )}
 
-            {/* 7. VIEW ALL OPERATORS MODAL */}
+            {/* 6. ARCHIVE CONFIRMATION MODAL */}
+            {isArchiveConfirmOpen && selectedBot && (
+                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm border border-slate-100 overflow-hidden animate-fade-in">
+                        <div className="p-5 pb-3 flex justify-start items-center gap-3">
+                            <div className="w-10 h-10 rounded-full bg-red-50 flex items-center justify-center text-red-500 shrink-0">
+                                <AlertTriangle className="w-5 h-5" />
+                            </div>
+                            <h3 className="text-base font-bold text-slate-900">Archive Bot</h3>
+                        </div>
+
+                        <div className="px-5 pb-5">
+                            <p className="text-sm text-slate-500 leading-relaxed">
+                                Are you sure you want to archive bot <strong className="text-slate-800">{selectedBot.id}</strong>?
+                                This will remove the bot from the active fleet. Any assigned operator will be unassigned automatically.
+                            </p>
+
+                            <div className="flex gap-3 justify-end mt-5 pt-4 border-t border-slate-100">
+                                <button
+                                    type="button"
+                                    onClick={() => setIsArchiveConfirmOpen(false)}
+                                    className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50 rounded-xl border border-slate-200 cursor-pointer"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={handleArchiveBot}
+                                    className="px-4 py-2 text-xs font-bold text-white bg-red-600 hover:bg-red-700 rounded-xl shadow-sm cursor-pointer"
+                                >
+                                    Archive Bot
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* 7. VIEW ALL BOTS MODAL */}
+            {isViewAllBotsOpen && (
+                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-2xl shadow-xl w-full max-w-4xl border border-slate-100 overflow-hidden flex flex-col max-h-[90vh] animate-fade-in">
+                        <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50 shrink-0">
+                            <div>
+                                <h3 className="text-base font-bold text-slate-900">All Bots Directory</h3>
+                                <p className="text-xs text-slate-400 mt-0.5">Manage and search all registered cleaning bots</p>
+                            </div>
+                            <button onClick={() => setIsViewAllBotsOpen(false)} className="text-slate-400 hover:text-slate-600 transition-colors">
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
+
+                        {/* Filters bar */}
+                        <div className="p-4 bg-slate-50/50 border-b border-slate-100 flex flex-col sm:flex-row justify-between gap-3 shrink-0">
+                            <div className="relative flex-1">
+                                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                                <input
+                                    type="text"
+                                    placeholder="Search bots by ID, operator, location..."
+                                    value={botSearch}
+                                    onChange={(e) => setBotSearch(e.target.value)}
+                                    className="w-full pl-10 pr-4 py-2 text-xs border border-slate-200 rounded-xl focus:outline-none bg-white"
+                                />
+                            </div>
+                            <div className="flex gap-2">
+                                <select
+                                    value={botFilterStatus}
+                                    onChange={(e) => setBotFilterStatus(e.target.value)}
+                                    className="px-3 py-2 text-xs border border-slate-200 rounded-xl bg-white text-slate-700 outline-none"
+                                >
+                                    <option value="All">All Statuses</option>
+                                    <option value="Active">Active</option>
+                                    <option value="Idle">Idle</option>
+                                    <option value="Charging">Charging</option>
+                                    <option value="Offline">Offline</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        {/* Content Table */}
+                        <div className="overflow-y-auto flex-1">
+                            <table className="w-full text-left border-collapse">
+                                <thead>
+                                    <tr className="border-b border-slate-100 bg-slate-50/50 sticky top-0">
+                                        <th className="px-5 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider bg-slate-50">BotID</th>
+                                        <th className="px-5 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider bg-slate-50">Status</th>
+                                        <th className="px-5 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider bg-slate-50">Battery</th>
+                                        <th className="px-5 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider bg-slate-50">Barangay</th>
+                                        <th className="px-5 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider bg-slate-50">Operator</th>
+                                        <th className="px-5 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider bg-slate-50">Scheduled cleanup</th>
+                                        <th className="px-5 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider bg-slate-50 font-medium">Runtime today</th>
+                                        <th className="px-5 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider bg-slate-50 font-sans text-center">Trash</th>
+                                        <th className="px-5 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider bg-slate-50 text-center">Select</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {filteredBots.map((bot) => (
+                                        <tr
+                                            key={bot.id}
+                                            className={`border-b border-slate-50 hover:bg-slate-50/40 text-xs ${selectedBotId === bot.id ? 'bg-[#e0f2fe]/40' : ''
+                                                }`}
+                                        >
+                                            <td className="px-5 py-3 font-bold text-slate-900">{bot.id}</td>
+                                            <td className="px-5 py-3">
+                                                <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-semibold inline-block ${getBotStatusBadgeClass(bot.status)}`}>
+                                                    {bot.status}
+                                                </span>
+                                            </td>
+                                            <td className="px-5 py-3 font-semibold text-slate-600 flex items-center gap-1 mt-1.5">
+                                                {bot.status === 'Charging' ? (
+                                                    <BatteryCharging className="w-3.5 h-3.5 text-amber-500" />
+                                                ) : (
+                                                    <Battery className={`w-3.5 h-3.5 ${bot.battery <= 20 ? 'text-red-500' : 'text-slate-400'}`} />
+                                                )}
+                                                {bot.battery}%
+                                            </td>
+                                            <td className="px-5 py-3 font-semibold text-slate-500">{bot.barangay}</td>
+                                            <td className="px-5 py-3 font-semibold text-slate-500">{bot.assignedOperator}</td>
+                                            <td className="px-5 py-3 font-semibold text-slate-400">{bot.scheduledCleanup}</td>
+                                            <td className="px-5 py-3 font-medium text-slate-400">{bot.runtimeToday}</td>
+                                            <td className="px-5 py-3 font-bold text-blue-600 text-center">{bot.totalTrash}</td>
+                                            <td className="px-5 py-3 text-center">
+                                                <button
+                                                    onClick={() => {
+                                                        setSelectedBotId(bot.id);
+                                                        setIsViewAllBotsOpen(false);
+                                                    }}
+                                                    className="px-2.5 py-1 text-[10px] font-bold text-white bg-[#1b4de4] hover:bg-[#153eb8] rounded-lg cursor-pointer"
+                                                >
+                                                    Select
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                    {filteredBots.length === 0 && (
+                                        <tr>
+                                            <td colSpan="9" className="text-center py-8 text-slate-400 font-semibold">
+                                                No bots found matching your search.
+                                            </td>
+                                        </tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* 8. VIEW ALL OPERATORS MODAL */}
             {isViewAllOpsOpen && (
                 <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
                     <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl border border-slate-100 overflow-hidden flex flex-col max-h-[90vh] animate-fade-in">

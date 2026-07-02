@@ -1,766 +1,610 @@
-import { useEffect, useState } from 'react';
+import { useState, useEffect } from "react";
 import {
-  Calendar, MapPin, CheckCircle2, X, Bot, Wrench,
-  Plus, Search, Clock
-} from 'lucide-react';
-import { useNavigate, useLocation } from 'react-router-dom';
+  Bot,
+  CalendarCheck,
+  UserRound,
+  Wrench,
+  Plus,
+  Filter,
+  Info,
+  MapPin,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+} from "lucide-react";
+import { api } from '../../services/api';
 
-const API_BASE = 'http://localhost:8000/api';
+const DAYS = [
+  { key: "mon", label: "Mon" },
+  { key: "tue", label: "Tue" },
+  { key: "wed", label: "Wed" },
+  { key: "thu", label: "Thu" },
+  { key: "fri", label: "Fri" },
+  { key: "sat", label: "Sat" },
+  { key: "sun", label: "Sun" },
+];
 
-const fmtDate = (d) => {
-  if (!d) return '—';
-  return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+const STATUS_STYLES = {
+  scheduled: "bg-emerald-50 text-emerald-700 border border-emerald-100",
+  maintenance: "bg-amber-50 text-amber-700 border border-amber-100",
+  available: "bg-sky-50 text-sky-700 border border-sky-100",
+  none: "bg-slate-50 text-slate-400 border border-slate-100",
 };
 
-const opDotClass = (status) => {
-  switch (status) {
-    case 'online': return 'bg-emerald-500 shadow-[0_0_6px_#10b981]';
-    case 'offline': return 'bg-slate-400';
-    case 'onleave': return 'bg-amber-500 shadow-[0_0_6px_#f59e0b]';
-    default: return 'bg-slate-400';
+function SummaryCard({ icon: Icon, label, value, sub }) {
+  return (
+    <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-6 flex items-center gap-4">
+      <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 shrink-0">
+        <Icon className="w-6 h-6" strokeWidth={2} />
+      </div>
+      <div className="min-w-0">
+        <p className="text-sm font-medium text-slate-600">{label}</p>
+        <p className="text-2xl font-bold text-slate-900 mt-1">{value}</p>
+        <p className="text-xs text-slate-400 mt-1">{sub}</p>
+      </div>
+    </div>
+  );
+}
+
+function LegendDot({ className, label }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-500">
+      <span className={`h-2 w-2 rounded-full ${className}`} />
+      {label}
+    </span>
+  );
+}
+
+function Cell({ entry }) {
+  if (!entry) {
+    return <div className="rounded-xl border border-dashed border-slate-200 px-2 py-2.5" />;
   }
-};
+  const styles = STATUS_STYLES[entry.status];
+  return (
+    <button
+      type="button"
+      className={`w-full rounded-xl px-2 py-2 text-left text-xs transition-colors hover:brightness-95 ${styles}`}
+    >
+      <p className="font-semibold leading-tight">{entry.label}</p>
+      {entry.zone && <p className="mt-0.5 truncate leading-tight opacity-80 flex items-center gap-1"><MapPin className="w-3 h-3" />{entry.zone}</p>}
+    </button>
+  );
+}
 
-const getOpStatusBadge = (status) => {
-  switch (status) {
-    case 'online': return 'border-emerald-500 text-emerald-600 bg-emerald-50';
-    case 'offline': return 'border-slate-300 text-slate-500 bg-slate-50';
-    case 'onleave': return 'border-amber-500 text-amber-600 bg-amber-50';
-    default: return 'border-slate-300 text-slate-500 bg-slate-50';
-  }
-};
+function ScheduleModal({ bots, onClose, onSave, prefillBot, prefillZone }) {
+  const [selectedBot, setSelectedBot] = useState(prefillBot || "");
+  const [selectedDay, setSelectedDay] = useState("mon");
+  const [timeSlot, setTimeSlot] = useState("06:00 - 10:00");
+  const [zone, setZone] = useState(prefillZone || "");
 
-const CollectionSchedule = () => {
-  const navigate = useNavigate();
-  const location = useLocation();
-  const [schedules, setSchedules] = useState([]);
-  const [boats, setBoats] = useState([]);
-  const [barangays, setBarangays] = useState([]);
-  const [requests, setRequests] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const handleSave = () => {
+    if (!selectedBot || !zone) return;
+    onSave(selectedBot, selectedDay, timeSlot, zone);
+    setSelectedBot("");
+    setZone("");
+    setTimeSlot("06:00 - 10:00");
+  };
 
-  // Inline scheduling (from request accept)
-  const [schedulingFor, setSchedulingFor] = useState(null);
-  const [selectedDate, setSelectedDate] = useState('');
-  const [selectedBarangay, setSelectedBarangay] = useState('');
-  const [selectedBotIds, setSelectedBotIds] = useState([]);
-  const [saving, setSaving] = useState(false);
-  const [scheduleSuccess, setScheduleSuccess] = useState(null);
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
+      <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden">
+        <div className="p-6 border-b border-slate-100">
+          <div className="flex items-center justify-between">
+            <h3 className="text-lg font-bold text-slate-900">Schedule Collection</h3>
+            <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 transition-colors">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+          </div>
+          <p className="text-xs text-slate-500 mt-1">Assign a bot to a barangay collection schedule.</p>
+        </div>
+        <div className="p-6 space-y-4">
+          <div>
+            <label className="block text-xs font-semibold text-slate-500 mb-1.5">Select Bot</label>
+            <div className="relative">
+              <select
+                value={selectedBot}
+                onChange={(e) => setSelectedBot(e.target.value)}
+                className="w-full rounded-lg border border-slate-200 bg-white py-2.5 px-3 text-sm text-slate-700 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30 appearance-none"
+              >
+                <option value="">-- Select Bot --</option>
+                {bots.map((b) => (
+                  <option key={b.id} value={b.id}>{b.name} ({b.status})</option>
+                ))}
+              </select>
+              <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 mb-1.5">Day</label>
+              <div className="relative">
+                <select
+                  value={selectedDay}
+                  onChange={(e) => setSelectedDay(e.target.value)}
+                  className="w-full rounded-lg border border-slate-200 bg-white py-2.5 px-3 text-sm text-slate-700 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30 appearance-none"
+                >
+                  {DAYS.map((d) => (
+                    <option key={d.key} value={d.key}>{d.label}</option>
+                  ))}
+                </select>
+                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 mb-1.5">Time Slot</label>
+              <div className="relative">
+                <select
+                  value={timeSlot}
+                  onChange={(e) => setTimeSlot(e.target.value)}
+                  className="w-full rounded-lg border border-slate-200 bg-white py-2.5 px-3 text-sm text-slate-700 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30 appearance-none"
+                >
+                  <option>06:00 - 10:00</option>
+                  <option>08:00 - 12:00</option>
+                  <option>14:00 - 18:00</option>
+                </select>
+                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+              </div>
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-slate-500 mb-1.5">Barangay Zone / Area</label>
+            <div className="relative">
+              <MapPin size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                value={zone}
+                onChange={(e) => setZone(e.target.value)}
+                placeholder="e.g., River Zone A"
+                className="w-full rounded-lg border border-slate-200 bg-white py-2.5 pl-9 pr-3 text-sm text-slate-700 placeholder:text-slate-400 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
+              />
+            </div>
+          </div>
+          <div className="flex gap-3 pt-2">
+            <button
+              onClick={onClose}
+              className="flex-1 rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={!selectedBot || !zone}
+              className="flex-1 rounded-lg bg-[#1b4de4] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#153eb8] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Save Schedule
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
-  // Add schedule modal
+const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+export default function CollectionSchedule() {
+  const [view, setView] = useState("Week");
   const [showModal, setShowModal] = useState(false);
-  const [modalDate, setModalDate] = useState('');
-  const [modalBarangay, setModalBarangay] = useState('');
-  const [modalBotIds, setModalBotIds] = useState([]);
-  const [modalSaving, setModalSaving] = useState(false);
-  const [modalFilter, setModalFilter] = useState('available'); // 'available' | 'bots' | 'all'
-  const [modalSearch, setModalSearch] = useState('');
-  const [modalSuccess, setModalSuccess] = useState(null);
-
-  // Calendar view state
-  const [viewMode, setViewMode] = useState('calendar'); // 'calendar' | 'list'
-  const [calendarMonth, setCalendarMonth] = useState(new Date().getMonth());
-  const [calendarYear, setCalendarYear] = useState(new Date().getFullYear());
-  const [selectedDay, setSelectedDay] = useState(null);
+  const [prefillBot, setPrefillBot] = useState("");
+  const [prefillZone, setPrefillZone] = useState("");
+  const [bots, setBots] = useState([]);
+  const [operators, setOperators] = useState([]);
+  const [schedule, setSchedule] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [selectedDate, setSelectedDate] = useState(new Date(2026, 4, 16));
 
   useEffect(() => {
-    const params = new URLSearchParams(location.search);
-    const rid = params.get('request_id');
-    if (rid) {
-      setSchedulingFor(parseInt(rid));
-    }
-  }, [location]);
+    let cancelled = false;
+    Promise.all([api.boats(), api.operators(), api.deploymentSchedules()]).then(([boatsData, operatorsData, schedulesData]) => {
+      if (cancelled) return;
 
-  const fetchSchedules = async () => {
-    const res = await fetch(`${API_BASE}/schedule/list/`);
-    const data = await res.json();
-    setSchedules(data);
-  };
+      const mappedBots = boatsData.map((b) => ({
+        id: b.id,
+        name: b.name,
+        status: b.is_active ? 'Active' : 'Inactive',
+        battery: Math.round(b.battery_level || 0),
+        latitude: b.last_latitude,
+        longitude: b.last_longitude,
+      }));
 
-  const fetchBoats = async () => {
-    const res = await fetch(`${API_BASE}/boats/`);
-    const data = await res.json();
-    setBoats(data);
-  };
+      const scheduleMap = {};
+      schedulesData.forEach((s) => {
+        const botId = String(s.bot);
+        scheduleMap[botId] = scheduleMap[botId] || {};
+        scheduleMap[botId][s.day] = {
+          status: s.status || 'none',
+          label: s.label || 'Available',
+          zone: s.zone || '',
+        };
+      });
 
-  const fetchBarangays = async () => {
-    const res = await fetch(`${API_BASE}/barangays/`);
-    const data = await res.json();
-    setBarangays(data);
-  };
+      setBots(mappedBots);
+      setOperators(operatorsData);
+      setSchedule(scheduleMap);
+      setLoading(false);
+    }).catch(() => setLoading(false));
 
-  const fetchRequests = async () => {
-    const res = await fetch(`${API_BASE}/requests/?role=admin&status=accepted`);
-    const data = await res.json();
-    setRequests(data);
-  };
-
-  useEffect(() => {
-    fetchSchedules();
-    fetchBoats();
-    fetchBarangays();
-    fetchRequests();
-    setLoading(false);
+    return () => { cancelled = true; };
   }, []);
 
-  useEffect(() => {
-    if (!schedulingFor) return;
-    const req = requests.find(r => r.request_id === schedulingFor);
-    if (req) {
-      setSchedulingFor(req);
-      setSelectedBarangay(req.barangay);
-    } else {
-      fetch(`${API_BASE}/requests/${schedulingFor}/`).then(r => r.json()).then(r => {
-        setSchedulingFor(r);
-        setSelectedBarangay(r.barangay);
-        fetchRequests();
-      });
-    }
-  }, [schedulingFor, requests]);
+  const filteredBots = bots;
 
-  const availableBots = boats.filter(b => b.is_active);
+  const selectedDayKey = DAYS[selectedDate.getDay()].key;
+  const selectedDayLabel = DAY_LABELS[selectedDate.getDay()];
 
-  const getFilteredBots = () => {
-    let filtered = [...availableBots];
-    const s = modalSearch.toLowerCase();
-
-    if (s) {
-      filtered = filtered.filter(b =>
-        b.name.toLowerCase().includes(s) ||
-        (b.operator?.name && b.operator.name.toLowerCase().includes(s))
-      );
-    }
-
-    switch (modalFilter) {
-      case 'available':
-        filtered = filtered.filter(b => b.operator && b.operator.status === 'online');
-        break;
-      case 'bots':
-        filtered = filtered.filter(b => b.operator && b.operator.status !== 'onleave');
-        break;
-      case 'all':
-        break;
-      default:
-        break;
-    }
-
-    return filtered;
+  const getWeekDays = () => {
+    const day = selectedDate.getDay();
+    const start = new Date(selectedDate);
+    start.setDate(selectedDate.getDate() - day);
+    return DAYS.map((d, i) => {
+      const date = new Date(start);
+      date.setDate(start.getDate() + i);
+      return { ...d, dateObj: date };
+    });
   };
 
-  const toggleModalBot = (botId) => {
-    setModalBotIds(prev =>
-      prev.includes(botId) ? prev.filter(id => id !== botId) : [...prev, botId]
+  const getMonthDays = () => {
+    const year = selectedDate.getFullYear();
+    const month = selectedDate.getMonth();
+    const firstDay = new Date(year, month, 1);
+    const lastDay = new Date(year, month + 1, 0);
+    const days = [];
+    const startPad = firstDay.getDay();
+    for (let i = 0; i < startPad; i++) {
+      days.push(null);
+    }
+    for (let d = 1; d <= lastDay.getDate(); d++) {
+      days.push(new Date(year, month, d));
+    }
+    return days;
+  };
+
+  const scheduledToday = Object.values(schedule).filter((s) => s?.[selectedDayKey]?.status === "scheduled").length;
+  const inMaintenance = Object.values(schedule).filter((s) =>
+    Object.values(s).some((d) => d.status === "maintenance")
+  ).length;
+
+  const handlePrev = () => {
+    const newDate = new Date(selectedDate);
+    if (view === "Day") newDate.setDate(newDate.getDate() - 1);
+    else if (view === "Week") newDate.setDate(newDate.getDate() - 7);
+    else newDate.setMonth(newDate.getMonth() - 1);
+    setSelectedDate(newDate);
+  };
+
+  const handleNext = () => {
+    const newDate = new Date(selectedDate);
+    if (view === "Day") newDate.setDate(newDate.getDate() + 1);
+    else if (view === "Week") newDate.setDate(newDate.getDate() + 7);
+    else newDate.setMonth(newDate.getMonth() + 1);
+    setSelectedDate(newDate);
+  };
+
+  const handleToday = () => {
+    setSelectedDate(new Date());
+  };
+
+  const handleSaveSchedule = (botId, day, timeSlot, zone) => {
+    const bot = bots.find(b => String(b.id) === String(botId));
+    if (!bot) return;
+
+    api.createDeploymentSchedule({
+      bot: botId,
+      day,
+      status: "scheduled",
+      label: timeSlot,
+      zone,
+    }).then(() => {
+      setSchedule((prev) => ({
+        ...prev,
+        [String(botId)]: {
+          ...prev[String(botId)],
+          [day]: { status: "scheduled", label: timeSlot, zone },
+        },
+      }));
+    }).catch(console.error);
+
+    setShowModal(false);
+    setPrefillBot("");
+    setPrefillZone("");
+  };
+
+  const robotsOnDuty = operators.filter(op => op.availability === 'assigned' || op.assigned_bot).length;
+
+  const renderWeekView = () => {
+    const weekDays = getWeekDays();
+    return (
+      <div className="overflow-x-auto">
+        <div className="min-w-[820px]">
+          <div className="grid grid-cols-[160px_repeat(7,1fr)] gap-2 border-b border-slate-100 pb-2">
+            <div className="text-xs font-semibold uppercase tracking-wider text-slate-400">Robot / Operator</div>
+            {weekDays.map((d) => (
+              <div key={d.key} className="text-center text-xs font-semibold uppercase tracking-wider text-slate-400">
+                <div>{d.label}</div>
+                <div
+                  className={`mx-auto mt-0.5 flex h-5 w-5 items-center justify-center rounded-full text-[11px] ${
+                    d.dateObj.toDateString() === selectedDate.toDateString() ? "bg-[#1b4de4] font-medium text-white" : "text-slate-400"
+                  }`}
+                >
+                  {d.dateObj.getDate()}
+                </div>
+                <div className="text-[10px] mt-0.5 text-slate-400">{d.dateObj.toLocaleDateString('en-US', { month: 'short' })}</div>
+              </div>
+            ))}
+          </div>
+          <div className="divide-y divide-slate-100">
+            {filteredBots.map((bot) => (
+              <div
+                key={bot.id}
+                className="grid grid-cols-[160px_repeat(7,1fr)] items-center gap-2 py-2.5"
+              >
+                <div className="flex items-center gap-2">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500">
+                    <Bot className="h-4 w-4" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-slate-900">{bot.id}</p>
+                    <p className="truncate text-xs text-slate-400">{bot.battery > 0 ? `${bot.battery}% battery` : 'No data'}</p>
+                  </div>
+                </div>
+                {weekDays.map((d) => (
+                  <Cell key={d.key} entry={schedule[bot.id]?.[d.key]} />
+                ))}
+              </div>
+            ))}
+            {filteredBots.length === 0 && (
+              <p className="py-6 text-center text-sm text-slate-400">
+                No robots match the selected filters.
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
     );
   };
 
-  const handleModalSubmit = async (e) => {
-    e.preventDefault();
-    if (!modalDate || !modalBotIds.length) return;
-    setModalSaving(true);
-    const res = await fetch(`${API_BASE}/schedule/`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        request_id: null,
-        scheduled_date: modalDate,
-        barangay_id: modalBarangay || null,
-        bot_ids: modalBotIds,
-      }),
-    });
-    const data = await res.json();
-    if (res.ok) {
-      setModalSuccess(data);
-      setModalSaving(false);
-      fetchSchedules();
-      setShowModal(false);
-      setModalDate('');
-      setModalBarangay('');
-      setModalBotIds([]);
-      setModalFilter('available');
-      setModalSearch('');
-      setModalSuccess(null);
-    }
-    setModalSaving(false);
-  };
-
-  const toggleBot = (botId) => {
-    setSelectedBotIds(prev =>
-      prev.includes(botId) ? prev.filter(id => id !== botId) : [...prev, botId]
+  const renderDayView = () => {
+    return (
+      <div className="overflow-x-auto">
+        <div className="min-w-[400px]">
+          <div className="grid grid-cols-[160px_1fr] gap-2 border-b border-slate-100 pb-2">
+            <div className="text-xs font-semibold uppercase tracking-wider text-slate-400">Robot / Operator</div>
+            <div className="text-center text-xs font-semibold uppercase tracking-wider text-slate-400">
+              <div>{selectedDayLabel}</div>
+              <div className="mx-auto mt-0.5 flex h-5 w-5 items-center justify-center rounded-full text-[11px] bg-[#1b4de4] font-medium text-white">
+                {selectedDate.getDate()}
+              </div>
+              <div className="text-[10px] mt-0.5 text-slate-400">{selectedDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}</div>
+            </div>
+          </div>
+          <div className="divide-y divide-slate-100">
+            {filteredBots.map((bot) => (
+              <div
+                key={bot.id}
+                className="grid grid-cols-[160px_1fr] items-center gap-2 py-2.5"
+              >
+                <div className="flex items-center gap-2">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500">
+                    <Bot className="h-4 w-4" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-slate-900">{bot.id}</p>
+                    <p className="truncate text-xs text-slate-400">{bot.battery > 0 ? `${bot.battery}% battery` : 'No data'}</p>
+                  </div>
+                </div>
+                <Cell key={selectedDayKey} entry={schedule[bot.id]?.[selectedDayKey]} />
+              </div>
+            ))}
+            {filteredBots.length === 0 && (
+              <p className="py-6 text-center text-sm text-slate-400">
+                No robots match the selected filters.
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
     );
   };
 
-  const handleSchedule = async (e) => {
-    e.preventDefault();
-    if (!selectedDate || !selectedBotIds.length || !schedulingFor) return;
-    setSaving(true);
-    const res = await fetch(`${API_BASE}/schedule/`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        request_id: schedulingFor.request_id,
-        scheduled_date: selectedDate,
-        barangay_id: selectedBarangay,
-        bot_ids: selectedBotIds,
-      }),
-    });
-    const data = await res.json();
-    if (res.ok) {
-      setScheduleSuccess(data);
-      setSaving(false);
-      fetchSchedules();
-      fetchRequests();
-      navigate('/admin/collection', { replace: true });
+  const renderMonthView = () => {
+    const monthDays = getMonthDays();
+    const weeks = [];
+    for (let i = 0; i < monthDays.length; i += 7) {
+      weeks.push(monthDays.slice(i, i + 7));
     }
-    setSaving(false);
-  };
 
-  const filteredModalBots = getFilteredBots();
+    return (
+      <div className="overflow-x-auto">
+        <div className="min-w-[600px]">
+          <div className="grid grid-cols-7 gap-2 border-b border-slate-100 pb-2">
+            {DAY_LABELS.map((d) => (
+              <div key={d} className="text-center text-xs font-semibold uppercase tracking-wider text-slate-400">{d}</div>
+            ))}
+          </div>
+          <div className="divide-y divide-slate-100">
+            {weeks.map((week, wi) => (
+              <div key={wi} className="grid grid-cols-7 gap-2 py-2">
+                {week.map((date, di) => {
+                  if (!date) return <div key={di} className="px-2 py-2" />;
+                  const dayKey = DAYS[date.getDay()].key;
+                  const isToday = date.toDateString() === new Date().toDateString();
+                  const isSelected = date.toDateString() === selectedDate.toDateString();
+                  const hasSchedule = filteredBots.some(bot => schedule[bot.id]?.[dayKey]?.status === 'scheduled');
+                  const hasMaintenance = filteredBots.some(bot => schedule[bot.id]?.[dayKey]?.status === 'maintenance');
+                  let statusClass = "border border-dashed border-slate-200";
+                  if (hasSchedule) statusClass = "bg-emerald-50 border border-emerald-100";
+                  else if (hasMaintenance) statusClass = "bg-amber-50 border border-amber-100";
+
+                  return (
+                    <div
+                      key={di}
+                      className={`rounded-lg px-2 py-2 text-center cursor-pointer transition-colors hover:brightness-95 ${statusClass}`}
+                      onClick={() => { setSelectedDate(date); setView("Day"); }}
+                    >
+                      <div className="flex items-center justify-center">
+                        <span className={`text-xs font-semibold ${isToday ? "bg-[#1b4de4] text-white rounded-full w-5 h-5 flex items-center justify-center" : isSelected ? "text-[#1b4de4]" : "text-slate-700"}`}>
+                          {date.getDate()}
+                        </span>
+                      </div>
+                      {hasSchedule && <div className="mt-1 h-1 w-1 rounded-full bg-emerald-500 mx-auto" />}
+                      {hasMaintenance && <div className="mt-1 h-1 w-1 rounded-full bg-amber-500 mx-auto" />}
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="max-w-[1400px] mx-auto animate-fade-in pb-12">
-      <header className="mb-6 flex justify-between items-center">
+      {loading && (
+        <div className="flex items-center justify-center h-[400px]">
+          <span className="text-sm font-medium text-slate-500">Loading schedule...</span>
+        </div>
+      )}
+      {!loading && (
+      <>
+      <header className="mb-6 flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-[28px] font-bold text-slate-900 tracking-tight leading-none">Collection Schedule</h1>
-          <p className="text-slate-500 text-sm mt-1.5 font-medium">Schedule bot cleanup missions for accepted requests</p>
+          <p className="text-slate-500 mt-1.5 text-sm font-medium">
+            Plan and track collection deployments across all Aquabot units.
+          </p>
         </div>
-        <div className="flex items-center gap-3">
-          {!schedulingFor && (
-            <button
-              onClick={() => setShowModal(true)}
-              className="bg-[#1b4de4] hover:bg-[#153eb8] text-white px-4 py-2.5 rounded-xl text-xs font-bold shadow-sm flex items-center gap-2 transition-all cursor-pointer"
-            >
-              <Plus className="w-4 h-4" />
-              Add Schedule
-            </button>
-          )}
-          {schedulingFor && (
-            <button
-              onClick={() => { setSchedulingFor(null); navigate('/admin/collection', { replace: true }); }}
-              className="text-xs font-bold text-[#1b4de4] hover:underline flex items-center gap-1"
-            >
-              <X className="w-3.5 h-3.5" /> Cancel Scheduling
-            </button>
-          )}
+        <div className="flex items-center gap-4">
+          <div className="hidden items-center gap-3 sm:flex">
+            <LegendDot className="bg-sky-500" label="Scheduled" />
+            <LegendDot className="bg-emerald-500" label="Active" />
+            <LegendDot className="bg-amber-500" label="In Maintenance" />
+            <LegendDot className="bg-slate-300" label="Offline" />
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowModal(true)}
+            className="flex items-center gap-1.5 rounded-lg bg-[#1b4de4] px-3.5 py-2 text-sm font-medium text-white transition-colors hover:bg-[#153eb8]"
+          >
+            <Plus className="h-4 w-4" />
+            Create Schedule
+          </button>
         </div>
       </header>
 
-      {schedulingFor && (
-        <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.06)] p-6 mb-6">
-          <h2 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
-            <Wrench className="w-5 h-5 text-[#1b4de4]" />
-            Schedule Cleanup for Request #{schedulingFor.request_id}
-          </h2>
-
-          {scheduleSuccess ? (
-            <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 flex items-center gap-3">
-              <CheckCircle2 className="w-6 h-6 text-emerald-600" />
-              <div>
-                <p className="text-sm font-bold text-emerald-800">Cleanup scheduled successfully!</p>
-                <p className="text-xs text-emerald-600">Bots have been assigned for {fmtDate(scheduleSuccess.scheduled_date)}</p>
-              </div>
-              <button
-                onClick={() => { setScheduleSuccess(null); setSchedulingFor(null); navigate('/admin/collection', { replace: true }); }}
-                className="ml-auto px-3 py-1.5 text-xs font-bold text-emerald-700 bg-emerald-100 rounded-lg cursor-pointer"
-              >
-                Done
-              </button>
-            </div>
-          ) : (
-            <form onSubmit={handleSchedule} className="flex flex-col gap-5">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Scheduled Date</label>
-                  <input
-                    type="date"
-                    required
-                    min={new Date().toISOString().split('T')[0]}
-                    value={selectedDate}
-                    onChange={(e) => setSelectedDate(e.target.value)}
-                    className="w-full px-3.5 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-[#1b4de4]"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Location (Barangay)</label>
-                  <select
-                    required
-                    value={selectedBarangay}
-                    onChange={(e) => setSelectedBarangay(e.target.value)}
-                    className="w-full px-3.5 py-2.5 text-sm border border-slate-200 rounded-xl bg-white focus:outline-none focus:border-[#1b4de4]"
-                  >
-                    <option value="">Select barangay...</option>
-                    {barangays.filter(b => b.spearhead_id === schedulingFor?.spearhead).map(b => (
-                      <option key={b.barangay_id} value={b.barangay_id}>{b.barangay_name}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">
-                  Select Bots ({selectedBotIds.length} selected)
-                </label>
-                <div className="border border-slate-200 rounded-xl overflow-hidden">
-                  <table className="w-full text-left border-collapse">
-                    <thead>
-                      <tr className="bg-slate-50 border-b border-slate-100">
-                        <th className="px-4 py-2.5 text-[11px] font-bold text-slate-400 uppercase w-12">Select</th>
-                        <th className="px-4 py-2.5 text-[11px] font-bold text-slate-400 uppercase">Bot</th>
-                        <th className="px-4 py-2.5 text-[11px] font-bold text-slate-400 uppercase">Operator</th>
-                        <th className="px-4 py-2.5 text-[11px] font-bold text-slate-400 uppercase">Operator Status</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {availableBots.map((bot) => (
-                        <tr
-                          key={bot.id}
-                          onClick={() => toggleBot(bot.id)}
-                          className={`border-b border-slate-50 cursor-pointer transition-colors text-sm ${selectedBotIds.includes(bot.id) ? 'bg-blue-50/60' : 'hover:bg-slate-50/40'}`}
-                        >
-                          <td className="px-4 py-3">
-                            <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all ${selectedBotIds.includes(bot.id) ? 'bg-[#1b4de4] border-[#1b4de4]' : 'border-slate-300 bg-white'}`}>
-                              {selectedBotIds.includes(bot.id) && <CheckCircle2 className="w-3.5 h-3.5 text-white" />}
-                            </div>
-                          </td>
-                          <td className="px-4 py-3">
-                            <div className="flex items-center gap-2">
-                              <Bot className="w-4 h-4 text-slate-400" />
-                              <span className="font-bold text-slate-900">{bot.name}</span>
-                            </div>
-                          </td>
-                          <td className="px-4 py-3 font-semibold text-slate-600">
-                            {bot.operator?.name || <span className="text-slate-400">Unassigned</span>}
-                          </td>
-                          <td className="px-4 py-3">
-                            {bot.operator ? (
-                              <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${getOpStatusBadge(bot.operator.status)}`}>
-                                <span className={`w-1.5 h-1.5 rounded-full ${opDotClass(bot.operator.status)}`}></span>
-                                {bot.operator.status}
-                              </span>
-                            ) : (
-                              <span className="text-xs text-slate-400">—</span>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                      {availableBots.length === 0 && (
-                        <tr>
-                          <td colSpan="4" className="px-4 py-6 text-center text-slate-400 text-sm font-semibold">
-                            No active bots available
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => { setSchedulingFor(null); navigate('/admin/collection', { replace: true }); }}
-                  className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50 rounded-xl border border-slate-200 cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={saving || !selectedDate || !selectedBotIds.length}
-                  className="px-5 py-2 text-xs font-bold text-white bg-[#1b4de4] hover:bg-[#153eb8] rounded-xl shadow-sm cursor-pointer disabled:opacity-50"
-                >
-                  {saving ? 'Saving...' : `Schedule ${selectedBotIds.length} Bot${selectedBotIds.length > 1 ? 's' : ''}`}
-                </button>
-              </div>
-            </form>
+      {/* Filter bar */}
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+{view !== 'Day' && (
+            <button
+              type="button"
+              className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
+            >
+              <Filter className="h-4 w-4" />
+              Filter
+            </button>
           )}
+          <button
+            onClick={handleToday}
+            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
+          >
+            {selectedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+          </button>
+          <button
+            onClick={handleNext}
+            className="rounded-lg border border-slate-200 bg-white p-2 text-slate-600 hover:bg-slate-50"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </button>
+          <button
+            onClick={handleToday}
+            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
+          >
+            Today
+          </button>
         </div>
-      )}
-
-      {/* CALENDAR / LIST VIEW */}
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] overflow-hidden">
-        <div className="p-5 pb-3 flex justify-between items-center border-b border-slate-50">
-          <h2 className="text-[17px] font-bold text-slate-950">Cleanup Schedule</h2>
-          <div className="flex items-center gap-2">
-            {viewMode === 'calendar' ? (
-              <button onClick={() => setViewMode('list')} className="text-xs font-bold text-[#1b4de4] hover:underline">List View</button>
-            ) : (
-              <button onClick={() => setViewMode('calendar')} className="text-xs font-bold text-[#1b4de4] hover:underline">Calendar View</button>
-            )}
+        <div className="flex items-center gap-3">
+          <div className="flex rounded-lg border border-slate-200 bg-white p-0.5 text-sm">
+            {["Day", "Week", "Month"].map((v) => (
+              <button
+                key={v}
+                onClick={() => setView(v)}
+                className={`rounded-md px-3 py-1.5 font-semibold transition-colors ${
+                  view === v ? "bg-[#1b4de4] text-white shadow-sm" : "text-slate-500 hover:text-slate-700"
+                }`}
+              >
+                {v}
+              </button>
+            ))}
           </div>
+          <button className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
+            <Filter className="h-4 w-4" />
+            Filter
+          </button>
         </div>
-
-        {loading ? (
-          <div className="p-8 text-center text-slate-400 font-semibold">Loading...</div>
-        ) : schedules.length === 0 ? (
-          <div className="p-12 text-center">
-            <Calendar className="w-12 h-12 mx-auto text-slate-300 mb-3" />
-            <p className="text-sm font-semibold text-slate-400">No scheduled cleanups yet.</p>
-            <p className="text-xs text-slate-400 mt-1">Accept a request or add a schedule to get started.</p>
-          </div>
-        ) : viewMode === 'calendar' ? (
-          <div className="p-5">
-            {/* Month navigation */}
-            <div className="flex items-center justify-between mb-4">
-              <button
-                onClick={() => {
-                  const d = new Date(calendarYear, calendarMonth - 1, 1);
-                  setCalendarMonth(d.getMonth());
-                  setCalendarYear(d.getFullYear());
-                  setSelectedDay(null);
-                }}
-                className="p-2 rounded-lg hover:bg-slate-100 text-slate-600 cursor-pointer"
-              >
-                ← Previous
-              </button>
-              <span className="text-sm font-bold text-slate-900">
-                {new Date(calendarYear, calendarMonth).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
-              </span>
-              <button
-                onClick={() => {
-                  const d = new Date(calendarYear, calendarMonth + 1, 1);
-                  setCalendarMonth(d.getMonth());
-                  setCalendarYear(d.getFullYear());
-                  setSelectedDay(null);
-                }}
-                className="p-2 rounded-lg hover:bg-slate-100 text-slate-600 cursor-pointer"
-              >
-                Next →
-              </button>
-            </div>
-
-            {/* Day headers */}
-            <div className="grid grid-cols-7 mb-2">
-              {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day) => (
-                <div key={day} className="text-center text-[11px] font-bold text-slate-400 uppercase py-2">
-                  {day}
-                </div>
-              ))}
-            </div>
-
-            {/* Calendar grid */}
-            <div className="grid grid-cols-7 gap-1">
-              {(() => {
-                const firstDay = new Date(calendarYear, calendarMonth, 1).getDay();
-                const daysInMonth = new Date(calendarYear, calendarMonth + 1, 0).getDate();
-                const today = new Date();
-                const todayStr = today.toISOString().split('T')[0];
-
-                const scheduleMap = {};
-                schedules.forEach((s) => {
-                  if (!scheduleMap[s.scheduled_date]) scheduleMap[s.scheduled_date] = [];
-                  scheduleMap[s.scheduled_date].push(s);
-                });
-
-                const cells = [];
-
-                // Empty cells for days before the first day of month
-                for (let i = 0; i < firstDay; i++) {
-                  cells.push(<div key={`empty-${i}`} className="min-h-[80px] bg-slate-50/30 rounded-lg" />);
-                }
-
-                // Day cells
-                for (let day = 1; day <= daysInMonth; day++) {
-                  const dateStr = `${calendarYear}-${String(calendarMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-                  const daySchedules = scheduleMap[dateStr] || [];
-                  const isToday = dateStr === todayStr;
-                  const isSelected = selectedDay === dateStr;
-                  const hasSchedules = daySchedules.length > 0;
-
-                  cells.push(
-                    <div
-                      key={day}
-                      onClick={() => hasSchedules && setSelectedDay(isSelected ? null : dateStr)}
-                      className={`min-h-[80px] p-2 rounded-lg border cursor-pointer transition-all relative ${
-                        isSelected
-                          ? 'border-[#1b4de4] bg-blue-50'
-                          : hasSchedules
-                          ? 'border-slate-200 bg-white hover:border-[#1b4de4] hover:shadow-sm'
-                          : 'border-transparent bg-slate-50/50'
-                      }`}
-                    >
-                      <div className={`text-sm font-bold mb-1 ${isToday ? 'text-[#1b4de4]' : 'text-slate-700'}`}>
-                        {day}
-                        {isToday && <span className="ml-1 text-[10px] font-bold text-[#1b4de4] uppercase">Today</span>}
-                      </div>
-                      {hasSchedules && (
-                        <div className="flex flex-col gap-1">
-                          {daySchedules.slice(0, 2).map((s, i) => (
-                            <div key={i} className="text-[10px] font-bold text-slate-600 bg-blue-100 px-1.5 py-0.5 rounded truncate">
-                              #{s.schedule_id} · {s.scheduled_bots?.length || 0} bot{s.scheduled_bots?.length > 1 ? 's' : ''}
-                            </div>
-                          ))}
-                          {daySchedules.length > 2 && (
-                            <div className="text-[10px] font-bold text-slate-500">+{daySchedules.length - 2} more</div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  );
-                }
-
-                return cells;
-              })()}
-            </div>
-
-            {/* Selected day detail */}
-            {selectedDay && (() => {
-              const daySchedules = schedules.filter(s => s.scheduled_date === selectedDay);
-              if (daySchedules.length === 0) return null;
-              return (
-                <div className="mt-4 p-4 bg-slate-50 rounded-xl border border-slate-100">
-                  <div className="flex items-center justify-between mb-3">
-                    <h3 className="text-sm font-bold text-slate-900">
-                      {new Date(selectedDay + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' })}
-                    </h3>
-                    <button onClick={() => setSelectedDay(null)} className="text-xs font-bold text-[#1b4de4] hover:underline">Close</button>
-                  </div>
-                  <div className="flex flex-col gap-3">
-                    {daySchedules.map((s) => (
-                      <div key={s.schedule_id} className="bg-white border border-slate-100 rounded-xl p-4">
-                        <div className="flex items-center justify-between mb-2">
-                          <span className="text-xs font-bold text-[#1b4de4]">Mission #{s.schedule_id}</span>
-                          <span className="text-[10px] font-bold text-slate-400 uppercase">{s.request?.barangay_name || '—'}</span>
-                        </div>
-                        <div className="flex items-center gap-2 mb-1.5">
-                          <MapPin className="w-3.5 h-3.5 text-slate-400" />
-                          <span className="text-xs font-semibold text-slate-600">{s.request?.barangay_name || '—'}</span>
-                        </div>
-                        <div className="flex items-center gap-2 mb-2">
-                          <Clock className="w-3.5 h-3.5 text-slate-400" />
-                          <span className="text-xs font-semibold text-slate-600">{s.request?.spearhead_full_name || s.request?.spearhead_username || '—'}</span>
-                        </div>
-                        <div className="flex flex-wrap gap-1.5 mt-2">
-                          {s.scheduled_bots?.length > 0 ? s.scheduled_bots.map((b, i) => (
-                            <span key={i} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-slate-100 text-slate-700 text-xs font-bold border border-slate-200">
-                              <Bot className="w-3 h-3" />
-                              {b.bot_name}
-                            </span>
-                          )) : <span className="text-xs text-slate-400">—</span>}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              );
-            })()}
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="border-b border-slate-100 bg-slate-50/50">
-                  <th className="px-5 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Schedule ID</th>
-                  <th className="px-5 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Date</th>
-                  <th className="px-5 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Barangay</th>
-                  <th className="px-5 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Requested By</th>
-                  <th className="px-5 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Assigned Bots</th>
-                </tr>
-              </thead>
-              <tbody>
-                {schedules.map((s) => (
-                  <tr key={s.schedule_id} className="border-b border-slate-50 hover:bg-slate-50/40 transition-colors text-sm">
-                    <td className="px-5 py-3.5 font-bold text-slate-900">#{s.schedule_id}</td>
-                    <td className="px-5 py-3.5 font-semibold text-slate-600">{fmtDate(s.scheduled_date)}</td>
-                    <td className="px-5 py-3.5 font-semibold text-slate-500">{s.request?.barangay_name || '—'}</td>
-                    <td className="px-5 py-3.5 font-semibold text-slate-500">{s.request?.spearhead_full_name || s.request?.spearhead_username || '—'}</td>
-                    <td className="px-5 py-3.5">
-                      <div className="flex flex-wrap gap-1.5">
-                        {s.scheduled_bots?.length > 0 ? s.scheduled_bots.map((b, i) => (
-                          <span key={i} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-slate-100 text-slate-700 text-xs font-bold border border-slate-200">
-                            <Bot className="w-3 h-3" />
-                            {b.bot_name}
-                          </span>
-                        )) : <span className="text-slate-400 text-xs">—</span>}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
       </div>
 
-      {/* ADD SCHEDULE MODAL */}
-      {showModal && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl border border-slate-100 overflow-hidden animate-fade-in flex flex-col max-h-[90vh]">
-            <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50 shrink-0">
-              <div>
-                <h3 className="text-base font-bold text-slate-900">Add New Schedule</h3>
-                <p className="text-xs text-slate-400 mt-0.5">Create a new cleanup mission</p>
-              </div>
-              <button onClick={() => { setShowModal(false); setModalSuccess(null); }} className="text-slate-400 hover:text-slate-600">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
+      {/* Summary cards */}
+      <div className="mb-6 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
+        <SummaryCard
+          icon={Bot}
+          label="Total Robots"
+          value={bots.length}
+          sub={`Active: ${bots.filter((b) => b.status === "Active").length}`}
+        />
+        <SummaryCard
+          icon={CalendarCheck}
+          label="Scheduled Today"
+          value={scheduledToday}
+          sub="Active deployments"
+        />
+        <SummaryCard
+          icon={UserRound}
+          label="Operators On Duty"
+          value={robotsOnDuty}
+          sub={`Available: ${operators.length - robotsOnDuty}`}
+        />
+        <SummaryCard
+          icon={Wrench}
+          label="Maintenance"
+          value={inMaintenance}
+          sub="Units"
+        />
+      </div>
 
-            {modalSuccess ? (
-              <div className="p-6 flex flex-col items-center justify-center">
-                <CheckCircle2 className="w-12 h-12 text-emerald-600 mb-3" />
-                <p className="text-sm font-bold text-slate-900">Schedule created successfully!</p>
-                <p className="text-xs text-slate-500 mt-1">New mission added for {fmtDate(modalSuccess.scheduled_date)}</p>
-                <button
-                  onClick={() => { setShowModal(false); setModalSuccess(null); fetchSchedules(); }}
-                  className="mt-4 px-5 py-2 text-xs font-bold text-white bg-[#1b4de4] hover:bg-[#153eb8] rounded-xl shadow-sm cursor-pointer"
-                >
-                  Done
-                </button>
-              </div>
-            ) : (
-              <form onSubmit={handleModalSubmit} className="flex flex-col overflow-hidden">
-                <div className="p-5 overflow-y-auto flex-1">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Schedule Date</label>
-                      <input
-                        type="date"
-                        required
-                        min={new Date().toISOString().split('T')[0]}
-                        value={modalDate}
-                        onChange={(e) => setModalDate(e.target.value)}
-                        className="w-full px-3.5 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-[#1b4de4]"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Location (Barangay)</label>
-                      <select
-                        value={modalBarangay}
-                        onChange={(e) => setModalBarangay(e.target.value)}
-                        className="w-full px-3.5 py-2.5 text-sm border border-slate-200 rounded-xl bg-white focus:outline-none focus:border-[#1b4de4]"
-                      >
-                        <option value="">Select barangay...</option>
-                        {barangays.map(b => (
-                          <option key={b.barangay_id} value={b.barangay_id}>{b.barangay_name}</option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-
-                  <div className="mb-4">
-                    <div className="flex items-center justify-between mb-2">
-                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">
-                        Select Bots ({modalBotIds.length} selected)
-                      </label>
-                      <div className="flex items-center gap-2">
-                        <Search className="w-3.5 h-3.5 text-slate-400" />
-                        <input
-                          type="text"
-                          placeholder="Search bots or operators..."
-                          value={modalSearch}
-                          onChange={(e) => setModalSearch(e.target.value)}
-                          className="px-2.5 py-1 text-xs border border-slate-200 rounded-lg focus:outline-none focus:border-[#1b4de4] w-40"
-                        />
-                      </div>
-                    </div>
-                    <div className="flex gap-2 mb-3">
-                      <button
-                        type="button"
-                        onClick={() => setModalFilter('available')}
-                        className={`px-3 py-1.5 rounded-lg text-[11px] font-bold border transition-all cursor-pointer ${modalFilter === 'available' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
-                      >
-                        Available
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setModalFilter('bots')}
-                        className={`px-3 py-1.5 rounded-lg text-[11px] font-bold border transition-all cursor-pointer ${modalFilter === 'bots' ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
-                      >
-                        Bots
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setModalFilter('all')}
-                        className={`px-3 py-1.5 rounded-lg text-[11px] font-bold border transition-all cursor-pointer ${modalFilter === 'all' ? 'bg-purple-50 text-purple-700 border-purple-200' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
-                      >
-                        Show All
-                      </button>
-                    </div>
-
-                    <div className="border border-slate-200 rounded-xl overflow-hidden max-h-[280px] overflow-y-auto">
-                      <table className="w-full text-left border-collapse">
-                        <thead className="sticky top-0 bg-slate-50">
-                          <tr className="border-b border-slate-100">
-                            <th className="px-4 py-2.5 text-[11px] font-bold text-slate-400 uppercase w-12">Select</th>
-                            <th className="px-4 py-2.5 text-[11px] font-bold text-slate-400 uppercase">Bot</th>
-                            <th className="px-4 py-2.5 text-[11px] font-bold text-slate-400 uppercase">Operator</th>
-                            <th className="px-4 py-2.5 text-[11px] font-bold text-slate-400 uppercase">Status</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {filteredModalBots.length === 0 ? (
-                            <tr>
-                              <td colSpan="4" className="px-4 py-6 text-center text-slate-400 text-sm font-semibold">
-                                No bots match the current filter
-                              </td>
-                            </tr>
-                          ) : (
-                            filteredModalBots.map((bot) => (
-                              <tr
-                                key={bot.id}
-                                onClick={() => toggleModalBot(bot.id)}
-                                className={`border-b border-slate-50 cursor-pointer transition-colors text-sm ${modalBotIds.includes(bot.id) ? 'bg-blue-50/60' : 'hover:bg-slate-50/40'}`}
-                              >
-                                <td className="px-4 py-3">
-                                  <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all ${modalBotIds.includes(bot.id) ? 'bg-[#1b4de4] border-[#1b4de4]' : 'border-slate-300 bg-white'}`}>
-                                    {modalBotIds.includes(bot.id) && <CheckCircle2 className="w-3.5 h-3.5 text-white" />}
-                                  </div>
-                                </td>
-                                <td className="px-4 py-3">
-                                  <div className="flex items-center gap-2">
-                                    <Bot className="w-4 h-4 text-slate-400" />
-                                    <div className="flex flex-col">
-                                      <span className="font-bold text-slate-900">{bot.name}</span>
-                                      <span className="text-[10px] font-semibold text-slate-400">
-                                        {bot.battery_level != null ? `${bot.battery_level}%` : '—'}
-                                      </span>
-                                    </div>
-                                  </div>
-                                </td>
-                                <td className="px-4 py-3 font-semibold text-slate-600">
-                                  {bot.operator?.name || <span className="text-slate-400">Unassigned</span>}
-                                </td>
-                                <td className="px-4 py-3">
-                                  {bot.operator ? (
-                                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${getOpStatusBadge(bot.operator.status)}`}>
-                                      <span className={`w-1.5 h-1.5 rounded-full ${opDotClass(bot.operator.status)}`}></span>
-                                      {bot.operator.status}
-                                    </span>
-                                  ) : (
-                                    <span className="text-xs text-slate-400">—</span>
-                                  )}
-                                </td>
-                              </tr>
-                            ))
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="p-4 border-t border-slate-100 flex justify-end gap-3 shrink-0 bg-slate-50">
-                  <button
-                    type="button"
-                    onClick={() => { setShowModal(false); setModalSuccess(null); setModalBotIds([]); }}
-                    className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50 rounded-xl border border-slate-200 cursor-pointer"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={modalSaving || !modalDate || !modalBotIds.length}
-                    className="px-5 py-2 text-xs font-bold text-white bg-[#1b4de4] hover:bg-[#153eb8] rounded-xl shadow-sm cursor-pointer disabled:opacity-50"
-                  >
-                    {modalSaving ? 'Saving...' : `Create Schedule`}
-                  </button>
-                </div>
-              </form>
-            )}
-          </div>
+      {/* Schedule grid based on view */}
+      <div className="mb-6 bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-6">
+        <div className="mb-5 flex items-center gap-1.5">
+          <h2 className="text-[17px] font-bold text-slate-900">
+            {view === 'Day' ? 'Daily Schedule' : view === 'Week' ? 'Weekly Schedule' : 'Monthly Overview'}
+          </h2>
+          <Info className="h-3.5 w-3.5 text-slate-300" />
         </div>
+
+        {view === 'Day' && renderDayView()}
+        {view === 'Week' && renderWeekView()}
+        {view === 'Month' && renderMonthView()}
+
+        <div className="mt-4 flex flex-wrap items-center gap-4 border-t border-slate-100 pt-4">
+          <LegendDot className="bg-emerald-500" label="Scheduled" />
+          <LegendDot className="bg-sky-500" label="Available" />
+          <LegendDot className="bg-amber-500" label="Maintenance" />
+          <LegendDot className="bg-slate-300" label="No Schedule" />
+        </div>
+      </div>
+
+      {showModal && (
+        <ScheduleModal
+          bots={bots}
+          onClose={() => { setShowModal(false); setPrefillBot(""); setPrefillZone(""); }}
+          onSave={handleSaveSchedule}
+          prefillBot={prefillBot}
+          prefillZone={prefillZone}
+        />
+      )}
+      </>
       )}
     </div>
   );
-};
-
-export default CollectionSchedule;
+}

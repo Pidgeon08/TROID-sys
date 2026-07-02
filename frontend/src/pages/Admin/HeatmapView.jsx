@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet.heat';
 import { Calendar } from 'lucide-react';
+import { api } from '../../services/api';
 
 /**
  * ChangeView Component
@@ -90,76 +91,77 @@ function HeatmapLayer({ points, type }) {
  * Interactive Creek Mock Data
  * Holds coordinates and metadata matching the revised screenshot labels.
  */
-const botData = {
-'Carlatan Creek': {
-     name: 'Carlatan Creek',
-    center: [16.6325, 120.3200],
-    zoom: 15,
-    points: [
-      [16.6332, 120.3191, 0.8], // Carlatan Creek bridge area
-      [16.6325, 120.3200, 0.6], 
-      [16.6315, 120.3210, 0.9], 
-      [16.6305, 120.3225, 0.5], 
-      [16.6340, 120.3180, 0.7], 
-      [16.6350, 120.3165, 0.4], 
-      [16.6360, 120.3150, 0.3], 
-      [16.6320, 120.3205, 0.8], 
-      [16.6338, 120.3262, 0.7], 
-      [16.6345, 120.3255, 0.9], 
-      [16.6355, 120.3250, 0.5], 
-    ],
-    areaCovered: '34%',
-    distance: '2.4km',
-    elapsedTime: '30 min',
-    startedAt: '9:54 pm',
-    status: 'Bot Online'
-  },
-  'Biday Creek': {
-    name: 'Biday Creek',
-    center: [16.6338, 120.3275],
-    zoom: 15,
-    points: [
-      [16.6338, 120.3275, 0.9], // Main Biday Creek branch
-      [16.6345, 120.3285, 0.8],
-      [16.6350, 120.3295, 0.7],
-      [16.6330, 120.3265, 0.6],
-      [16.6325, 120.3255, 0.5],
-      [16.6320, 120.3245, 0.4],
-      [16.6315, 120.3235, 0.9],
-    ],
-    areaCovered: '48%',
-    distance: '3.8km',
-    elapsedTime: '50 min',
-    startedAt: '9:12 pm',
-    status: 'Bot Online'
-  },
-  'San Fernando Creek': {
-    name: 'San Fernando Creek',
-    center: [16.6300, 120.3220],
-    zoom: 15,
-    points: [
-      [16.6300, 120.3220, 0.5], // Downtown creek reaches
-      [16.6290, 120.3230, 0.6],
-      [16.6280, 120.3245, 0.8],
-      [16.6270, 120.3260, 0.9],
-      [16.6310, 120.3205, 0.4],
-      [16.6318, 120.3190, 0.3],
-      [16.6260, 120.3270, 0.7],
-    ],
-    areaCovered: '61%',
-    distance: '5.2km',
-    elapsedTime: '90 min',
-    startedAt: '8:30 pm',
-    status: 'Bot Online'
-  }
-};
-
 const HeatmapView = () => {
   const [selectedBotKey, setSelectedBotKey] = useState('Carlatan Creek');
   const [timeFilter, setTimeFilter] = useState('Today');
   const [heatmapType, setHeatmapType] = useState('Waste Density');
   const [dateRange, setDateRange] = useState({ from: '', to: '' });
-  const selectedBot = botData[selectedBotKey];
+  const [botData, setBotData] = useState({});
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.heatmapData().then((data) => {
+      if (cancelled) return;
+
+      const creekCenters = {
+        'Carlatan Creek': [16.6325, 120.3200],
+        'Biday Creek': [16.6338, 120.3275],
+        'San Fernando Creek': [16.6300, 120.3220],
+      };
+
+      const grouped = {};
+
+      Object.entries(creekCenters).forEach(([name, [clat, clng]]) => {
+        const points = [];
+        data.forEach((p) => {
+          const dist = Math.sqrt(
+            (p.latitude - clat) ** 2 + (p.longitude - clng) ** 2
+          );
+          if (dist <= 0.005) {
+            points.push([p.latitude, p.longitude, p.weight || 0.5]);
+          }
+        });
+
+        const count = points.length;
+        const avgWeight =
+          count > 0
+            ? points.reduce((sum, [, , w]) => sum + w, 0) / count
+            : 0;
+
+        grouped[name] = {
+          name,
+          center: [clat, clng],
+          zoom: 15,
+          points,
+          areaCovered: count > 0 ? `${Math.min(95, Math.round(count * 5 + avgWeight * 10))}%` : '0%',
+          distance: count > 0 ? `${(count * 0.4).toFixed(1)}km` : '0km',
+          elapsedTime: count > 0 ? `${count * 5} min` : '0 min',
+          startedAt: count > 0 ? '9:00 pm' : '-',
+          status: count > 0 ? 'Bot Online' : 'Offline',
+        };
+      });
+
+      setBotData(grouped);
+      setLoading(false);
+    }).catch(() => setLoading(false));
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const selectedBot = botData[selectedBotKey] || {
+    name: selectedBotKey,
+    center: [16.6325, 120.3200],
+    zoom: 15,
+    points: [],
+    areaCovered: '0%',
+    distance: '0km',
+    elapsedTime: '0 min',
+    startedAt: '-',
+    status: 'Offline',
+  };
 
   // Dynamically load Inter font to match the premium typography in the design
   useEffect(() => {
@@ -208,6 +210,13 @@ const HeatmapView = () => {
 
   return (
     <div className="max-w-[1400px] mx-auto animate-fade-in pb-12 select-none">
+      {loading && (
+        <div className="flex items-center justify-center h-[500px]">
+          <span className="text-sm font-medium text-slate-500">Loading coverage data...</span>
+        </div>
+      )}
+      {!loading && (
+      <>
       
       {/* HEADER BAR */}
       <header className="mb-6 flex justify-between items-center">
@@ -220,10 +229,14 @@ const HeatmapView = () => {
         <div className="bg-white border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] rounded-xl px-5 py-2.5 flex flex-col gap-0.5 min-w-[160px]">
           <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Started: {selectedBot.startedAt}</span>
           <div className="flex items-center gap-2">
-            <span className={`w-2 h-2 rounded-full ${selectedBot.status === 'Bot Online' ? 'bg-[#10b981] animate-pulse' : 'bg-rose-500'}`}></span>
-            <span className={`text-[11px] font-bold ${selectedBot.status === 'Bot Online' ? 'text-[#10b981]' : 'text-rose-500'}`}>
-              {selectedBot.status}
-            </span>
+            <span className={`w-2 h-2 rounded-full ${
+               selectedBot.status === 'Bot Online' ? 'bg-emerald-500 shadow-[0_0_6px_#10b981]' : 'bg-rose-500'
+             }`}></span>
+<span className={`text-[11px] font-bold ${
+                       selectedBot.status === 'Bot Online' ? 'text-emerald-600' : 'text-rose-500'
+                     }`}>
+                       {selectedBot.status}
+                     </span>
           </div>
         </div>
       </header>
@@ -392,6 +405,8 @@ const HeatmapView = () => {
         </div>
       </div>
 
+      </>
+      )}
     </div>
   );
 };

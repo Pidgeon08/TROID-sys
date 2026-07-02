@@ -1,21 +1,57 @@
 import { useEffect, useState } from "react";
-import {
-  Search,
-  Filter,
-  FileText,
-  Clock,
-  CheckCircle2,
-  XCircle,
-  Eye,
-  ChevronLeft,
-  ChevronRight,
-  User,
-  MapPin,
-  Download,
-} from "lucide-react";
-import api from '../../services/api';
+import { FileText, Clock, CheckCircle2, Eye, MapPin, Trash2, Recycle, ArrowLeft, Download, User } from "lucide-react";
+import api from "../../services/api";
 
-const TABS = ["All Requests", "Pending", "Approved", "Declined"];
+const BCOL_STATUS_STYLES = {
+  Pending: "bg-amber-50 text-amber-700",
+  Approved: "bg-emerald-50 text-emerald-700",
+  Declined: "bg-red-50 text-red-700",
+  Processing: "bg-blue-50 text-blue-700",
+  Completed: "bg-emerald-50 text-emerald-700",
+  Segregated: "bg-purple-50 text-purple-700",
+};
+
+const BCOL_STATUS_DOT = {
+  Pending: "bg-amber-500",
+  Approved: "bg-emerald-500",
+  Declined: "bg-red-500",
+  Processing: "bg-blue-500",
+  Completed: "bg-emerald-500",
+  Segregated: "bg-purple-500",
+};
+
+const mapApiRequest = (r) => ({
+  id: r.id,
+  type: r.type,
+  status: r.status,
+  dateSubmitted: r.date_submitted,
+  requestedBy: {
+    name: r.requested_by_name,
+    role: r.requested_by_role,
+    barangay: r.requested_by_barangay,
+    contact: r.contact,
+    email: r.email,
+  },
+  location: {
+    name: r.location_name,
+    barangay: r.barangay,
+    municipality: r.municipality,
+    province: r.province,
+  },
+  notes: r.notes,
+  letter: {
+    fileName: r.letter_file_name,
+    size: r.letter_size,
+  },
+  photos: r.photos || [],
+  statusHistory: r.status_history || [],
+  botId: r.bot_id || null,
+  operator: r.operator || null,
+  bags: r.bags || 0,
+  weightKg: r.weight_kg || 0,
+  nonUsableKg: r.non_usable_kg || 0,
+  recyclableKg: r.recyclable_kg || 0,
+});
 
 function SummaryCard({ icon: Icon, label, value, sub }) {
   return (
@@ -46,12 +82,12 @@ const Field = ({ label, value }) => (
   </div>
 );
 
-function RequestDetailsModal({ request, onClose }) {
+function DetailModal({ request, onClose }) {
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 overflow-y-auto">
       <div className="max-w-[1400px] mx-auto animate-fade-in pb-12 w-full bg-slate-50">
         <button onClick={onClose} className="flex items-center gap-1.5 text-sm font-medium text-blue-600 hover:text-blue-700 mb-4 mt-4">
-          <ChevronLeft size={15} />
+          <ArrowLeft size={15} />
           Back to Requests
         </button>
 
@@ -59,7 +95,7 @@ function RequestDetailsModal({ request, onClose }) {
           <div>
             <div className="flex items-center gap-2.5">
               <h1 className="text-[28px] font-bold text-slate-900 tracking-tight leading-none">Request Details</h1>
-              <span className={`inline-block rounded-full px-2.5 py-1 text-xs font-medium ${STATUS_STYLES[request.status]}`}>
+              <span className={`inline-block rounded-full px-2.5 py-1 text-xs font-medium ${BCOL_STATUS_STYLES[request.status]}`}>
                 {request.status}
               </span>
             </div>
@@ -69,7 +105,7 @@ function RequestDetailsModal({ request, onClose }) {
           </div>
           <div className="flex items-center gap-2.5">
             <button className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
-              <FileText size={15} />
+              <Download size={15} />
               Download All
             </button>
           </div>
@@ -198,42 +234,42 @@ function RequestDetailsModal({ request, onClose }) {
           <div className="flex flex-col gap-5">
             <Card>
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-sm font-semibold text-slate-800">Photo Documentation</h3>
+                <h3 className="text-sm font-semibold text-slate-800">Collection Data</h3>
                 <span className={`inline-block rounded-full px-2.5 py-1 text-xs font-medium whitespace-nowrap ${
-                  request.status === "Approved" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"
+                  request.status === "Approved" || request.status === "Completed" || request.status === "Segregated" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"
                 }`}>
-                  {request.status === "Approved" ? "Deployed / Completed" : "Pending Review"}
+                  {request.status}
                 </span>
               </div>
 
-              {request.status === "Approved" && (
-                <div className="flex items-start gap-2.5 rounded-lg bg-emerald-50 border border-emerald-100 px-3 py-2.5 mb-4">
-                  <CheckCircle2 size={16} className="text-emerald-600 mt-0.5 shrink-0" />
-                  <p className="text-xs text-emerald-800 leading-relaxed">
-                    Clean-up and waste collection were already conducted.
-                    <br />
-                    <span className="text-emerald-600">Date Completed: {request.dateSubmitted}</span>
-                  </p>
+              {request.bags && (
+                <div className="grid grid-cols-2 gap-4 mb-4">
+                  <div className="rounded-lg bg-slate-50 p-3 border border-slate-100">
+                    <p className="text-xs text-slate-500 mb-1">Total Bags</p>
+                    <p className="text-xl font-bold text-slate-900">{request.bags}</p>
+                  </div>
+                  <div className="rounded-lg bg-slate-50 p-3 border border-slate-100">
+                    <p className="text-xs text-slate-500 mb-1">Total Weight</p>
+                    <p className="text-xl font-bold text-slate-900">{request.weightKg} kg</p>
+                  </div>
+                  <div className="rounded-lg bg-red-50 p-3 border border-red-100">
+                    <p className="text-xs text-red-600 mb-1 flex items-center gap-1"><Trash2 className="w-3 h-3" /> Non-Usable</p>
+                    <p className="text-xl font-bold text-red-700">{request.nonUsableKg} kg</p>
+                  </div>
+                  <div className="rounded-lg bg-emerald-50 p-3 border border-emerald-100">
+                    <p className="text-xs text-emerald-600 mb-1 flex items-center gap-1"><Recycle className="w-3 h-3" /> Recyclable</p>
+                    <p className="text-xl font-bold text-emerald-700">{request.recyclableKg} kg</p>
+                  </div>
                 </div>
               )}
 
-              <div className="grid grid-cols-3 gap-2.5">
-                {(request.photos || []).map((photo) => (
-                  <div key={photo.id} className="group cursor-pointer">
-                    <div className="aspect-square rounded-lg bg-slate-200 overflow-hidden relative flex items-center justify-center">
-                      <span className="text-slate-400 text-[10px]">Photo {photo.id}</span>
-                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 flex items-center justify-center transition-colors">
-                        <Eye size={16} className="text-white opacity-0 group-hover:opacity-100 transition-opacity" />
-                      </div>
-                    </div>
-                    <p className="text-[11px] font-medium text-slate-700 mt-1.5 leading-tight">{photo.label}</p>
-                    <p className="text-[10px] text-slate-400">{photo.date}</p>
-                  </div>
-                ))}
-                {(request.photos || []).length === 0 && (
-                  <p className="text-xs text-slate-400 col-span-3">No photos uploaded yet.</p>
-                )}
-              </div>
+              {request.botId && (
+                <div className="rounded-lg border border-slate-100 p-3">
+                  <p className="text-xs text-slate-500 mb-1">Assigned Bot</p>
+                  <p className="text-lg font-bold text-slate-900">{request.botId}</p>
+                  <p className="text-xs text-slate-500">Operator: {request.operator}</p>
+                </div>
+              )}
             </Card>
 
             <Card title="Status History">
@@ -264,173 +300,90 @@ function RequestDetailsModal({ request, onClose }) {
             </Card>
           </div>
         </div>
-
-        <div className="mt-6 bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="text-sm font-semibold text-slate-900">View Mode</h3>
-              <p className="text-xs text-slate-500 mt-1">CENRO is in view-only mode. The Mayor's Office is responsible for approving or declining requests.</p>
-            </div>
-            <div className="rounded-lg bg-blue-50 border border-blue-100 px-4 py-2.5 text-sm font-medium text-blue-700">
-              View Only
-            </div>
-          </div>
-        </div>
       </div>
     </div>
   );
 }
 
-const STATUS_STYLES = {
-  Pending: "bg-amber-50 text-amber-700",
-  Approved: "bg-emerald-50 text-emerald-700",
-  Declined: "bg-red-50 text-red-700",
-};
-
-const STATUS_DOT = {
-  Pending: "bg-amber-500",
-  Approved: "bg-emerald-500",
-  Declined: "bg-red-500",
-};
-
-export default function Requests({ userRole = "admin" }) {
-  const [activeTab, setActiveTab] = useState("All Requests");
-  const [currentPage, setCurrentPage] = useState(1);
+export default function BarangayRequests() {
+  const [activeTab, setActiveTab] = useState("All");
   const [selectedRequest, setSelectedRequest] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  const isCenro = userRole === "admin";
-  const isBarangay = userRole === "barangay";
-
-  const title = "TROID Bot Requests";
-  const subtitle = "View TROID bot deployment requests from barangays. Status updates will appear here.";
-
   useEffect(() => {
-    const fetchRequests = async () => {
+    let cancelled = false;
+    async function load() {
       try {
-        const res = await api.requests();
-        const mapped = Array.isArray(res) ? res.map((r) => ({
-          id: r.request_id,
-          type: r.request_type || "TROID Bot Deployment",
-          status: r.status.charAt(0).toUpperCase() + r.status.slice(1),
-          dateSubmitted: r.date_submitted
-            ? new Date(r.date_submitted).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })
-            : r.date_submitted,
-          requestedBy: {
-            name: r.requested_by_name || "",
-            role: r.requested_by_role || "",
-            barangay: r.requested_by_barangay || "",
-            contact: r.contact || "",
-            email: r.email || "",
-          },
-          location: {
-            name: r.location_name || "",
-            barangay: r.barangay || "",
-            municipality: r.municipality || "",
-            province: r.province || "",
-          },
-          notes: r.notes || "",
-          letter: {
-            fileName: r.letter_file_name || "",
-            size: r.letter_size || "",
-          },
-          photos: (r.photos || []).map(p => ({
-            id: p.photo_id || p.id,
-            label: p.label || "",
-            date: p.date || "",
-          })),
-          statusHistory: (r.status_history || []).map(sh => ({
-            label: sh.label || "",
-            date: sh.date
-              ? new Date(sh.date).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })
-              : sh.date,
-            actor: sh.actor || "",
-            role: sh.role || "",
-            state: sh.state || "done",
-          })),
-        })) : [];
-        setRequests(mapped);
+        const all = await api.requests();
+        const mapped = all
+          .filter((r) => (r.requested_by_barangay || "").toLowerCase().includes("carlatan"))
+          .map(mapApiRequest);
+        if (!cancelled) setRequests(mapped);
       } catch (err) {
-        console.error('Failed to fetch requests:', err);
+        console.error("Failed to load requests", err);
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
-    };
-    fetchRequests();
+    }
+    load();
+    return () => { cancelled = true; };
   }, []);
 
-  const filteredRequests = requests.filter((req) => {
-    if (isBarangay) {
-      const name = req.requestedBy?.name || "";
-      const brgy = req.location?.barangay || "";
-      return name.toLowerCase().includes("santos") || brgy.toLowerCase().includes("carlatan");
-    }
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase();
-      return (
-        req.id.toLowerCase().includes(q) ||
-        req.type.toLowerCase().includes(q) ||
-        (req.requestedBy?.name || "").toLowerCase().includes(q)
-      );
-    }
-    return true;
+  const tabs = ["All", "Pending", "Approved", "Deployed", "Completed"];
+
+  const filtered = requests.filter((r) => {
+    if (activeTab === "All") return true;
+    if (activeTab === "Deployed") return r.status === "Approved" && r.deploymentDate;
+    if (activeTab === "Completed") return r.status === "Completed" || r.status === "Segregated";
+    return r.status === activeTab;
+  }).filter((r) => {
+    if (!searchQuery) return true;
+    const q = searchQuery.toLowerCase();
+    return r.id.toLowerCase().includes(q) || r.type.toLowerCase().includes(q) || r.notes.toLowerCase().includes(q);
   });
-
-  const filteredByTab = activeTab === "All Requests"
-    ? filteredRequests
-    : filteredRequests.filter((r) => r.status === activeTab);
-
-  const paginated = filteredByTab.slice((currentPage - 1) * 5, currentPage * 5);
-
-  if (loading) {
-    return (
-      <div className="max-w-[1400px] mx-auto animate-fade-in pb-12 flex items-center justify-center min-h-[400px]">
-        <p className="text-lg font-semibold text-slate-500">Loading...</p>
-      </div>
-    );
-  }
 
   return (
     <div className="max-w-[1400px] mx-auto animate-fade-in pb-12">
+      {loading && (
+        <div className="flex items-center justify-center h-[400px]">
+          <span className="text-sm font-medium text-slate-500">Loading requests...</span>
+        </div>
+      )}
+      {!loading && (
+      <>
       <header className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-[28px] font-bold text-slate-900 tracking-tight leading-none">{title}</h1>
-          <p className="text-slate-500 text-sm mt-1.5 font-medium">{subtitle}</p>
+          <h1 className="text-[28px] font-bold text-slate-900 tracking-tight leading-none">My Requests</h1>
+          <p className="text-slate-500 text-sm mt-1.5 font-medium">Track all submitted cleanup requests and their current status.</p>
         </div>
-        <div className="flex items-center gap-2.5">
-          <div className="relative">
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input
-              value={searchQuery}
-              onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(1); }}
-              placeholder="Search requests..."
-              className="w-56 rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm text-slate-700 placeholder:text-slate-400 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
-            />
-          </div>
-          {isCenro && (
-            <button className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
-              <Filter size={15} />
-              Filter
-            </button>
-          )}
+        <div className="relative">
+          <input
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search requests..."
+            className="w-56 rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm text-slate-700 placeholder:text-slate-400 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
+          />
+          <FileText size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
         </div>
       </header>
 
+      {/* Stat cards */}
       <div className="mb-6 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
-        <SummaryCard icon={FileText} label="Total Requests" value={requests.length} sub="All time" />
-        <SummaryCard icon={Clock} label="Pending" value={requests.filter((r) => r.status === "Pending").length} sub="Awaiting review" />
+        <SummaryCard icon={FileText} label="Total Requests" value={requests.length} sub="All submitted" />
+        <SummaryCard icon={Clock} label="Pending" value={requests.filter((r) => r.status === "Pending").length} sub="Awaiting approval" />
         <SummaryCard icon={CheckCircle2} label="Approved" value={requests.filter((r) => r.status === "Approved").length} sub="Ready for deployment" />
-        <SummaryCard icon={XCircle} label="Declined" value={requests.filter((r) => r.status === "Declined").length} sub="Declined" />
+        <SummaryCard icon={Recycle} label="Completed" value={requests.filter((r) => r.status === "Completed" || r.status === "Segregated").length} sub="Including segregation" />
       </div>
 
+      {/* Tab navigation */}
       <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] overflow-hidden">
         <div className="flex items-center gap-6 px-5 border-b border-slate-100 overflow-x-auto">
-          {TABS.map((tab) => (
+          {tabs.map((tab) => (
             <button
               key={tab}
-              onClick={() => { setActiveTab(tab); setCurrentPage(1); }}
+              onClick={() => setActiveTab(tab)}
               className={`relative py-3.5 text-sm font-medium transition-colors whitespace-nowrap ${
                 activeTab === tab ? "text-blue-600" : "text-slate-500 hover:text-slate-700"
               }`}
@@ -447,47 +400,41 @@ export default function Requests({ userRole = "admin" }) {
               <tr className="border-b border-slate-100">
                 <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Request ID</th>
                 <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Type</th>
-                <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Requested By</th>
                 <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Barangay</th>
                 <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Date Submitted</th>
                 <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Status</th>
                 <th className="px-5 py-3 text-right text-xs font-semibold uppercase tracking-wider text-slate-400">Actions</th>
               </tr>
             </thead>
-            <tbody>
-              {paginated.map((req) => (
-                <tr key={req.id} className="border-t border-slate-50 hover:bg-slate-50/60 transition-colors">
-                  <td className="px-5 py-3.5 font-semibold text-slate-800">{req.id}</td>
-                  <td className="px-5 py-3.5 text-slate-600">{req.type}</td>
-                  <td className="px-5 py-3.5 text-slate-600">{req.requestedBy?.name}</td>
-                  <td className="px-5 py-3.5 text-slate-600">{req.location?.barangay}</td>
-                  <td className="px-5 py-3.5 text-slate-500">
-                    {req.dateSubmitted}
-                  </td>
+<tbody>
+               {filtered.map((req) => (
+                 <tr key={req.id} className="border-t border-slate-50 hover:bg-slate-50/60 transition-colors">
+                   <td className="px-5 py-3.5 font-semibold text-slate-800">{req.id}</td>
+                   <td className="px-5 py-3.5 text-slate-600">{req.type}</td>
+                   <td className="px-5 py-3.5 text-slate-600 flex items-center gap-1"><MapPin className="w-3 h-3 text-slate-400" />{req.location?.barangay}</td>
+                   <td className="px-5 py-3.5 text-slate-500">
+                     {req.dateSubmitted}
+                   </td>
                   <td className="px-5 py-3.5">
-                    <span
-                      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${STATUS_STYLES[req.status]}`}
-                    >
-                      <span className={`w-1.5 h-1.5 rounded-full ${STATUS_DOT[req.status]}`} />
+                    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${BCOL_STATUS_STYLES[req.status]}`}>
+                      <span className={`w-1.5 h-1.5 rounded-full ${BCOL_STATUS_DOT[req.status]}`} />
                       {req.status}
                     </span>
                   </td>
                   <td className="px-5 py-3.5">
-                    <div className="flex items-center justify-end gap-2">
-                      <button
-                        onClick={() => setSelectedRequest(req)}
-                        className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-blue-600 hover:bg-blue-50"
-                      >
-                        <Eye size={13} />
-                        View
-                      </button>
-                    </div>
+                    <button
+                      onClick={() => setSelectedRequest(req)}
+                      className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-blue-600 hover:bg-blue-50"
+                    >
+                      <Eye size={13} />
+                      View
+                    </button>
                   </td>
                 </tr>
               ))}
-              {paginated.length === 0 && (
+              {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-5 py-10 text-center text-sm text-slate-400">
+                  <td colSpan={6} className="px-5 py-10 text-center text-sm text-slate-400">
                     No requests found.
                   </td>
                 </tr>
@@ -495,44 +442,12 @@ export default function Requests({ userRole = "admin" }) {
             </tbody>
           </table>
         </div>
-
-        <div className="flex items-center justify-between px-5 py-3.5 border-t border-slate-100">
-          <p className="text-xs text-slate-500">Showing {filteredByTab.length === 0 ? 0 : (currentPage - 1) * 5 + 1}–{Math.min(currentPage * 5, filteredByTab.length)} of {filteredByTab.length} requests</p>
-          <div className="flex items-center gap-1.5">
-            <button
-              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-              disabled={currentPage === 1}
-              className="w-7 h-7 flex items-center justify-center rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-40"
-            >
-              <ChevronLeft size={14} />
-            </button>
-            {[1, 2, 3].map((page) => (
-              <button
-                key={page}
-                onClick={() => setCurrentPage(page)}
-                className={`w-7 h-7 flex items-center justify-center rounded-md text-xs font-medium border ${
-                  currentPage === page ? "bg-blue-50 border-blue-200 text-blue-600" : "border-slate-200 text-slate-500 hover:bg-slate-50"
-                }`}
-              >
-                {page}
-              </button>
-            ))}
-            <button
-              onClick={() => setCurrentPage((p) => Math.min(Math.ceil(filteredByTab.length / 5), p + 1))}
-              disabled={currentPage >= Math.ceil(filteredByTab.length / 5)}
-              className="w-7 h-7 flex items-center justify-center rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-40"
-            >
-              <ChevronRight size={14} />
-            </button>
-          </div>
-        </div>
       </div>
 
       {selectedRequest && (
-        <RequestDetailsModal
-          request={selectedRequest}
-          onClose={() => setSelectedRequest(null)}
-        />
+        <DetailModal request={selectedRequest} onClose={() => setSelectedRequest(null)} />
+      )}
+      </>
       )}
     </div>
   );

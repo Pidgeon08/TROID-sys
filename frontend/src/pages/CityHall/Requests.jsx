@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import {
   Search,
-  Filter,
   FileText,
   Clock,
   CheckCircle2,
@@ -9,13 +8,63 @@ import {
   Eye,
   ChevronLeft,
   ChevronRight,
-  User,
-  MapPin,
+  ShieldCheck,
+  Signature,
+  ArrowLeft,
   Download,
+  ChevronDown,
+  MapPin,
+  User,
+  ZoomIn,
 } from "lucide-react";
-import api from '../../services/api';
+import api from "../../services/api";
 
 const TABS = ["All Requests", "Pending", "Approved", "Declined"];
+
+const STATUS_STYLES = {
+  Pending: "bg-amber-50 text-amber-700",
+  Approved: "bg-emerald-50 text-emerald-700",
+  Declined: "bg-red-50 text-red-700",
+};
+
+const STATUS_DOT = {
+  Pending: "bg-amber-500",
+  Approved: "bg-emerald-500",
+  Declined: "bg-red-500",
+};
+
+const mapApiRequest = (r) => ({
+  id: r.id,
+  type: r.type,
+  status: r.status,
+  dateSubmitted: r.date_submitted,
+  requestedBy: {
+    name: r.requested_by_name,
+    role: r.requested_by_role,
+    barangay: r.requested_by_barangay,
+    contact: r.contact,
+    email: r.email,
+  },
+  location: {
+    name: r.location_name,
+    barangay: r.barangay,
+    municipality: r.municipality,
+    province: r.province,
+  },
+  notes: r.notes,
+  letter: {
+    fileName: r.letter_file_name,
+    size: r.letter_size,
+  },
+  photos: r.photos || [],
+  statusHistory: r.status_history || [],
+  botId: r.bot_id || null,
+  operator: r.operator || null,
+  bags: r.bags || 0,
+  weightKg: r.weight_kg || 0,
+  nonUsableKg: r.non_usable_kg || 0,
+  recyclableKg: r.recyclable_kg || 0,
+});
 
 function SummaryCard({ icon: Icon, label, value, sub }) {
   return (
@@ -46,12 +95,14 @@ const Field = ({ label, value }) => (
   </div>
 );
 
-function RequestDetailsModal({ request, onClose }) {
+function RequestDetailsModal({ request, onClose, onConfirm }) {
+  const [actionsOpen, setActionsOpen] = useState(false);
+
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 overflow-y-auto">
       <div className="max-w-[1400px] mx-auto animate-fade-in pb-12 w-full bg-slate-50">
         <button onClick={onClose} className="flex items-center gap-1.5 text-sm font-medium text-blue-600 hover:text-blue-700 mb-4 mt-4">
-          <ChevronLeft size={15} />
+          <ArrowLeft size={15} />
           Back to Requests
         </button>
 
@@ -67,11 +118,43 @@ function RequestDetailsModal({ request, onClose }) {
               {request.id} &bull; {request.type}
             </p>
           </div>
+
           <div className="flex items-center gap-2.5">
             <button className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
-              <FileText size={15} />
+              <Download size={15} />
               Download All
             </button>
+            <div className="relative">
+              <button
+                onClick={() => setActionsOpen((v) => !v)}
+                className="flex items-center gap-2 rounded-lg bg-blue-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-blue-700"
+              >
+                Actions
+                <ChevronDown size={15} />
+              </button>
+              {actionsOpen && (
+                <>
+                  <div className="fixed inset-0 z-10" onClick={() => setActionsOpen(false)} />
+                  <div className="absolute right-0 mt-1.5 w-44 rounded-lg border border-slate-100 bg-white shadow-lg overflow-hidden z-20">
+                    <button
+                      onClick={() => setActionsOpen(false)}
+                      className="w-full text-left px-3.5 py-2.5 text-sm text-slate-700 hover:bg-slate-50"
+                    >
+                      Approve Request
+                    </button>
+                    <button
+                      onClick={() => setActionsOpen(false)}
+                      className="w-full text-left px-3.5 py-2.5 text-sm text-slate-700 hover:bg-slate-50"
+                    >
+                      Reject Request
+                    </button>
+                    <button className="w-full text-left px-3.5 py-2.5 text-sm text-red-600 hover:bg-red-50">
+                      Archive
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </header>
 
@@ -81,22 +164,15 @@ function RequestDetailsModal({ request, onClose }) {
               <div className="divide-y divide-slate-100">
                 <Field label="Request ID" value={request.id} />
                 <Field label="Type of Request" value={request.type} />
-                <Field label="Status" value={
-                  <span className={`inline-flex items-center gap-1.5 font-medium ${
-                    request.status === "Pending" ? "text-amber-700" :
-                    request.status === "Approved" ? "text-emerald-700" :
-                    request.status === "Declined" ? "text-red-700" :
-                    "text-slate-700"
-                  }`}>
-                    <span className={`w-1.5 h-1.5 rounded-full ${
-                      request.status === "Pending" ? "bg-amber-500" :
-                      request.status === "Approved" ? "bg-emerald-500" :
-                      request.status === "Declined" ? "bg-red-500" :
-                      "bg-slate-500"
-                    }`} />
-                    {request.status}
-                  </span>
-                } />
+                <Field
+                  label="Status"
+                  value={
+                    <span className={`inline-flex items-center gap-1.5 text-amber-700 font-medium`}>
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                      {request.status}
+                    </span>
+                  }
+                />
                 <Field label="Date Submitted" value={request.dateSubmitted} />
               </div>
             </Card>
@@ -107,11 +183,11 @@ function RequestDetailsModal({ request, onClose }) {
                   <User size={16} className="text-blue-600" />
                 </div>
                 <div className="text-sm">
-                  <p className="font-semibold text-slate-800">{request.requestedBy?.name}</p>
-                  <p className="text-slate-500 mt-0.5">{request.requestedBy?.role}</p>
-                  <p className="text-slate-500">{request.requestedBy?.barangay}</p>
-                  <p className="text-slate-500 mt-1.5">Contact No. {request.requestedBy?.contact}</p>
-                  <p className="text-slate-500">{request.requestedBy?.email}</p>
+                  <p className="font-semibold text-slate-800">{request.requestedBy.name}</p>
+                  <p className="text-slate-500 mt-0.5">{request.requestedBy.role}</p>
+                  <p className="text-slate-500">{request.requestedBy.barangay}</p>
+                  <p className="text-slate-500 mt-1.5">Contact No. {request.requestedBy.contact}</p>
+                  <p className="text-slate-500">{request.requestedBy.email}</p>
                 </div>
               </div>
             </Card>
@@ -122,12 +198,15 @@ function RequestDetailsModal({ request, onClose }) {
                   <MapPin size={16} className="text-emerald-600" />
                 </div>
                 <div className="text-sm">
-                  <p className="font-semibold text-slate-800">{request.location?.name}</p>
-                  <p className="text-slate-500 mt-0.5">{request.location?.barangay}</p>
-                  <p className="text-slate-500">{request.location?.municipality}</p>
-                  <p className="text-slate-500">{request.location?.province}</p>
+                  <p className="font-semibold text-slate-800">{request.location.name}</p>
+                  <p className="text-slate-500 mt-0.5">{request.location.barangay}</p>
+                  <p className="text-slate-500">{request.location.municipality}</p>
+                  <p className="text-slate-500">{request.location.province}</p>
                 </div>
               </div>
+              <button className="mt-4 w-full rounded-lg border border-slate-200 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50">
+                View on Map
+              </button>
             </Card>
 
             <Card title="Additional Notes">
@@ -140,8 +219,8 @@ function RequestDetailsModal({ request, onClose }) {
               <div className="flex items-center gap-2.5">
                 <FileText size={18} className="text-blue-600" />
                 <div className="text-sm">
-                  <p className="font-medium text-slate-800 leading-tight">{request.letter?.fileName}</p>
-                  <p className="text-slate-400 text-xs">PDF &bull; {request.letter?.size}</p>
+                  <p className="font-medium text-slate-800 leading-tight">{request.letter.fileName}</p>
+                  <p className="text-slate-400 text-xs">PDF • {request.letter.size}</p>
                 </div>
               </div>
               <div className="flex items-center gap-2 shrink-0">
@@ -169,7 +248,7 @@ function RequestDetailsModal({ request, onClose }) {
                     <br />
                     City of San Fernando
                     <br />
-                    <span className="font-bold text-slate-800 text-sm">{request.location?.barangay?.toUpperCase()}</span>
+                    <span className="font-bold text-slate-800 text-sm">{request.location.barangay.toUpperCase()}</span>
                   </div>
                 </div>
                 <p className="text-right text-xs text-slate-500 mb-4">{request.dateSubmitted}</p>
@@ -182,14 +261,16 @@ function RequestDetailsModal({ request, onClose }) {
                 </p>
                 <p className="font-semibold text-slate-800 mb-3 text-xs">Subject: Request for Assistance – {request.type}</p>
                 <p className="mb-3 text-xs">Dear Sir/Madam,</p>
-                <p className="mb-3 text-xs">{request.notes}</p>
+                <p className="mb-3 text-xs">
+                  {request.notes}
+                </p>
                 <p className="mb-6 text-xs">Thank you very much for your immediate attention and support.</p>
                 <p className="text-xs">Respectfully yours,</p>
-                <p className="font-semibold text-slate-800 mt-6 text-xs">{request.requestedBy?.name}</p>
+                <p className="font-semibold text-slate-800 mt-6 text-xs">{request.requestedBy.name}</p>
                 <p className="text-xs text-slate-500">
-                  {request.requestedBy?.role}
+                  {request.requestedBy.role}
                   <br />
-                  {request.requestedBy?.barangay}
+                  {request.requestedBy.barangay}
                 </p>
               </div>
             </div>
@@ -223,7 +304,7 @@ function RequestDetailsModal({ request, onClose }) {
                     <div className="aspect-square rounded-lg bg-slate-200 overflow-hidden relative flex items-center justify-center">
                       <span className="text-slate-400 text-[10px]">Photo {photo.id}</span>
                       <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 flex items-center justify-center transition-colors">
-                        <Eye size={16} className="text-white opacity-0 group-hover:opacity-100 transition-opacity" />
+                        <ZoomIn size={16} className="text-white opacity-0 group-hover:opacity-100 transition-opacity" />
                       </div>
                     </div>
                     <p className="text-[11px] font-medium text-slate-700 mt-1.5 leading-tight">{photo.label}</p>
@@ -265,139 +346,94 @@ function RequestDetailsModal({ request, onClose }) {
           </div>
         </div>
 
-        <div className="mt-6 bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="text-sm font-semibold text-slate-900">View Mode</h3>
-              <p className="text-xs text-slate-500 mt-1">CENRO is in view-only mode. The Mayor's Office is responsible for approving or declining requests.</p>
-            </div>
-            <div className="rounded-lg bg-blue-50 border border-blue-100 px-4 py-2.5 text-sm font-medium text-blue-700">
-              View Only
+        {request.status === "Pending" && (
+          <div className="mt-6 bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-semibold text-slate-900">Take Action on This Request</h3>
+                <p className="text-xs text-slate-500 mt-1">Your decision will be recorded and the request status will update immediately.</p>
+              </div>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => onConfirm(request.id, "Declined")}
+                  className="flex items-center gap-2 rounded-lg border-2 border-red-200 px-4 py-2.5 text-sm font-semibold text-red-700 hover:bg-red-50 transition-colors"
+                >
+                  <XCircle size={16} />
+                  Decline
+                </button>
+                <button
+                  onClick={() => onConfirm(request.id, "Approved")}
+                  className="flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700 transition-colors"
+                >
+                  <CheckCircle2 size={16} />
+                  Approve
+                </button>
+              </div>
             </div>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );
 }
 
-const STATUS_STYLES = {
-  Pending: "bg-amber-50 text-amber-700",
-  Approved: "bg-emerald-50 text-emerald-700",
-  Declined: "bg-red-50 text-red-700",
-};
-
-const STATUS_DOT = {
-  Pending: "bg-amber-500",
-  Approved: "bg-emerald-500",
-  Declined: "bg-red-500",
-};
-
-export default function Requests({ userRole = "admin" }) {
+export default function Requests() {
   const [activeTab, setActiveTab] = useState("All Requests");
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedRequest, setSelectedRequest] = useState(null);
-  const [searchQuery, setSearchQuery] = useState("");
   const [requests, setRequests] = useState([]);
+  const [searchQuery, setSearchQuery] = useState("");
   const [loading, setLoading] = useState(true);
 
-  const isCenro = userRole === "admin";
-  const isBarangay = userRole === "barangay";
-
-  const title = "TROID Bot Requests";
-  const subtitle = "View TROID bot deployment requests from barangays. Status updates will appear here.";
-
   useEffect(() => {
-    const fetchRequests = async () => {
+    let cancelled = false;
+    async function load() {
       try {
-        const res = await api.requests();
-        const mapped = Array.isArray(res) ? res.map((r) => ({
-          id: r.request_id,
-          type: r.request_type || "TROID Bot Deployment",
-          status: r.status.charAt(0).toUpperCase() + r.status.slice(1),
-          dateSubmitted: r.date_submitted
-            ? new Date(r.date_submitted).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })
-            : r.date_submitted,
-          requestedBy: {
-            name: r.requested_by_name || "",
-            role: r.requested_by_role || "",
-            barangay: r.requested_by_barangay || "",
-            contact: r.contact || "",
-            email: r.email || "",
-          },
-          location: {
-            name: r.location_name || "",
-            barangay: r.barangay || "",
-            municipality: r.municipality || "",
-            province: r.province || "",
-          },
-          notes: r.notes || "",
-          letter: {
-            fileName: r.letter_file_name || "",
-            size: r.letter_size || "",
-          },
-          photos: (r.photos || []).map(p => ({
-            id: p.photo_id || p.id,
-            label: p.label || "",
-            date: p.date || "",
-          })),
-          statusHistory: (r.status_history || []).map(sh => ({
-            label: sh.label || "",
-            date: sh.date
-              ? new Date(sh.date).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })
-              : sh.date,
-            actor: sh.actor || "",
-            role: sh.role || "",
-            state: sh.state || "done",
-          })),
-        })) : [];
-        setRequests(mapped);
+        const all = await api.requests();
+        if (!cancelled) {
+          setRequests(all.map(mapApiRequest));
+        }
       } catch (err) {
-        console.error('Failed to fetch requests:', err);
+        console.error("Failed to load requests", err);
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
-    };
-    fetchRequests();
+    }
+    load();
+    return () => { cancelled = true; };
   }, []);
 
-  const filteredRequests = requests.filter((req) => {
-    if (isBarangay) {
-      const name = req.requestedBy?.name || "";
-      const brgy = req.location?.barangay || "";
-      return name.toLowerCase().includes("santos") || brgy.toLowerCase().includes("carlatan");
-    }
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase();
-      return (
-        req.id.toLowerCase().includes(q) ||
-        req.type.toLowerCase().includes(q) ||
-        (req.requestedBy?.name || "").toLowerCase().includes(q)
-      );
-    }
-    return true;
-  });
-
   const filteredByTab = activeTab === "All Requests"
-    ? filteredRequests
-    : filteredRequests.filter((r) => r.status === activeTab);
+    ? requests
+    : requests.filter((r) => r.status === activeTab);
 
   const paginated = filteredByTab.slice((currentPage - 1) * 5, currentPage * 5);
 
-  if (loading) {
-    return (
-      <div className="max-w-[1400px] mx-auto animate-fade-in pb-12 flex items-center justify-center min-h-[400px]">
-        <p className="text-lg font-semibold text-slate-500">Loading...</p>
-      </div>
+  const handleConfirm = (id, decision) => {
+    setRequests((prev) =>
+      prev.map((r) => (r.id === id ? { ...r, status: decision } : r))
     );
-  }
+    setSelectedRequest(null);
+  };
 
   return (
     <div className="max-w-[1400px] mx-auto animate-fade-in pb-12">
+      {loading && (
+        <div className="flex items-center justify-center h-[400px]">
+          <span className="text-sm font-medium text-slate-500">Loading requests...</span>
+        </div>
+      )}
+      {!loading && (
+      <>
       <header className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-[28px] font-bold text-slate-900 tracking-tight leading-none">{title}</h1>
-          <p className="text-slate-500 text-sm mt-1.5 font-medium">{subtitle}</p>
+          <div className="flex items-center gap-2.5 mb-1">
+            <div className="w-9 h-9 rounded-full bg-blue-100 flex items-center justify-center text-blue-700">
+              <ShieldCheck className="w-5 h-5" />
+            </div>
+            <h1 className="text-[28px] font-bold text-slate-900 tracking-tight leading-none">Requests</h1>
+          </div>
+          <p className="text-slate-500 text-sm mt-1.5 font-medium">Review and approve or decline barangay requests for TROID bot deployment.</p>
         </div>
         <div className="flex items-center gap-2.5">
           <div className="relative">
@@ -409,20 +445,17 @@ export default function Requests({ userRole = "admin" }) {
               className="w-56 rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm text-slate-700 placeholder:text-slate-400 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
             />
           </div>
-          {isCenro && (
-            <button className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
-              <Filter size={15} />
-              Filter
-            </button>
-          )}
+          <button className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
+            Filter
+          </button>
         </div>
       </header>
 
       <div className="mb-6 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
         <SummaryCard icon={FileText} label="Total Requests" value={requests.length} sub="All time" />
-        <SummaryCard icon={Clock} label="Pending" value={requests.filter((r) => r.status === "Pending").length} sub="Awaiting review" />
-        <SummaryCard icon={CheckCircle2} label="Approved" value={requests.filter((r) => r.status === "Approved").length} sub="Ready for deployment" />
-        <SummaryCard icon={XCircle} label="Declined" value={requests.filter((r) => r.status === "Declined").length} sub="Declined" />
+        <SummaryCard icon={Clock} label="Pending Review" value={requests.filter((r) => r.status === "Pending").length} sub="Awaiting your decision" />
+        <SummaryCard icon={CheckCircle2} label="Approved" value={requests.filter((r) => r.status === "Approved").length} sub="Sent to CENRO" />
+        <SummaryCard icon={XCircle} label="Declined" value={requests.filter((r) => r.status === "Declined").length} sub="Declined requests" />
       </div>
 
       <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] overflow-hidden">
@@ -481,6 +514,15 @@ export default function Requests({ userRole = "admin" }) {
                         <Eye size={13} />
                         View
                       </button>
+                      {req.status === "Pending" && (
+                        <button
+                          onClick={() => setSelectedRequest(req)}
+                          className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-[#1b4de4] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#153eb8]"
+                        >
+                          <Signature size={13} />
+                          Review
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -532,7 +574,10 @@ export default function Requests({ userRole = "admin" }) {
         <RequestDetailsModal
           request={selectedRequest}
           onClose={() => setSelectedRequest(null)}
+          onConfirm={handleConfirm}
         />
+      )}
+      </>
       )}
     </div>
   );
