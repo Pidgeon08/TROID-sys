@@ -16,7 +16,12 @@ const STATUS_STYLES = {
   Archived: "bg-slate-100 text-slate-600",
 };
 
-const QUICK_ACTIONS = ["Reset password", "Change role", "Reassign area", "Suspend account"];
+const QUICK_ACTIONS = [
+  { label: "Reset password", action: "resetPassword" },
+  { label: "Change role", action: "changeRole" },
+  { label: "Reassign area", action: "reassignArea" },
+  { label: "Suspend account", action: "suspendAccount" },
+];
 
 const PAGE_SIZE = 5;
 
@@ -29,6 +34,7 @@ export default function UserManagement() {
   const [showArchived, setShowArchived] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [activeModal, setActiveModal] = useState(null);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [pendingApproval, setPendingApproval] = useState(0);
@@ -152,6 +158,61 @@ export default function UserManagement() {
     } catch (err) {
       console.error('Failed to create user:', err);
       alert('Failed to create user. Please try again.');
+    }
+  };
+
+  const openModal = (action) => {
+    if (selected) setActiveModal(action);
+  };
+
+  const closeModal = () => setActiveModal(null);
+
+  const handleResetPassword = async () => {
+    if (!selected) return;
+    try {
+      await api.post(`/users/${selected.id}/reset-password/`);
+      alert(`Password reset successfully for ${selected.email}`);
+      closeModal();
+    } catch (err) {
+      console.error('Failed to reset password:', err);
+      alert('Failed to reset password. Please try again.');
+    }
+  };
+
+  const handleRoleChange = async (newRole) => {
+    if (!selected) return;
+    try {
+      const roleValue = newRole === 'Admin' ? 'admin' : newRole === 'Mayor' ? 'mayorsoffice' : newRole === 'Spearhead' ? 'spearhead' : 'barangay';
+      await api.updateUser(selected.id, { role: roleValue });
+      setUsers((prev) => prev.map((u) => u.id === selected.id ? { ...u, role: newRole } : u));
+      closeModal();
+    } catch (err) {
+      console.error('Failed to update role:', err);
+      alert('Failed to update role. Please try again.');
+    }
+  };
+
+  const handleReassignArea = async (newLocation) => {
+    if (!selected) return;
+    try {
+      await api.updateUser(selected.id, { location: newLocation });
+      setUsers((prev) => prev.map((u) => u.id === selected.id ? { ...u, location: newLocation } : u));
+      closeModal();
+    } catch (err) {
+      console.error('Failed to reassign area:', err);
+      alert('Failed to reassign area. Please try again.');
+    }
+  };
+
+  const handleSuspendAccount = async () => {
+    if (!selected) return;
+    try {
+      await api.updateUser(selected.id, { status: 'archived' });
+      setUsers((prev) => prev.map((u) => u.id === selected.id ? { ...u, status: 'Archived' } : u));
+      closeModal();
+    } catch (err) {
+      console.error('Failed to suspend account:', err);
+      alert('Failed to suspend account. Please try again.');
     }
   };
 
@@ -449,11 +510,12 @@ className={`flex h-7 w-7 items-center justify-center rounded-md text-xs font-med
             <div className="space-y-2">
               {QUICK_ACTIONS.map((action) => (
                 <button
-                  key={action}
+                  key={action.action}
+                  onClick={() => openModal(action.action)}
                   disabled={!selected}
                   className="w-full rounded-lg border border-slate-200 py-2 text-sm text-slate-600 transition-colors hover:border-blue-400 hover:bg-blue-50 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  {action}
+                  {action.label}
                 </button>
               ))}
             </div>
@@ -464,6 +526,22 @@ className={`flex h-7 w-7 items-center justify-center rounded-md text-xs font-med
 
       {editingUser && (
         <EditUserModal user={editingUser} onCancel={() => setEditingUser(null)} onSave={handleSaveEdit} />
+      )}
+
+      {activeModal === 'resetPassword' && selected && (
+        <ResetPasswordModal user={selected} onCancel={closeModal} onConfirm={handleResetPassword} />
+      )}
+
+      {activeModal === 'changeRole' && selected && (
+        <ChangeRoleModal user={selected} onCancel={closeModal} onSave={handleRoleChange} />
+      )}
+
+      {activeModal === 'reassignArea' && selected && (
+        <ReassignAreaModal user={selected} onCancel={closeModal} onSave={handleReassignArea} />
+      )}
+
+      {activeModal === 'suspendAccount' && selected && (
+        <SuspendAccountModal user={selected} onCancel={closeModal} onConfirm={handleSuspendAccount} />
       )}
 
       {showAddModal && (
@@ -636,12 +714,142 @@ function AddUserModal({ onCancel, onSave }) {
           >
             Cancel
           </button>
-          <button
-             onClick={() => onSave(form)}
-             className="rounded-lg bg-[#1b4de4] px-4 py-2 text-sm font-medium text-white hover:bg-[#153eb8]"
-           >
-             Create user
-           </button>
+<button
+              onClick={() => onSave(form)}
+              className="rounded-lg bg-[#1b4de4] px-4 py-2 text-sm font-medium text-white hover:bg-[#153eb8]"
+            >
+              Create user
+            </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ResetPasswordModal({ user, onCancel, onConfirm }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
+      <div className="w-full max-w-sm rounded-xl bg-white p-6 border border-slate-200">
+        <div className="mb-4 flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-slate-800">Reset Password</h3>
+          <button onClick={onCancel} className="text-slate-400 hover:text-slate-600" aria-label="Close">
+            <X size={18} />
+          </button>
+        </div>
+        <p className="text-sm text-slate-600 mb-4">
+          Reset password for <strong>{user.name}</strong>? A new temporary password will be sent to {user.email}.
+        </p>
+        <div className="flex justify-end gap-2">
+          <button onClick={onCancel} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
+            Cancel
+          </button>
+          <button onClick={onConfirm} className="rounded-lg bg-[#1b4de4] px-4 py-2 text-sm font-medium text-white hover:bg-[#153eb8]">
+            Reset Password
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ChangeRoleModal({ user, onCancel, onSave }) {
+  const [selectedRole, setSelectedRole] = useState(user.role);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
+      <div className="w-full max-w-sm rounded-xl bg-white p-6 border border-slate-200">
+        <div className="mb-4 flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-slate-800">Change Role</h3>
+          <button onClick={onCancel} className="text-slate-400 hover:text-slate-600" aria-label="Close">
+            <X size={18} />
+          </button>
+        </div>
+        <p className="text-sm text-slate-600 mb-3">
+          Change role for <strong>{user.name}</strong>
+        </p>
+        <div className="mb-4">
+          <label className="mb-1 block text-xs font-medium text-slate-500">New Role</label>
+          <select
+            value={selectedRole}
+            onChange={(e) => setSelectedRole(e.target.value)}
+            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
+          >
+            <option>Admin</option>
+            <option>Mayor</option>
+            <option>Spearhead</option>
+            <option>Barangay</option>
+          </select>
+        </div>
+        <div className="flex justify-end gap-2">
+          <button onClick={onCancel} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
+            Cancel
+          </button>
+          <button onClick={() => onSave(selectedRole)} className="rounded-lg bg-[#1b4de4] px-4 py-2 text-sm font-medium text-white hover:bg-[#153eb8]">
+            Save
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ReassignAreaModal({ user, onCancel, onSave }) {
+  const [location, setLocation] = useState(user.location || '');
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
+      <div className="w-full max-w-sm rounded-xl bg-white p-6 border border-slate-200">
+        <div className="mb-4 flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-slate-800">Reassign Area</h3>
+          <button onClick={onCancel} className="text-slate-400 hover:text-slate-600" aria-label="Close">
+            <X size={18} />
+          </button>
+        </div>
+        <p className="text-sm text-slate-600 mb-3">
+          Reassign area for <strong>{user.name}</strong>
+        </p>
+        <div className="mb-4">
+          <label className="mb-1 block text-xs font-medium text-slate-500">Assigned Location</label>
+          <input
+            value={location}
+            onChange={(e) => setLocation(e.target.value)}
+            placeholder="Enter location"
+            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
+          />
+        </div>
+        <div className="flex justify-end gap-2">
+          <button onClick={onCancel} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
+            Cancel
+          </button>
+          <button onClick={() => onSave(location)} className="rounded-lg bg-[#1b4de4] px-4 py-2 text-sm font-medium text-white hover:bg-[#153eb8]">
+            Save
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SuspendAccountModal({ user, onCancel, onConfirm }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
+      <div className="w-full max-w-sm rounded-xl bg-white p-6 border border-slate-200">
+        <div className="mb-4 flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-slate-800">Suspend Account</h3>
+          <button onClick={onCancel} className="text-slate-400 hover:text-slate-600" aria-label="Close">
+            <X size={18} />
+          </button>
+        </div>
+        <p className="text-sm text-slate-600 mb-4">
+          Suspend account for <strong>{user.name}</strong>? This will archive the account and prevent login.
+        </p>
+        <div className="flex justify-end gap-2">
+          <button onClick={onCancel} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
+            Cancel
+          </button>
+          <button onClick={onConfirm} className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700">
+            Suspend Account
+          </button>
         </div>
       </div>
     </div>
