@@ -1,147 +1,71 @@
-import random
-import string
-
-from django.contrib.auth.hashers import make_password
-from django.utils import timezone
 from rest_framework import serializers
-
-from .models import Barangay, Boat, CleanupRequest, DetectionEvent, Operator, ScheduledBot, ScheduledCleanup, User
-
+from .models import Boat, DetectionEvent, User, Operator, Request, StatusHistory, Photo, DeploymentSchedule, LandfillRecord, RecyclingRecord, SegregationRecord, AuditLog, HeatmapData
 
 class DetectionEventSerializer(serializers.ModelSerializer):
     class Meta:
         model = DetectionEvent
         fields = ['id', 'boat', 'timestamp', 'latitude', 'longitude', 'trash_count']
 
+class BoatSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Boat
+        fields = ['id', 'name', 'is_active', 'archived', 'last_latitude', 'last_longitude', 'battery_level', 'last_seen']
 
 class UserSerializer(serializers.ModelSerializer):
-    is_signed_in = serializers.SerializerMethodField()
-
     class Meta:
         model = User
-        fields = [
-            'user_id', 'username', 'email', 'role',
-            'full_name', 'is_active', 'created_at', 'last_login', 'is_signed_in',
-        ]
-
-    def get_is_signed_in(self, obj):
-        if not obj.last_login:
-            return False
-        now = timezone.now()
-        diff = (now - obj.last_login).total_seconds()
-        return diff < 300
-
-
-class CreateUserSerializer(serializers.ModelSerializer):
-    """Serializer for creating a new user — hashes password and generates user_id."""
-
-    password = serializers.CharField(write_only=True, min_length=6)
-    confirm_password = serializers.CharField(write_only=True)
-
-    class Meta:
-        model = User
-        fields = ['username', 'email', 'role', 'full_name', 'password', 'confirm_password']
-
-    def validate(self, data):
-        if data['password'] != data['confirm_password']:
-            raise serializers.ValidationError({'confirm_password': 'Passwords do not match.'})
-        return data
-
-    def create(self, validated_data):
-        validated_data.pop('confirm_password')
-        password = validated_data.pop('password')
-
-        while True:
-            uid = ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
-            if not User.objects.filter(user_id=uid).exists():
-                break
-
-        user = User.objects.create(
-            user_id=uid,
-            password_hash=make_password(password),
-            **validated_data,
-        )
-        return user
-
-
-class LoginSerializer(serializers.Serializer):
-    username = serializers.CharField()
-    password = serializers.CharField(write_only=True)
-
-
-class BarangaySerializer(serializers.ModelSerializer):
-    spearhead_id = serializers.PrimaryKeyRelatedField(
-        queryset=User.objects.all(),
-        allow_null=True,
-        required=False,
-    )
-
-    class Meta:
-        model = Barangay
-        fields = ['barangay_id', 'barangay_name', 'latitude', 'longitude', 'spearhead_id', 'created_at']
-
+        fields = ['id', 'name', 'email', 'role', 'status', 'location', 'date_created']
 
 class OperatorSerializer(serializers.ModelSerializer):
     class Meta:
         model = Operator
-        fields = ['id', 'name', 'status', 'availability']
+        fields = ['id', 'operator_id', 'name', 'status', 'assigned_bot', 'availability', 'archived']
 
+class StatusHistorySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = StatusHistory
+        fields = ['id', 'request', 'label', 'date', 'actor', 'role', 'state']
 
-class BoatSerializer(serializers.ModelSerializer):
-    operator = OperatorSerializer(read_only=True)
+class PhotoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Photo
+        fields = ['id', 'request', 'photo_id', 'label', 'date']
+
+class RequestSerializer(serializers.ModelSerializer):
+    status_history = StatusHistorySerializer(many=True, read_only=True)
+    photos = PhotoSerializer(many=True, read_only=True)
 
     class Meta:
-        model = Boat
-        fields = ['id', 'name', 'is_active', 'last_latitude', 'last_longitude', 'battery_level', 'last_seen', 'operator']
+        model = Request
+        fields = ['id', 'request_id', 'request_type', 'status', 'date_submitted', 'requested_by_name', 'requested_by_role', 'requested_by_barangay', 'contact', 'email', 'location_name', 'barangay', 'municipality', 'province', 'notes', 'letter_file_name', 'letter_size', 'bot_id', 'operator', 'bags', 'weight_kg', 'non_usable_kg', 'recyclable_kg', 'status_history', 'photos']
 
-
-class CleanupRequestSerializer(serializers.ModelSerializer):
-    spearhead_username = serializers.CharField(source='spearhead.username', read_only=True)
-    spearhead_full_name = serializers.CharField(source='spearhead.full_name', read_only=True)
-    barangay_name = serializers.CharField(source='barangay.barangay_name', read_only=True)
-    media_url = serializers.SerializerMethodField()
-
+class DeploymentScheduleSerializer(serializers.ModelSerializer):
     class Meta:
-        model = CleanupRequest
-        fields = [
-            'request_id', 'spearhead', 'spearhead_username', 'spearhead_full_name',
-            'barangay', 'barangay_name', 'description', 'media_type', 'media', 'media_url',
-            'status', 'created_at', 'accepted_at', 'admin_note',
-        ]
+        model = DeploymentSchedule
+        fields = ['id', 'bot', 'day', 'status', 'label', 'zone']
 
-    def get_media_url(self, obj):
-        if obj.media:
-            request = self.context.get('request')
-            if request:
-                return request.build_absolute_uri(obj.media.url)
-            return obj.media.url
-        return None
-
-
-class ScheduledBotSerializer(serializers.ModelSerializer):
-    bot_name = serializers.CharField(source='bot.name', read_only=True)
-    operator_name = serializers.SerializerMethodField()
-    operator_status = serializers.SerializerMethodField()
-
+class LandfillRecordSerializer(serializers.ModelSerializer):
     class Meta:
-        model = ScheduledBot
-        fields = ['id', 'bot', 'bot_name', 'operator_name', 'operator_status']
+        model = LandfillRecord
+        fields = ['id', 'record_id', 'barangay', 'date', 'bags', 'weight_kg', 'bot', 'operator', 'vehicle', 'disposed_by']
 
-    def get_operator_name(self, obj):
-        if obj.bot.operator:
-            return obj.bot.operator.name
-        return None
-
-    def get_operator_status(self, obj):
-        if obj.bot.operator:
-            return obj.bot.operator.status
-        return None
-
-
-class ScheduledCleanupSerializer(serializers.ModelSerializer):
-    request = CleanupRequestSerializer(read_only=True)
-    scheduled_bots = ScheduledBotSerializer(many=True, read_only=True)
-
+class RecyclingRecordSerializer(serializers.ModelSerializer):
     class Meta:
-        model = ScheduledCleanup
-        fields = ['schedule_id', 'request', 'scheduled_date', 'scheduled_bots', 'created_at']
+        model = RecyclingRecord
+        fields = ['id', 'record_id', 'barangay', 'date', 'bags', 'weight_kg', 'category', 'bot', 'operator', 'buyer', 'sold_at']
+
+class SegregationRecordSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SegregationRecord
+        fields = ['id', 'zone', 'date', 'total_bags', 'total_weight_kg', 'non_usable_weight_kg', 'recyclable_weight_kg', 'notes', 'created_at']
+
+class AuditLogSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AuditLog
+        fields = ['id', 'time', 'user', 'role', 'action', 'details', 'module', 'ip', 'status']
+
+
+class HeatmapDataSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = HeatmapData
+        fields = ['id', 'latitude', 'longitude', 'weight', 'source_type', 'timestamp']

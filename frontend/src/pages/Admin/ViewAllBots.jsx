@@ -78,11 +78,11 @@ const defaultBots = [
 ];
 
 const defaultOperators = [
-    { id: 'OP-001', name: 'Lorem Ipsum', status: 'online', assignedBot: 'TRD-001', availability: 'Assigned' },
-    { id: 'OP-002', name: 'Lorem Ipsum', status: 'offline', assignedBot: null, availability: 'Available' },
-    { id: 'OP-003', name: 'Lorem Ipsum', status: 'online', assignedBot: 'TRD-004', availability: 'Assigned' },
-    { id: 'OP-004', name: 'Lorem Ipsum', status: 'onleave', assignedBot: 'TRD-067', availability: 'Unavailable' },
-    { id: 'OP-005', name: 'Lorem Ipsum', status: 'online', assignedBot: null, availability: 'Available' }
+    { id: 'OP-001', name: 'Lorem Ipsum', status: 'available', assignedBot: 'TRD-001', availability: 'Assigned' },
+    { id: 'OP-002', name: 'Lorem Ipsum', status: 'unavailable', assignedBot: null, availability: 'Unavailable' },
+    { id: 'OP-003', name: 'Lorem Ipsum', status: 'available', assignedBot: 'TRD-004', availability: 'Assigned' },
+    { id: 'OP-004', name: 'Lorem Ipsum', status: 'unavailable', assignedBot: 'TRD-067', availability: 'Unavailable' },
+    { id: 'OP-005', name: 'Lorem Ipsum', status: 'available', assignedBot: null, availability: 'Available' }
 ];
 
 const getBotStatusBadgeClass = (status) => {

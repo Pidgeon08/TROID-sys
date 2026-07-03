@@ -1,647 +1,539 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from "react";
 import {
-  Film, MapPin, MessageSquarePlus, Search, Send, ShieldCheck,
-  ShieldX, Clock, Image as ImageIcon, X,
-  Bell, BellOff
-} from 'lucide-react';
-import { useNavigate, useLocation } from 'react-router-dom';
-import { useUserContext } from '../../components/Layout';
+  Search,
+  Filter,
+  FileText,
+  Clock,
+  CheckCircle2,
+  XCircle,
+  Eye,
+  ChevronLeft,
+  ChevronRight,
+  User,
+  MapPin,
+  Download,
+} from "lucide-react";
+import api from '../../services/api';
 
-const API_BASE = 'http://localhost:8000/api';
+const TABS = ["All Requests", "Pending", "Approved", "Declined"];
 
-const fmtDate = (d) => {
-  if (!d) return '—';
-  return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+function SummaryCard({ icon: Icon, label, value, sub }) {
+  return (
+    <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-6 flex items-center gap-4">
+      <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 shrink-0">
+        <Icon className="w-6 h-6" strokeWidth={2} />
+      </div>
+      <div className="min-w-0">
+        <p className="text-sm font-medium text-slate-600">{label}</p>
+        <p className="text-2xl font-bold text-slate-900 mt-1">{value}</p>
+        <p className="text-xs text-slate-400 mt-1">{sub}</p>
+      </div>
+    </div>
+  );
+}
+
+const Card = ({ title, children, className = "" }) => (
+  <div className={`bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-5 ${className}`}>
+    {title && <h3 className="text-sm font-semibold text-slate-800 mb-4">{title}</h3>}
+    {children}
+  </div>
+);
+
+const Field = ({ label, value }) => (
+  <div className="flex items-center justify-between py-2 text-sm">
+    <span className="text-slate-500">{label}</span>
+    <span className="font-medium text-slate-800 text-right">{value}</span>
+  </div>
+);
+
+function RequestDetailsModal({ request, onClose }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 overflow-y-auto">
+      <div className="max-w-[1400px] mx-auto animate-fade-in pb-12 w-full bg-slate-50">
+        <button onClick={onClose} className="flex items-center gap-1.5 text-sm font-medium text-blue-600 hover:text-blue-700 mb-4 mt-4">
+          <ChevronLeft size={15} />
+          Back to Requests
+        </button>
+
+        <header className="mb-6 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2.5">
+              <h1 className="text-[28px] font-bold text-slate-900 tracking-tight leading-none">Request Details</h1>
+              <span className={`inline-block rounded-full px-2.5 py-1 text-xs font-medium ${STATUS_STYLES[request.status]}`}>
+                {request.status}
+              </span>
+            </div>
+            <p className="text-slate-500 text-sm mt-1.5 font-medium">
+              {request.id} &bull; {request.type}
+            </p>
+          </div>
+          <div className="flex items-center gap-2.5">
+            <button className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
+              <FileText size={15} />
+              Download All
+            </button>
+          </div>
+        </header>
+
+        <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr_360px] gap-5 items-start">
+          <div className="flex flex-col gap-5">
+            <Card title="Request Information">
+              <div className="divide-y divide-slate-100">
+                <Field label="Request ID" value={request.id} />
+                <Field label="Type of Request" value={request.type} />
+                <Field label="Status" value={
+                  <span className={`inline-flex items-center gap-1.5 font-medium ${
+                    request.status === "Pending" ? "text-amber-700" :
+                    request.status === "Approved" ? "text-emerald-700" :
+                    request.status === "Declined" ? "text-red-700" :
+                    "text-slate-700"
+                  }`}>
+                    <span className={`w-1.5 h-1.5 rounded-full ${
+                      request.status === "Pending" ? "bg-amber-500" :
+                      request.status === "Approved" ? "bg-emerald-500" :
+                      request.status === "Declined" ? "bg-red-500" :
+                      "bg-slate-500"
+                    }`} />
+                    {request.status}
+                  </span>
+                } />
+                <Field label="Date Submitted" value={request.dateSubmitted} />
+              </div>
+            </Card>
+
+            <Card title="Requested By">
+              <div className="flex items-start gap-3">
+                <div className="w-9 h-9 rounded-full bg-blue-50 flex items-center justify-center shrink-0">
+                  <User size={16} className="text-blue-600" />
+                </div>
+                <div className="text-sm">
+                  <p className="font-semibold text-slate-800">{request.requestedBy?.name}</p>
+                  <p className="text-slate-500 mt-0.5">{request.requestedBy?.role}</p>
+                  <p className="text-slate-500">{request.requestedBy?.barangay}</p>
+                  <p className="text-slate-500 mt-1.5">Contact No. {request.requestedBy?.contact}</p>
+                  <p className="text-slate-500">{request.requestedBy?.email}</p>
+                </div>
+              </div>
+            </Card>
+
+            <Card title="Location of Concern">
+              <div className="flex items-start gap-3">
+                <div className="w-9 h-9 rounded-full bg-emerald-50 flex items-center justify-center shrink-0">
+                  <MapPin size={16} className="text-emerald-600" />
+                </div>
+                <div className="text-sm">
+                  <p className="font-semibold text-slate-800">{request.location?.name}</p>
+                  <p className="text-slate-500 mt-0.5">{request.location?.barangay}</p>
+                  <p className="text-slate-500">{request.location?.municipality}</p>
+                  <p className="text-slate-500">{request.location?.province}</p>
+                </div>
+              </div>
+            </Card>
+
+            <Card title="Additional Notes">
+              <p className="text-sm text-slate-600 leading-relaxed bg-slate-50 rounded-lg p-3">{request.notes}</p>
+            </Card>
+          </div>
+
+          <Card title="Letter of Request" className="lg:sticky lg:top-5">
+            <div className="flex items-center justify-between rounded-lg border border-slate-100 bg-slate-50 px-3 py-2.5 mb-4">
+              <div className="flex items-center gap-2.5">
+                <FileText size={18} className="text-blue-600" />
+                <div className="text-sm">
+                  <p className="font-medium text-slate-800 leading-tight">{request.letter?.fileName}</p>
+                  <p className="text-slate-400 text-xs">PDF &bull; {request.letter?.size}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <button className="flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50">
+                  <Eye size={13} />
+                  Preview
+                </button>
+                <button className="flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50">
+                  <Download size={13} />
+                  Download
+                </button>
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-slate-100 bg-slate-100 p-6 min-h-[560px] flex flex-col">
+              <div className="bg-white rounded shadow-sm p-8 flex-1 text-sm text-slate-700 leading-relaxed">
+                <div className="flex items-start gap-3 mb-4">
+                  <div className="w-12 h-12 rounded-full border-2 border-blue-800 flex items-center justify-center text-[9px] text-center text-blue-800 font-semibold leading-tight shrink-0">
+                    SEAL
+                  </div>
+                  <div className="text-xs text-slate-500 leading-snug">
+                    Republic of the Philippines
+                    <br />
+                    Province of La Union
+                    <br />
+                    City of San Fernando
+                    <br />
+                    <span className="font-bold text-slate-800 text-sm">{request.location?.barangay?.toUpperCase()}</span>
+                  </div>
+                </div>
+                <p className="text-right text-xs text-slate-500 mb-4">{request.dateSubmitted}</p>
+                <p className="mb-3 text-xs text-slate-600">
+                  The Community Environment and
+                  <br />
+                  Natural Resources Office (CENRO)
+                  <br />
+                  San Fernando, La Union
+                </p>
+                <p className="font-semibold text-slate-800 mb-3 text-xs">Subject: Request for Assistance – {request.type}</p>
+                <p className="mb-3 text-xs">Dear Sir/Madam,</p>
+                <p className="mb-3 text-xs">{request.notes}</p>
+                <p className="mb-6 text-xs">Thank you very much for your immediate attention and support.</p>
+                <p className="text-xs">Respectfully yours,</p>
+                <p className="font-semibold text-slate-800 mt-6 text-xs">{request.requestedBy?.name}</p>
+                <p className="text-xs text-slate-500">
+                  {request.requestedBy?.role}
+                  <br />
+                  {request.requestedBy?.barangay}
+                </p>
+              </div>
+            </div>
+          </Card>
+
+          <div className="flex flex-col gap-5">
+            <Card>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-sm font-semibold text-slate-800">Photo Documentation</h3>
+                <span className={`inline-block rounded-full px-2.5 py-1 text-xs font-medium whitespace-nowrap ${
+                  request.status === "Approved" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"
+                }`}>
+                  {request.status === "Approved" ? "Deployed / Completed" : "Pending Review"}
+                </span>
+              </div>
+
+              {request.status === "Approved" && (
+                <div className="flex items-start gap-2.5 rounded-lg bg-emerald-50 border border-emerald-100 px-3 py-2.5 mb-4">
+                  <CheckCircle2 size={16} className="text-emerald-600 mt-0.5 shrink-0" />
+                  <p className="text-xs text-emerald-800 leading-relaxed">
+                    Clean-up and waste collection were already conducted.
+                    <br />
+                    <span className="text-emerald-600">Date Completed: {request.dateSubmitted}</span>
+                  </p>
+                </div>
+              )}
+
+              <div className="grid grid-cols-3 gap-2.5">
+                {(request.photos || []).map((photo) => (
+                  <div key={photo.id} className="group cursor-pointer">
+                    <div className="aspect-square rounded-lg bg-slate-200 overflow-hidden relative flex items-center justify-center">
+                      <span className="text-slate-400 text-[10px]">Photo {photo.id}</span>
+                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 flex items-center justify-center transition-colors">
+                        <Eye size={16} className="text-white opacity-0 group-hover:opacity-100 transition-opacity" />
+                      </div>
+                    </div>
+                    <p className="text-[11px] font-medium text-slate-700 mt-1.5 leading-tight">{photo.label}</p>
+                    <p className="text-[10px] text-slate-400">{photo.date}</p>
+                  </div>
+                ))}
+                {(request.photos || []).length === 0 && (
+                  <p className="text-xs text-slate-400 col-span-3">No photos uploaded yet.</p>
+                )}
+              </div>
+            </Card>
+
+            <Card title="Status History">
+              <div className="relative pl-5">
+                <div className="absolute left-[5px] top-1.5 bottom-1.5 w-px bg-slate-200" />
+                <div className="flex flex-col gap-5">
+                  {(request.statusHistory || []).map((step, i) => (
+                    <div key={i} className="relative">
+                      <span
+                        className={`absolute -left-5 top-0.5 w-2.5 h-2.5 rounded-full border-2 border-white ring-2 ${
+                          step.state === "current" ? "bg-emerald-500 ring-emerald-100" : "bg-blue-500 ring-blue-100"
+                        }`}
+                      />
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-semibold text-slate-800">{step.label}</p>
+                          <p className="text-xs text-slate-400 mt-0.5">{step.date}</p>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <p className="text-xs font-medium text-slate-600">{step.actor}</p>
+                          <p className="text-[11px] text-slate-400">{step.role}</p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </Card>
+          </div>
+        </div>
+
+        <div className="mt-6 bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-semibold text-slate-900">View Mode</h3>
+              <p className="text-xs text-slate-500 mt-1">CENRO is in view-only mode. The Mayor's Office is responsible for approving or declining requests.</p>
+            </div>
+            <div className="rounded-lg bg-blue-50 border border-blue-100 px-4 py-2.5 text-sm font-medium text-blue-700">
+              View Only
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const STATUS_STYLES = {
+  Pending: "bg-amber-50 text-amber-700",
+  Approved: "bg-emerald-50 text-emerald-700",
+  Declined: "bg-red-50 text-red-700",
 };
 
-const statusBadge = (status) => {
-  const map = {
-    pending: 'bg-amber-100 text-amber-800 border-amber-200',
-    accepted: 'bg-emerald-100 text-emerald-800 border-emerald-200',
-    rejected: 'bg-red-100 text-red-800 border-red-200',
-    scheduled: 'bg-blue-100 text-blue-800 border-blue-200',
-  };
-  return map[status] || 'bg-slate-100 text-slate-700 border-slate-200';
+const STATUS_DOT = {
+  Pending: "bg-amber-500",
+  Approved: "bg-emerald-500",
+  Declined: "bg-red-500",
 };
 
-const Requests = () => {
-  const { user } = useUserContext();
-  const navigate = useNavigate();
-  const location = useLocation();
-  const [role, setRole] = useState(user?.role || 'admin');
-  const [userId, setUserId] = useState(user?.user_id || '');
+export default function Requests({ userRole = "admin" }) {
+  const [activeTab, setActiveTab] = useState("All Requests");
+  const [currentPage, setCurrentPage] = useState(1);
+  const [selectedRequest, setSelectedRequest] = useState(null);
+  const [searchQuery, setSearchQuery] = useState("");
   const [requests, setRequests] = useState([]);
-  const [barangays, setBarangays] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [notifications, setNotifications] = useState([]);
-  const [polling, setPolling] = useState(true);
-  const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
 
-  // Form state
-  const [showForm, setShowForm] = useState(false);
-  const [newReq, setNewReq] = useState({ barangay_id: '', description: '', media_type: 'image' });
-  const [mediaFile, setMediaFile] = useState(null);
-  const [mediaPreview, setMediaPreview] = useState(null);
-  const [submitting, setSubmitting] = useState(false);
+  const isCenro = userRole === "admin";
+  const isBarangay = userRole === "barangay";
 
-  // Detail modal
-  const [selectedReq, setSelectedReq] = useState(null);
-
-  // Admin note
-  const [adminNote, setAdminNote] = useState('');
-  const [noteOpen, setNoteOpen] = useState(false);
-
-  // Reject reason
-  const [rejectReason, setRejectReason] = useState('');
-  const [rejectOpen, setRejectOpen] = useState(false);
-
-  const fileInputRef = useRef(null);
+  const title = "TROID Bot Requests";
+  const subtitle = "View TROID bot deployment requests from barangays. Status updates will appear here.";
 
   useEffect(() => {
-    if (user) {
-      setRole(user.role === 'officemayor' ? 'mayorsoffice' : user.role);
-      setUserId(user.user_id);
-    }
-  }, [user]);
-
-  const fetchRequests = async () => {
-    const params = new URLSearchParams();
-    if (role === 'spearhead' || role === 'mayorsoffice') {
-      params.set('role', role);
-      params.set('user_id', userId);
-    }
-    if (statusFilter) params.set('status', statusFilter);
-    const res = await fetch(`${API_BASE}/requests/?${params}`);
-    const data = await res.json();
-    setRequests(data);
-  };
-
-  const fetchBarangays = async () => {
-    const res = await fetch(`${API_BASE}/barangays/`);
-    const data = await res.json();
-    setBarangays(data);
-  };
-
-  useEffect(() => {
-    setLoading(true);
-    fetchRequests();
-    fetchBarangays();
-    setLoading(false);
-  }, [role, userId, statusFilter]);
-
-  // Polling for notifications (new pending requests for admin)
-  useEffect(() => {
-    if (!polling || role !== 'admin') return;
-    const interval = setInterval(async () => {
+    const fetchRequests = async () => {
       try {
-        const res = await fetch(`${API_BASE}/requests/?role=admin&status=pending`);
-        const data = await res.json();
-        const pending = data.filter(r => !notifications.find(n => n.request_id === r.request_id && n.read));
-        if (pending.length > 0) {
-          setNotifications(prev => [...pending.map(r => ({ ...r, read: false })), ...prev]);
-        }
-      } catch { /* ignore */ }
-    }, 30000);
-    return () => clearInterval(interval);
-  }, [polling, role]);
-
-  // Check for request_id in URL (redirect from accept)
-  useEffect(() => {
-    const params = new URLSearchParams(location.search);
-    const rid = params.get('request_id');
-    if (rid) {
-      setSelectedReq({ request_id: parseInt(rid) });
-    }
-  }, [location]);
-
-  const handleMediaChange = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    setMediaFile(file);
-    setMediaPreview(URL.createObjectURL(file));
-  };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!newReq.barangay_id || !newReq.description) return;
-    setSubmitting(true);
-    const formData = new FormData();
-    formData.append('spearhead_id', userId);
-    formData.append('barangay_id', newReq.barangay_id);
-    formData.append('description', newReq.description);
-    formData.append('media_type', newReq.media_type);
-    if (mediaFile) formData.append('media', mediaFile);
-
-    const res = await fetch(`${API_BASE}/requests/`, {
-      method: 'POST',
-      body: formData,
-    });
-    if (res.ok) {
-      setNewReq({ barangay_id: '', description: '', media_type: 'image' });
-      setMediaFile(null);
-      setMediaPreview(null);
-      setShowForm(false);
-      fetchRequests();
-    }
-    setSubmitting(false);
-  };
-
-  const handleAccept = async (req) => {
-    setAdminNote('');
-    setNoteOpen(true);
-    setSelectedReq(req);
-  };
-
-  const confirmAccept = async () => {
-    await fetch(`${API_BASE}/requests/${selectedReq.request_id}/`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: 'accepted', admin_note: adminNote }),
-    });
-    setNoteOpen(false);
-    setSelectedReq(null);
+        const res = await api.requests();
+        const mapped = Array.isArray(res) ? res.map((r) => ({
+          id: r.request_id,
+          type: r.request_type || "TROID Bot Deployment",
+          status: r.status.charAt(0).toUpperCase() + r.status.slice(1),
+          dateSubmitted: r.date_submitted
+            ? new Date(r.date_submitted).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+            : r.date_submitted,
+          requestedBy: {
+            name: r.requested_by_name || "",
+            role: r.requested_by_role || "",
+            barangay: r.requested_by_barangay || "",
+            contact: r.contact || "",
+            email: r.email || "",
+          },
+          location: {
+            name: r.location_name || "",
+            barangay: r.barangay || "",
+            municipality: r.municipality || "",
+            province: r.province || "",
+          },
+          notes: r.notes || "",
+          letter: {
+            fileName: r.letter_file_name || "",
+            size: r.letter_size || "",
+          },
+          photos: (r.photos || []).map(p => ({
+            id: p.photo_id || p.id,
+            label: p.label || "",
+            date: p.date || "",
+          })),
+          statusHistory: (r.status_history || []).map(sh => ({
+            label: sh.label || "",
+            date: sh.date
+              ? new Date(sh.date).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+              : sh.date,
+            actor: sh.actor || "",
+            role: sh.role || "",
+            state: sh.state || "done",
+          })),
+        })) : [];
+        setRequests(mapped);
+      } catch (err) {
+        console.error('Failed to fetch requests:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
     fetchRequests();
-    // Redirect to scheduling page with request_id
-    navigate(`/admin/collection?request_id=${selectedReq.request_id}`);
-  };
+  }, []);
 
-  const confirmReject = async () => {
-    await fetch(`${API_BASE}/requests/${selectedReq.request_id}/`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: 'rejected', admin_note: rejectReason }),
-    });
-    setRejectOpen(false);
-    setSelectedReq(null);
-    setRejectReason('');
-    fetchRequests();
-  };
-
-  const filtered = requests.filter(r => {
-    if (!search) return true;
-    const s = search.toLowerCase();
-    return (
-      (r.barangay_name && r.barangay_name.toLowerCase().includes(s)) ||
-      (r.spearhead_username && r.spearhead_username.toLowerCase().includes(s)) ||
-      (r.description && r.description.toLowerCase().includes(s))
-    );
+  const filteredRequests = requests.filter((req) => {
+    if (isBarangay) {
+      const name = req.requestedBy?.name || "";
+      const brgy = req.location?.barangay || "";
+      return name.toLowerCase().includes("santos") || brgy.toLowerCase().includes("carlatan");
+    }
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      return (
+        req.id.toLowerCase().includes(q) ||
+        req.type.toLowerCase().includes(q) ||
+        (req.requestedBy?.name || "").toLowerCase().includes(q)
+      );
+    }
+    return true;
   });
 
-  const getStatusIcon = (status) => {
-    switch (status) {
-      case 'accepted': return <ShieldCheck className="w-4 h-4 text-emerald-600" />;
-      case 'rejected': return <ShieldX className="w-4 h-4 text-red-600" />;
-      default: return <Clock className="w-4 h-4 text-amber-600" />;
-    }
-  };
+  const filteredByTab = activeTab === "All Requests"
+    ? filteredRequests
+    : filteredRequests.filter((r) => r.status === activeTab);
+
+  const paginated = filteredByTab.slice((currentPage - 1) * 5, currentPage * 5);
+
+  if (loading) {
+    return (
+      <div className="max-w-[1400px] mx-auto animate-fade-in pb-12 flex items-center justify-center min-h-[400px]">
+        <p className="text-lg font-semibold text-slate-500">Loading...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-[1400px] mx-auto animate-fade-in pb-12">
-      {/* HEADER */}
-      <header className="mb-6 flex justify-between items-center">
+      <header className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-[28px] font-bold text-slate-900 tracking-tight leading-none">Requests</h1>
-          <p className="text-slate-500 text-sm mt-1.5 font-medium">
-            {role === 'spearhead' || role === 'mayorsoffice'
-              ? 'Submit and track cleanup requests'
-              : 'Review and manage incoming cleanup requests'}
-          </p>
+          <h1 className="text-[28px] font-bold text-slate-900 tracking-tight leading-none">{title}</h1>
+          <p className="text-slate-500 text-sm mt-1.5 font-medium">{subtitle}</p>
         </div>
-        <div className="flex gap-3">
-          {role === 'admin' && (
-            <button
-              onClick={() => setPolling(!polling)}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold border transition-all cursor-pointer ${polling ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-slate-50 text-slate-600 border-slate-200'}`}
-            >
-              {polling ? <Bell className="w-4 h-4" /> : <BellOff className="w-4 h-4" />}
-              {polling ? 'Live' : 'Paused'}
-            </button>
-          )}
-          {(role === 'spearhead' || role === 'mayorsoffice') && (
-            <button
-              onClick={() => setShowForm(!showForm)}
-              className="bg-[#1b4de4] hover:bg-[#153eb8] text-white px-5 py-2.5 rounded-xl text-xs font-bold shadow-sm flex items-center gap-2 transition-all cursor-pointer"
-            >
-              <MessageSquarePlus className="w-4 h-4" />
-              New Request
+        <div className="flex items-center gap-2.5">
+          <div className="relative">
+            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              value={searchQuery}
+              onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(1); }}
+              placeholder="Search requests..."
+              className="w-56 rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm text-slate-700 placeholder:text-slate-400 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
+            />
+          </div>
+          {isCenro && (
+            <button className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
+              <Filter size={15} />
+              Filter
             </button>
           )}
         </div>
       </header>
 
-      {/* NEW REQUEST FORM */}
-      {showForm && (role === 'spearhead' || role === 'mayorsoffice') && (
-        <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-6 mb-6">
-          <h2 className="text-lg font-bold text-slate-900 mb-4">Submit Cleanup Request</h2>
-          <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-            <div>
-              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Location (Barangay)</label>
-              <select
-                required
-                value={newReq.barangay_id}
-                onChange={(e) => setNewReq({ ...newReq, barangay_id: e.target.value })}
-                className="w-full px-3.5 py-2.5 text-sm border border-slate-200 rounded-xl bg-white focus:outline-none focus:border-[#1b4de4]"
-              >
-                <option value="">Select barangay...</option>
-                {barangays.filter(b => role === 'spearhead' ? b.spearhead_id === user?.user_id || b.spearhead === userId : true).map(b => (
-                  <option key={b.barangay_id} value={b.barangay_id}>{b.barangay_name}</option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Description</label>
-              <textarea
-                required
-                value={newReq.description}
-                onChange={(e) => setNewReq({ ...newReq, description: e.target.value })}
-                placeholder="Describe the cleanup needed..."
-                className="w-full px-3.5 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-[#1b4de4] h-24 resize-none"
-              />
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Media Type</label>
-                <select
-                  value={newReq.media_type}
-                  onChange={(e) => setNewReq({ ...newReq, media_type: e.target.value })}
-                  className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl bg-white focus:outline-none focus:border-[#1b4de4]"
-                >
-                  <option value="image">Image</option>
-                  <option value="video">Video</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Upload File</label>
-                <div className="flex items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    className="flex items-center gap-2 px-4 py-2.5 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 hover:bg-slate-50 transition-all cursor-pointer"
-                  >
-                    {newReq.media_type === 'image' ? <ImageIcon className="w-4 h-4" /> : <Film className="w-4 h-4" />}
-                    Choose File
-                  </button>
-                  <span className="text-xs text-slate-500 truncate">
-                    {mediaFile ? mediaFile.name : 'No file selected'}
-                  </span>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept={newReq.media_type === 'image' ? 'image/*' : 'video/*'}
-                    onChange={handleMediaChange}
-                    className="hidden"
-                  />
-                </div>
-              </div>
-            </div>
-
-            {mediaPreview && (
-              <div className="relative w-fit">
-                {newReq.media_type === 'image' ? (
-                  <img src={mediaPreview} alt="Preview" className="h-32 rounded-xl border border-slate-200 object-cover" />
-                ) : (
-                  <video src={mediaPreview} controls className="h-32 rounded-xl border border-slate-200" />
-                )}
-                <button
-                  type="button"
-                  onClick={() => { setMediaFile(null); setMediaPreview(null); }}
-                  className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 hover:bg-red-600 transition-colors"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            )}
-
-            <div className="flex justify-end gap-3 mt-2 pt-4 border-t border-slate-100">
-              <button
-                type="button"
-                onClick={() => setShowForm(false)}
-                className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50 rounded-xl border border-slate-200 cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={submitting}
-                className="px-5 py-2 text-xs font-bold text-white bg-[#1b4de4] hover:bg-[#153eb8] rounded-xl shadow-sm cursor-pointer disabled:opacity-50"
-              >
-                {submitting ? 'Submitting...' : 'Submit Request'}
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
-
-      {/* FILTERS */}
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-4 mb-6 flex flex-col sm:flex-row gap-3">
-        <div className="relative flex-1">
-          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-          <input
-            type="text"
-            placeholder="Search by barangay, user, or description..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-[#1b4de4] bg-white"
-          />
-        </div>
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          className="px-4 py-2 text-sm border border-slate-200 rounded-xl bg-white text-slate-700 outline-none focus:border-[#1b4de4]"
-        >
-          <option value="">All Statuses</option>
-          <option value="pending">Pending</option>
-          <option value="accepted">Accepted</option>
-          <option value="rejected">Rejected</option>
-          <option value="scheduled">Scheduled</option>
-        </select>
+      <div className="mb-6 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
+        <SummaryCard icon={FileText} label="Total Requests" value={requests.length} sub="All time" />
+        <SummaryCard icon={Clock} label="Pending" value={requests.filter((r) => r.status === "Pending").length} sub="Awaiting review" />
+        <SummaryCard icon={CheckCircle2} label="Approved" value={requests.filter((r) => r.status === "Approved").length} sub="Ready for deployment" />
+        <SummaryCard icon={XCircle} label="Declined" value={requests.filter((r) => r.status === "Declined").length} sub="Declined" />
       </div>
 
-      {/* STATS */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
-        {['pending', 'accepted', 'rejected', 'scheduled'].map((s) => (
-          <div key={s} className="bg-white rounded-xl border border-slate-100 shadow-[0_2px_8px_rgba(0,0,0,0.04)] p-4">
-            <div className="flex items-center gap-2 mb-2">
-              {getStatusIcon(s)}
-              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">{s}</span>
-            </div>
-            <span className="text-2xl font-bold text-slate-900">
-              {requests.filter(r => r.status === s).length}
-            </span>
-          </div>
-        ))}
-      </div>
-
-      {/* NOTIFICATIONS */}
-      {(role === 'admin') && notifications.length > 0 && (
-        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 mb-6">
-          <div className="flex items-center gap-2 mb-3">
-            <Bell className="w-5 h-5 text-amber-600" />
-            <span className="text-sm font-bold text-amber-800">New Requests ({notifications.length})</span>
-          </div>
-          {notifications.slice(0, 5).map(n => (
-            <div key={n.request_id} className="flex items-center justify-between py-2 border-b border-amber-100 last:border-0">
-              <div>
-                <span className="text-sm font-semibold text-slate-800">#{n.request_id} — {n.barangay_name}</span>
-                <p className="text-xs text-slate-500 truncate max-w-md">{n.description}</p>
-              </div>
-              <button
-                onClick={() => { setSelectedReq(n); setNotifications(prev => prev.filter(x => x.request_id !== n.request_id)); }}
-                className="text-xs font-bold text-[#1b4de4] hover:underline whitespace-nowrap ml-3"
-              >
-                View
-              </button>
-            </div>
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] overflow-hidden">
+        <div className="flex items-center gap-6 px-5 border-b border-slate-100 overflow-x-auto">
+          {TABS.map((tab) => (
+            <button
+              key={tab}
+              onClick={() => { setActiveTab(tab); setCurrentPage(1); }}
+              className={`relative py-3.5 text-sm font-medium transition-colors whitespace-nowrap ${
+                activeTab === tab ? "text-blue-600" : "text-slate-500 hover:text-slate-700"
+              }`}
+            >
+              {tab}
+              {activeTab === tab && <span className="absolute left-0 right-0 -bottom-px h-[2px] bg-blue-600 rounded-full" />}
+            </button>
           ))}
         </div>
-      )}
 
-      {/* LOADING */}
-      {loading && <div className="text-center py-12 text-slate-400 font-semibold">Loading...</div>}
-
-      {/* REQUEST LIST */}
-      {!loading && filtered.length === 0 && (
-        <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-12 text-center">
-          <MessageSquarePlus className="w-12 h-12 mx-auto text-slate-300 mb-3" />
-          <p className="text-sm font-semibold text-slate-400">No requests found.</p>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-slate-100">
+                <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Request ID</th>
+                <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Type</th>
+                <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Requested By</th>
+                <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Barangay</th>
+                <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Date Submitted</th>
+                <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Status</th>
+                <th className="px-5 py-3 text-right text-xs font-semibold uppercase tracking-wider text-slate-400">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {paginated.map((req) => (
+                <tr key={req.id} className="border-t border-slate-50 hover:bg-slate-50/60 transition-colors">
+                  <td className="px-5 py-3.5 font-semibold text-slate-800">{req.id}</td>
+                  <td className="px-5 py-3.5 text-slate-600">{req.type}</td>
+                  <td className="px-5 py-3.5 text-slate-600">{req.requestedBy?.name}</td>
+                  <td className="px-5 py-3.5 text-slate-600">{req.location?.barangay}</td>
+                  <td className="px-5 py-3.5 text-slate-500">
+                    {req.dateSubmitted}
+                  </td>
+                  <td className="px-5 py-3.5">
+                    <span
+                      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${STATUS_STYLES[req.status]}`}
+                    >
+                      <span className={`w-1.5 h-1.5 rounded-full ${STATUS_DOT[req.status]}`} />
+                      {req.status}
+                    </span>
+                  </td>
+                  <td className="px-5 py-3.5">
+                    <div className="flex items-center justify-end gap-2">
+                      <button
+                        onClick={() => setSelectedRequest(req)}
+                        className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-blue-600 hover:bg-blue-50"
+                      >
+                        <Eye size={13} />
+                        View
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {paginated.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="px-5 py-10 text-center text-sm text-slate-400">
+                    No requests found.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </div>
-      )}
 
-      <div className="flex flex-col gap-4">
-        {filtered.map((r) => (
-          <div
-            key={r.request_id}
-            onClick={() => setSelectedReq(r)}
-            className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-5 hover:shadow-[0_8px_30px_rgba(0,0,0,0.06)] transition-all cursor-pointer"
-          >
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div className="flex items-start gap-4 flex-1 min-w-0">
-                <div className="shrink-0 w-12 h-12 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-center">
-                  {r.media_type === 'image' ? (
-                    <ImageIcon className="w-6 h-6 text-slate-400" />
-                  ) : (
-                    <Film className="w-6 h-6 text-slate-400" />
-                  )}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-sm font-bold text-slate-900">#{r.request_id}</span>
-                    <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${statusBadge(r.status)}`}>
-                      {r.status.toUpperCase()}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-3 text-xs text-slate-500">
-                    <span className="flex items-center gap-1">
-                      <MapPin className="w-3.5 h-3.5" />
-                      {r.barangay_name || '—'}
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <Clock className="w-3.5 h-3.5" />
-                      {fmtDate(r.created_at)}
-                    </span>
-                  </div>
-                  <p className="text-sm text-slate-600 mt-2 line-clamp-2">{r.description}</p>
-                </div>
-              </div>
-
-              {role === 'admin' && r.status === 'pending' && (
-                <div className="flex gap-2 shrink-0">
-                  <button
-                    onClick={(e) => { e.stopPropagation(); handleAccept(r); }}
-                    className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5"
-                  >
-                    <ShieldCheck className="w-3.5 h-3.5" />
-                    Accept
-                  </button>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); setSelectedReq(r); setRejectOpen(true); }}
-                    className="bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5"
-                  >
-                    <ShieldX className="w-3.5 h-3.5" />
-                    Reject
-                  </button>
-                </div>
-              )}
-
-              {role === 'admin' && r.status === 'accepted' && (
-                <button
-                  onClick={(e) => { e.stopPropagation(); navigate(`/admin/collection?request_id=${r.request_id}`); }}
-                  className="bg-[#1b4de4] hover:bg-[#153eb8] text-white px-4 py-2 rounded-xl text-xs font-bold shadow-sm transition-all cursor-pointer flex items-center gap-1.5 shrink-0"
-                >
-                  <Send className="w-3.5 h-3.5" />
-                  Schedule
-                </button>
-              )}
-            </div>
+        <div className="flex items-center justify-between px-5 py-3.5 border-t border-slate-100">
+          <p className="text-xs text-slate-500">Showing {filteredByTab.length === 0 ? 0 : (currentPage - 1) * 5 + 1}–{Math.min(currentPage * 5, filteredByTab.length)} of {filteredByTab.length} requests</p>
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              disabled={currentPage === 1}
+              className="w-7 h-7 flex items-center justify-center rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-40"
+            >
+              <ChevronLeft size={14} />
+            </button>
+            {[1, 2, 3].map((page) => (
+              <button
+                key={page}
+                onClick={() => setCurrentPage(page)}
+                className={`w-7 h-7 flex items-center justify-center rounded-md text-xs font-medium border ${
+                  currentPage === page ? "bg-blue-50 border-blue-200 text-blue-600" : "border-slate-200 text-slate-500 hover:bg-slate-50"
+                }`}
+              >
+                {page}
+              </button>
+            ))}
+            <button
+              onClick={() => setCurrentPage((p) => Math.min(Math.ceil(filteredByTab.length / 5), p + 1))}
+              disabled={currentPage >= Math.ceil(filteredByTab.length / 5)}
+              className="w-7 h-7 flex items-center justify-center rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-40"
+            >
+              <ChevronRight size={14} />
+            </button>
           </div>
-        ))}
+        </div>
       </div>
 
-      {/* DETAIL MODAL */}
-      {selectedReq && !noteOpen && !rejectOpen && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl border border-slate-100 overflow-hidden animate-fade-in flex flex-col max-h-[90vh]">
-            <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50 shrink-0">
-              <div>
-                <h3 className="text-base font-bold text-slate-900">Request #{selectedReq.request_id}</h3>
-                <p className="text-xs text-slate-400 mt-0.5">Submitted {fmtDate(selectedReq.created_at)}</p>
-              </div>
-              <button onClick={() => { setSelectedReq(null); setNoteOpen(false); setRejectOpen(false); }} className="text-slate-400 hover:text-slate-600">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="p-5 overflow-y-auto flex-1">
-              <div className="grid grid-cols-2 gap-4 mb-4">
-                <div>
-                  <span className="text-xs font-bold text-slate-400 uppercase">Status</span>
-                  <p className={`mt-1 inline-flex px-2.5 py-0.5 rounded-full text-xs font-bold border ${statusBadge(selectedReq.status)}`}>
-                    {selectedReq.status.toUpperCase()}
-                  </p>
-                </div>
-                <div>
-                  <span className="text-xs font-bold text-slate-400 uppercase">Barangay</span>
-                  <p className="mt-1 text-sm font-bold text-slate-800 flex items-center gap-1">
-                    <MapPin className="w-3.5 h-3.5 text-slate-400" /> {selectedReq.barangay_name || '—'}
-                  </p>
-                </div>
-                <div>
-                  <span className="text-xs font-bold text-slate-400 uppercase">Submitted By</span>
-                  <p className="mt-1 text-sm font-bold text-slate-800">{selectedReq.spearhead_full_name || selectedReq.spearhead_username || '—'}</p>
-                </div>
-                <div>
-                  <span className="text-xs font-bold text-slate-400 uppercase">Accepted At</span>
-                  <p className="mt-1 text-sm font-bold text-slate-800">{selectedReq.accepted_at ? fmtDate(selectedReq.accepted_at) : '—'}</p>
-                </div>
-              </div>
-
-              <div className="mb-4">
-                <span className="text-xs font-bold text-slate-400 uppercase">Description</span>
-                <p className="mt-1 text-sm text-slate-700 bg-slate-50 p-3 rounded-xl border border-slate-100">{selectedReq.description}</p>
-              </div>
-
-              {selectedReq.admin_note && (
-                <div className="mb-4">
-                  <span className="text-xs font-bold text-slate-400 uppercase">Admin Note</span>
-                  <p className="mt-1 text-sm text-slate-700 bg-blue-50 p-3 rounded-xl border border-blue-100">{selectedReq.admin_note}</p>
-                </div>
-              )}
-
-              {selectedReq.media_url && (
-                <div>
-                  <span className="text-xs font-bold text-slate-400 uppercase">Media</span>
-                  <div className="mt-2">
-                    {selectedReq.media_type === 'image' ? (
-                      <img src={selectedReq.media_url} alt="Request" className="max-h-64 rounded-xl border border-slate-200 object-cover" />
-                    ) : (
-                      <video src={selectedReq.media_url} controls className="max-h-64 rounded-xl border border-slate-200 w-full" />
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {role === 'admin' && selectedReq.status === 'pending' && (
-              <div className="p-4 border-t border-slate-100 flex justify-end gap-3 shrink-0">
-                <button
-                  onClick={() => { setSelectedReq(selectedReq); setRejectOpen(true); }}
-                  className="px-4 py-2 text-xs font-bold text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 rounded-xl cursor-pointer"
-                >
-                  Reject
-                </button>
-                <button
-                  onClick={() => { setSelectedReq(selectedReq); setNoteOpen(true); }}
-                  className="px-4 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-sm cursor-pointer"
-                >
-                  Accept
-                </button>
-              </div>
-            )}
-
-            {role === 'admin' && selectedReq.status === 'accepted' && (
-              <div className="p-4 border-t border-slate-100 flex justify-end shrink-0">
-                <button
-                  onClick={() => navigate(`/admin/collection?request_id=${selectedReq.request_id}`)}
-                  className="px-4 py-2 text-xs font-bold text-white bg-[#1b4de4] hover:bg-[#153eb8] rounded-xl shadow-sm cursor-pointer flex items-center gap-2"
-                >
-                  <Send className="w-4 h-4" /> Schedule Cleanup
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* ACCEPT MODAL */}
-      {noteOpen && selectedReq && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md border border-slate-100 overflow-hidden animate-fade-in">
-            <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-              <h3 className="text-base font-bold text-slate-900">Accept Request #{selectedReq.request_id}</h3>
-              <button onClick={() => setNoteOpen(false)} className="text-slate-400 hover:text-slate-600">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <form onSubmit={(e) => { e.preventDefault(); confirmAccept(); }} className="p-5 flex flex-col gap-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Note to Spearhead (optional)</label>
-                <textarea
-                  value={adminNote}
-                  onChange={(e) => setAdminNote(e.target.value)}
-                  placeholder="Add a note..."
-                  className="w-full px-3.5 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-[#1b4de4] h-20 resize-none"
-                />
-              </div>
-              <div className="flex gap-3 justify-end">
-                <button type="button" onClick={() => setNoteOpen(false)} className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50 rounded-xl border border-slate-200 cursor-pointer">
-                  Cancel
-                </button>
-                <button type="submit" className="px-4 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-sm cursor-pointer">
-                  Confirm Accept
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* REJECT MODAL */}
-      {rejectOpen && selectedReq && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md border border-slate-100 overflow-hidden animate-fade-in">
-            <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-red-50">
-              <h3 className="text-base font-bold text-red-900">Reject Request #{selectedReq.request_id}</h3>
-              <button onClick={() => setRejectOpen(false)} className="text-red-400 hover:text-red-600">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <form onSubmit={(e) => { e.preventDefault(); confirmReject(); }} className="p-5 flex flex-col gap-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Reason (optional)</label>
-                <textarea
-                  value={rejectReason}
-                  onChange={(e) => setRejectReason(e.target.value)}
-                  placeholder="Reason for rejection..."
-                  className="w-full px-3.5 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-red-400 h-20 resize-none"
-                />
-              </div>
-              <div className="flex gap-3 justify-end">
-                <button type="button" onClick={() => setRejectOpen(false)} className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50 rounded-xl border border-slate-200 cursor-pointer">
-                  Cancel
-                </button>
-                <button type="submit" className="px-4 py-2 text-xs font-bold text-white bg-red-600 hover:bg-red-700 rounded-xl shadow-sm cursor-pointer">
-                  Confirm Reject
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+      {selectedRequest && (
+        <RequestDetailsModal
+          request={selectedRequest}
+          onClose={() => setSelectedRequest(null)}
+        />
       )}
     </div>
   );
-};
-
-export default Requests;
+}
