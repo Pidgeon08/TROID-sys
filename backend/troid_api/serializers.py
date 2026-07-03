@@ -9,7 +9,7 @@ class DetectionEventSerializer(serializers.ModelSerializer):
 class BoatSerializer(serializers.ModelSerializer):
     class Meta:
         model = Boat
-        fields = ['id', 'name', 'is_active', 'last_latitude', 'last_longitude', 'battery_level', 'last_seen']
+        fields = ['id', 'name', 'is_active', 'archived', 'last_latitude', 'last_longitude', 'battery_level', 'last_seen']
 
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
@@ -19,7 +19,7 @@ class UserSerializer(serializers.ModelSerializer):
 class OperatorSerializer(serializers.ModelSerializer):
     class Meta:
         model = Operator
-        fields = ['id', 'name', 'status', 'assigned_bot', 'availability']
+        fields = ['id', 'operator_id', 'name', 'status', 'assigned_bot', 'availability', 'archived']
 
 class StatusHistorySerializer(serializers.ModelSerializer):
     class Meta:

@@ -5,13 +5,15 @@ import api from '../../services/api';
 const ROLE_STYLES = {
   Admin: "bg-blue-50 text-blue-700",
   Mayor: "bg-amber-50 text-amber-800",
-  Viewer: "bg-slate-100 text-slate-600",
+  Spearhead: "bg-purple-50 text-purple-700",
+  Barangay: "bg-emerald-50 text-emerald-700",
 };
 
 const STATUS_STYLES = {
   Active: "bg-green-50 text-green-800",
   Pending: "bg-amber-50 text-amber-800",
   Offline: "bg-red-50 text-red-800",
+  Archived: "bg-slate-100 text-slate-600",
 };
 
 const QUICK_ACTIONS = ["Reset password", "Change role", "Reassign area", "Suspend account"];
@@ -24,9 +26,9 @@ export default function UserManagement() {
   const [statusFilter, setStatusFilter] = useState("All status");
   const [selectedId, setSelectedId] = useState(null);
   const [users, setUsers] = useState([]);
-  const [archivedIds, setArchivedIds] = useState([]);
   const [showArchived, setShowArchived] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
+  const [showAddModal, setShowAddModal] = useState(false);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [pendingApproval, setPendingApproval] = useState(0);
@@ -44,7 +46,7 @@ export default function UserManagement() {
             .replace('spearhead', 'Spearhead')
             .replace('barangay', 'Barangay')
             .replace('admin', 'Admin'),
-          status: u.status === 'active' ? 'Active' : u.status === 'pending' ? 'Pending' : u.status === 'offline' ? 'Offline' : u.status,
+          status: u.status === 'active' ? 'Active' : u.status === 'pending' ? 'Pending' : u.status === 'offline' ? 'Offline' : u.status === 'archived' ? 'Archived' : u.status,
           location: u.location || '—',
           date: u.date_created
             ? new Date(u.date_created).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' })
@@ -76,8 +78,8 @@ export default function UserManagement() {
   }, []);
 
   const scopedUsers = useMemo(
-    () => users.filter((u) => (showArchived ? archivedIds.includes(u.id) : !archivedIds.includes(u.id))),
-    [users, archivedIds, showArchived]
+    () => users.filter((u) => (showArchived ? u.status === 'Archived' : u.status !== 'Archived')),
+    [users, showArchived]
   );
 
   const filtered = useMemo(() => {
@@ -96,16 +98,65 @@ export default function UserManagement() {
 
   const selected = users.find((u) => u.id === selectedId) || null;
 
-  const handleArchiveToggle = (id) => {
-    setArchivedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  const handleArchiveToggle = async (user) => {
+    const newStatus = user.status === 'Archived' ? 'active' : 'archived';
+    try {
+      await api.updateUser(user.id, { status: newStatus });
+      setUsers((prev) => prev.map((u) => (u.id === user.id ? { ...u, status: newStatus === 'active' ? 'Active' : 'Archived' } : u)));
+    } catch (err) {
+      console.error('Failed to update user status:', err);
+      alert('Failed to update user status. Please try again.');
+    }
   };
 
-  const handleSaveEdit = (updated) => {
-    setUsers((prev) => prev.map((u) => (u.id === updated.id ? updated : u)));
-    setEditingUser(null);
+  const handleSaveEdit = async (updated) => {
+    try {
+      const payload = {
+        name: updated.name,
+        email: updated.email,
+        role: updated.role === 'Admin' ? 'admin' : updated.role === 'Mayor' ? 'mayorsoffice' : updated.role === 'Spearhead' ? 'spearhead' : updated.role === 'Barangay' ? 'barangay' : updated.role,
+        status: updated.status === 'Active' ? 'active' : updated.status === 'Pending' ? 'pending' : updated.status === 'Offline' ? 'offline' : updated.status === 'Archived' ? 'archived' : updated.status,
+        location: updated.location,
+      };
+      await api.updateUser(updated.id, payload);
+      setUsers((prev) => prev.map((u) => (u.id === updated.id ? { ...u, ...updated } : u)));
+      setEditingUser(null);
+    } catch (err) {
+      console.error('Failed to save user:', err);
+      alert('Failed to save user. Please try again.');
+    }
   };
 
-  const activeNow = users.filter((u) => u.status === "Active" && !archivedIds.includes(u.id)).length;
+  const handleAddUser = async (form) => {
+    try {
+      const payload = {
+        name: form.name,
+        email: form.email,
+        role: form.role === 'Admin' ? 'admin' : form.role === 'Mayor' ? 'mayorsoffice' : form.role === 'Spearhead' ? 'spearhead' : form.role === 'Barangay' ? 'barangay' : form.role,
+        status: form.status === 'Active' ? 'active' : form.status === 'Pending' ? 'pending' : form.status === 'Offline' ? 'offline' : 'active',
+        location: form.location || '',
+      };
+      const created = await api.createUser(payload);
+      const newUser = {
+        id: created.id,
+        name: created.name,
+        email: created.email,
+        role: created.role.replace('mayorsoffice', "Mayor").replace('spearhead', 'Spearhead').replace('barangay', 'Barangay').replace('admin', 'Admin'),
+        status: created.status === 'active' ? 'Active' : created.status === 'pending' ? 'Pending' : created.status === 'offline' ? 'Offline' : created.status === 'archived' ? 'Archived' : created.status,
+        location: created.location || '—',
+        date: new Date().toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' }),
+      };
+      setUsers((prev) => [newUser, ...prev]);
+      setShowAddModal(false);
+      setSelectedId(newUser.id);
+    } catch (err) {
+      console.error('Failed to create user:', err);
+      alert('Failed to create user. Please try again.');
+    }
+  };
+
+  const archivedCount = users.filter((u) => u.status === 'Archived').length;
+  const activeNow = users.filter((u) => u.status === "Active" && u.status !== 'Archived').length;
 
   if (loading) {
     return (
@@ -136,10 +187,11 @@ export default function UserManagement() {
                 : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
             }`}
           >
-            Archived ({archivedIds.length})
+            Archived ({archivedCount})
           </button>
           <button
             type="button"
+            onClick={() => setShowAddModal(true)}
             className="flex items-center gap-1.5 rounded-lg bg-[#1b4de4] px-3.5 py-2 text-sm font-medium text-white transition-colors hover:bg-[#153eb8]"
           >
             <Plus className="h-4 w-4" />
@@ -160,7 +212,7 @@ export default function UserManagement() {
               { icon: Users, label: "Total accounts", value: users.length, caption: "Registered accounts" },
               { icon: UserCheck, label: "Active now", value: activeNow, caption: "Signed in today" },
               { icon: Clock, label: "Pending approval", value: pendingApproval, caption: "Awaiting review" },
-              { icon: Ban, label: "Suspended", value: archivedIds.length, caption: "Archived accounts" },
+              { icon: Ban, label: "Suspended", value: archivedCount, caption: "Archived accounts" },
             ].map(({ icon: Icon, label, value, caption }) => (
               <div
                 key={label}
@@ -206,7 +258,8 @@ export default function UserManagement() {
                 <option>All roles</option>
                 <option>Admin</option>
                 <option>Mayor</option>
-                <option>Viewer</option>
+                <option>Spearhead</option>
+                <option>Barangay</option>
               </select>
               <select
                 value={statusFilter}
@@ -220,6 +273,7 @@ export default function UserManagement() {
                 <option>Active</option>
                 <option>Pending</option>
                 <option>Offline</option>
+                <option>Archived</option>
               </select>
             </div>
 
@@ -249,12 +303,12 @@ export default function UserManagement() {
                         <p className="text-xs text-slate-400">{u.email}</p>
                       </td>
                       <td className="px-4 py-2.5">
-                        <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${ROLE_STYLES[u.role]}`}>
+                        <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${ROLE_STYLES[u.role] || 'bg-slate-100 text-slate-600'}`}>
                           {u.role}
                         </span>
                       </td>
                       <td className="px-4 py-2.5">
-                        <span className={`inline-block rounded-full px-2.5 py-1 text-xs font-medium ${STATUS_STYLES[u.status]}`}>
+                        <span className={`inline-block rounded-full px-2.5 py-1 text-xs font-medium ${STATUS_STYLES[u.status] || 'bg-slate-100 text-slate-600'}`}>
                           {u.status}
                         </span>
                       </td>
@@ -276,15 +330,15 @@ export default function UserManagement() {
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              handleArchiveToggle(u.id);
+                              handleArchiveToggle(u);
                             }}
                             className={`flex h-7 w-7 items-center justify-center rounded-lg border transition-colors ${
-                              archivedIds.includes(u.id)
+                              u.status === 'Archived'
                                 ? "border-amber-300 bg-amber-50 text-amber-700"
                                 : "border-slate-200 text-slate-500 hover:border-red-300 hover:text-red-700"
                             }`}
-                            aria-label={archivedIds.includes(u.id) ? `Restore ${u.name}` : `Archive ${u.name}`}
-                            title={archivedIds.includes(u.id) ? "Restore" : "Archive"}
+                            aria-label={u.status === 'Archived' ? `Restore ${u.name}` : `Archive ${u.name}`}
+                            title={u.status === 'Archived' ? "Restore" : "Archive"}
                           >
                             <Archive size={14} />
                           </button>
@@ -361,7 +415,7 @@ className={`flex h-7 w-7 items-center justify-center rounded-md text-xs font-med
                   </p>
                   <p className="text-slate-600">
                     <span className="text-slate-400">Status: </span>
-                    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_STYLES[selected.status]}`}>
+                    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_STYLES[selected.status] || 'bg-slate-100 text-slate-600'}`}>
                       {selected.status}
                     </span>
                   </p>
@@ -411,6 +465,10 @@ className={`flex h-7 w-7 items-center justify-center rounded-md text-xs font-med
       {editingUser && (
         <EditUserModal user={editingUser} onCancel={() => setEditingUser(null)} onSave={handleSaveEdit} />
       )}
+
+      {showAddModal && (
+        <AddUserModal onCancel={() => setShowAddModal(false)} onSave={handleAddUser} />
+      )}
     </div>
   );
 }
@@ -454,7 +512,8 @@ function EditUserModal({ user, onCancel, onSave }) {
             >
               <option>Admin</option>
               <option>Mayor</option>
-              <option>Viewer</option>
+              <option>Spearhead</option>
+              <option>Barangay</option>
             </select>
           </div>
           <div>
@@ -464,10 +523,19 @@ function EditUserModal({ user, onCancel, onSave }) {
                 onChange={(e) => setForm({ ...form, status: e.target.value })}
                 className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
               >
-                <option>Pending</option>
                 <option>Active</option>
+                <option>Pending</option>
                 <option>Offline</option>
+                <option>Archived</option>
               </select>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-slate-500">Assigned location</label>
+            <input
+              value={form.location}
+              onChange={(e) => setForm({ ...form, location: e.target.value })}
+              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
+            />
           </div>
         </div>
 
@@ -478,11 +546,101 @@ function EditUserModal({ user, onCancel, onSave }) {
           >
             Cancel
           </button>
-<button
+          <button
              onClick={() => onSave(form)}
              className="rounded-lg bg-[#1b4de4] px-4 py-2 text-sm font-medium text-white hover:bg-[#153eb8]"
            >
              Save changes
+           </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AddUserModal({ onCancel, onSave }) {
+  const [form, setForm] = useState({
+    name: '',
+    email: '',
+    role: 'Barangay',
+    status: 'Active',
+    location: '',
+  });
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
+      <div className="w-full max-w-sm rounded-xl bg-white p-6 border border-slate-200">
+        <div className="mb-4 flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-slate-800">Add user</h3>
+          <button onClick={onCancel} className="text-slate-400 hover:text-slate-600" aria-label="Close">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="space-y-3">
+          <div>
+            <label className="mb-1 block text-xs font-medium text-slate-500">Name</label>
+            <input
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-slate-500">Email</label>
+            <input
+              value={form.email}
+              onChange={(e) => setForm({ ...form, email: e.target.value })}
+              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-slate-500">Role</label>
+            <select
+              value={form.role}
+              onChange={(e) => setForm({ ...form, role: e.target.value })}
+              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
+            >
+              <option>Admin</option>
+              <option>Mayor</option>
+              <option>Spearhead</option>
+              <option>Barangay</option>
+            </select>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-slate-500">Status</label>
+            <select
+              value={form.status}
+              onChange={(e) => setForm({ ...form, status: e.target.value })}
+              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
+            >
+              <option>Active</option>
+              <option>Pending</option>
+              <option>Offline</option>
+            </select>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-slate-500">Assigned location</label>
+            <input
+              value={form.location}
+              onChange={(e) => setForm({ ...form, location: e.target.value })}
+              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
+            />
+          </div>
+        </div>
+
+        <div className="mt-6 flex justify-end gap-2">
+          <button
+            onClick={onCancel}
+            className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
+          >
+            Cancel
+          </button>
+          <button
+             onClick={() => onSave(form)}
+             className="rounded-lg bg-[#1b4de4] px-4 py-2 text-sm font-medium text-white hover:bg-[#153eb8]"
+           >
+             Create user
            </button>
         </div>
       </div>

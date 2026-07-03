@@ -2,7 +2,8 @@ from django.db import models
 
 class Boat(models.Model):
     name = models.CharField(max_length=100)
-    is_active = models.BooleanField(default=True)
+    is_active = models.BooleanField(default=False)
+    archived = models.BooleanField(default=False)
     last_latitude = models.FloatField(null=True, blank=True)
     last_longitude = models.FloatField(null=True, blank=True)
     battery_level = models.FloatField(null=True, blank=True)
@@ -46,19 +47,27 @@ class User(models.Model):
 
 class Operator(models.Model):
     STATUS_CHOICES = [
-        ('online', 'Online'),
-        ('offline', 'Offline'),
-        ('onleave', 'On Leave'),
+        ('available', 'Available'),
+        ('unavailable', 'Unavailable'),
     ]
     AVAILABILITY_CHOICES = [
         ('assigned', 'Assigned'),
         ('available', 'Available'),
         ('unavailable', 'Unavailable'),
     ]
+    operator_id = models.CharField(max_length=10, unique=True)
     name = models.CharField(max_length=100)
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='online')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='available')
     assigned_bot = models.ForeignKey(Boat, on_delete=models.SET_NULL, null=True, blank=True, related_name='operators')
     availability = models.CharField(max_length=20, choices=AVAILABILITY_CHOICES, default='available')
+    archived = models.BooleanField(default=False)
+
+    def save(self, *args, **kwargs):
+        if not self.operator_id:
+            last_id = Operator.objects.exclude(pk=self.pk).order_by('-id').first()
+            next_num = (last_id.id + 1) if last_id else 1
+            self.operator_id = f'OP-{str(next_num).zfill(4)}'
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return self.name
