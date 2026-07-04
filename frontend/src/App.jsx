@@ -5,10 +5,13 @@ import Login from './pages/Login';
 import Dashboard from './pages/Admin/Dashboard';
 import HeatmapView from './pages/Admin/HeatmapView';
 import Reports from './pages/Admin/Reports';
+import SendReport from './pages/Admin/SendReport';
 import Settings from './pages/Admin/Settings';
 import ManageBots from './pages/Admin/Manage-bots';
 import UserManagement from './pages/Admin/UserManagement';
 import Requests from './pages/Admin/Requests';
+import ViewRequest from './pages/Admin/ViewRequest';
+import SendRequest from './pages/Admin/request/SendRequest';
 import CityHallDashboard from './pages/CityHall/Dashboard';
 import CityHallRequests from './pages/CityHall/Requests';
 import DeploymentSchedule from './pages/Admin/DeploymentSchedule';
@@ -61,7 +64,10 @@ function App() {
             <Route path="/admin/dashboard" element={<Dashboard />} />
             <Route path="/admin/manage-bots" element={<ManageBots />} />
             <Route path="/admin/users" element={<UserManagement />} />
+            <Route path="/admin/reports/send-report" element={<SendReport />} />
             <Route path="/admin/requests" element={<Requests userRole="admin" />} />
+            <Route path="/admin/requests/:id" element={<ViewRequest />} />
+            <Route path="/admin/request/send-request" element={<SendRequest />} />
             <Route path="/admin/deployment" element={<DeploymentSchedule />} />
             <Route path="/admin/collection-schedule" element={<CollectionSchedule />} />
             <Route path="/admin/heatmap" element={<HeatmapView />} />
@@ -81,6 +87,7 @@ function App() {
           {/* SPEARHEAD ROUTES */}
           <Route element={<ProtectedRoute isAuthenticated={isAuthenticated} userRole={userType} allowedRoles={['spearhead']} />}>
             <Route path="/spearhead/requests" element={<Requests userRole="spearhead" />} />
+            <Route path="/spearhead/requests/:id" element={<ViewRequest />} />
             <Route path="/spearhead/heatmap" element={<HeatmapView />} />
             <Route path="/spearhead/reports" element={<Reports />} />
           </Route>

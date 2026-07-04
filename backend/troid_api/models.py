@@ -81,19 +81,19 @@ class Request(models.Model):
         ('completed', 'Completed'),
         ('segregated', 'Segregated'),
     ]
-    request_id = models.CharField(max_length=20, unique=True)
-    request_type = models.CharField(max_length=50)
+    request_id = models.CharField(max_length=20, unique=True, blank=True)
+    request_type = models.CharField(max_length=50, default='Cleanup')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     date_submitted = models.DateTimeField(auto_now_add=True)
-    requested_by_name = models.CharField(max_length=100)
-    requested_by_role = models.CharField(max_length=50)
-    requested_by_barangay = models.CharField(max_length=100)
-    contact = models.CharField(max_length=20)
-    email = models.EmailField()
-    location_name = models.CharField(max_length=100)
-    barangay = models.CharField(max_length=100)
-    municipality = models.CharField(max_length=100)
-    province = models.CharField(max_length=100)
+    requested_by_name = models.CharField(max_length=100, blank=True)
+    requested_by_role = models.CharField(max_length=50, default='CENRO')
+    requested_by_barangay = models.CharField(max_length=100, blank=True)
+    contact = models.CharField(max_length=20, blank=True, default="")
+    email = models.EmailField(blank=True, null=True, default="")
+    location_name = models.CharField(max_length=100, blank=True)
+    barangay = models.CharField(max_length=100, blank=True)
+    municipality = models.CharField(max_length=100, blank=True)
+    province = models.CharField(max_length=100, blank=True)
     notes = models.TextField(blank=True)
     letter_file_name = models.CharField(max_length=100, blank=True)
     letter_size = models.CharField(max_length=20, blank=True)
@@ -103,6 +103,13 @@ class Request(models.Model):
     weight_kg = models.FloatField(null=True, blank=True)
     non_usable_kg = models.FloatField(null=True, blank=True)
     recyclable_kg = models.FloatField(null=True, blank=True)
+
+    def save(self, *args, **kwargs):
+        if not self.request_id:
+            last_req = Request.objects.exclude(pk=self.pk).order_by('-id').first()
+            next_num = (last_req.id + 1) if last_req else 1
+            self.request_id = f'REQ-{str(next_num).zfill(4)}'
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return self.request_id

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import {
+import { useNavigate } from "react-router-dom";
+import { 
   Search,
   Filter,
   FileText,
@@ -9,13 +10,23 @@ import {
   Eye,
   ChevronLeft,
   ChevronRight,
-  User,
-  MapPin,
-  Download,
+  Plus,
 } from "lucide-react";
 import api from '../../services/api';
 
 const TABS = ["All Requests", "Pending", "Approved", "Declined"];
+
+const STATUS_STYLES = {
+  Pending: "bg-amber-50 text-amber-700",
+  Approved: "bg-emerald-50 text-emerald-700",
+  Declined: "bg-red-50 text-red-700",
+};
+
+const STATUS_DOT = {
+  Pending: "bg-amber-500",
+  Approved: "bg-emerald-500",
+  Declined: "bg-red-500",
+};
 
 function SummaryCard({ icon: Icon, label, value, sub }) {
   return (
@@ -46,260 +57,13 @@ const Field = ({ label, value }) => (
   </div>
 );
 
-function RequestDetailsModal({ request, onClose }) {
-  return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 overflow-y-auto">
-      <div className="max-w-[1400px] mx-auto animate-fade-in pb-12 w-full bg-slate-50">
-        <button onClick={onClose} className="flex items-center gap-1.5 text-sm font-medium text-blue-600 hover:text-blue-700 mb-4 mt-4">
-          <ChevronLeft size={15} />
-          Back to Requests
-        </button>
-
-        <header className="mb-6 flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <div className="flex items-center gap-2.5">
-              <h1 className="text-[28px] font-bold text-slate-900 tracking-tight leading-none">Request Details</h1>
-              <span className={`inline-block rounded-full px-2.5 py-1 text-xs font-medium ${STATUS_STYLES[request.status]}`}>
-                {request.status}
-              </span>
-            </div>
-            <p className="text-slate-500 text-sm mt-1.5 font-medium">
-              {request.id} &bull; {request.type}
-            </p>
-          </div>
-          <div className="flex items-center gap-2.5">
-            <button className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
-              <FileText size={15} />
-              Download All
-            </button>
-          </div>
-        </header>
-
-        <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr_360px] gap-5 items-start">
-          <div className="flex flex-col gap-5">
-            <Card title="Request Information">
-              <div className="divide-y divide-slate-100">
-                <Field label="Request ID" value={request.id} />
-                <Field label="Type of Request" value={request.type} />
-                <Field label="Status" value={
-                  <span className={`inline-flex items-center gap-1.5 font-medium ${
-                    request.status === "Pending" ? "text-amber-700" :
-                    request.status === "Approved" ? "text-emerald-700" :
-                    request.status === "Declined" ? "text-red-700" :
-                    "text-slate-700"
-                  }`}>
-                    <span className={`w-1.5 h-1.5 rounded-full ${
-                      request.status === "Pending" ? "bg-amber-500" :
-                      request.status === "Approved" ? "bg-emerald-500" :
-                      request.status === "Declined" ? "bg-red-500" :
-                      "bg-slate-500"
-                    }`} />
-                    {request.status}
-                  </span>
-                } />
-                <Field label="Date Submitted" value={request.dateSubmitted} />
-              </div>
-            </Card>
-
-            <Card title="Requested By">
-              <div className="flex items-start gap-3">
-                <div className="w-9 h-9 rounded-full bg-blue-50 flex items-center justify-center shrink-0">
-                  <User size={16} className="text-blue-600" />
-                </div>
-                <div className="text-sm">
-                  <p className="font-semibold text-slate-800">{request.requestedBy?.name}</p>
-                  <p className="text-slate-500 mt-0.5">{request.requestedBy?.role}</p>
-                  <p className="text-slate-500">{request.requestedBy?.barangay}</p>
-                  <p className="text-slate-500 mt-1.5">Contact No. {request.requestedBy?.contact}</p>
-                  <p className="text-slate-500">{request.requestedBy?.email}</p>
-                </div>
-              </div>
-            </Card>
-
-            <Card title="Location of Concern">
-              <div className="flex items-start gap-3">
-                <div className="w-9 h-9 rounded-full bg-emerald-50 flex items-center justify-center shrink-0">
-                  <MapPin size={16} className="text-emerald-600" />
-                </div>
-                <div className="text-sm">
-                  <p className="font-semibold text-slate-800">{request.location?.name}</p>
-                  <p className="text-slate-500 mt-0.5">{request.location?.barangay}</p>
-                  <p className="text-slate-500">{request.location?.municipality}</p>
-                  <p className="text-slate-500">{request.location?.province}</p>
-                </div>
-              </div>
-            </Card>
-
-            <Card title="Additional Notes">
-              <p className="text-sm text-slate-600 leading-relaxed bg-slate-50 rounded-lg p-3">{request.notes}</p>
-            </Card>
-          </div>
-
-          <Card title="Letter of Request" className="lg:sticky lg:top-5">
-            <div className="flex items-center justify-between rounded-lg border border-slate-100 bg-slate-50 px-3 py-2.5 mb-4">
-              <div className="flex items-center gap-2.5">
-                <FileText size={18} className="text-blue-600" />
-                <div className="text-sm">
-                  <p className="font-medium text-slate-800 leading-tight">{request.letter?.fileName}</p>
-                  <p className="text-slate-400 text-xs">PDF &bull; {request.letter?.size}</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2 shrink-0">
-                <button className="flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50">
-                  <Eye size={13} />
-                  Preview
-                </button>
-                <button className="flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50">
-                  <Download size={13} />
-                  Download
-                </button>
-              </div>
-            </div>
-
-            <div className="rounded-lg border border-slate-100 bg-slate-100 p-6 min-h-[560px] flex flex-col">
-              <div className="bg-white rounded shadow-sm p-8 flex-1 text-sm text-slate-700 leading-relaxed">
-                <div className="flex items-start gap-3 mb-4">
-                  <div className="w-12 h-12 rounded-full border-2 border-blue-800 flex items-center justify-center text-[9px] text-center text-blue-800 font-semibold leading-tight shrink-0">
-                    SEAL
-                  </div>
-                  <div className="text-xs text-slate-500 leading-snug">
-                    Republic of the Philippines
-                    <br />
-                    Province of La Union
-                    <br />
-                    City of San Fernando
-                    <br />
-                    <span className="font-bold text-slate-800 text-sm">{request.location?.barangay?.toUpperCase()}</span>
-                  </div>
-                </div>
-                <p className="text-right text-xs text-slate-500 mb-4">{request.dateSubmitted}</p>
-                <p className="mb-3 text-xs text-slate-600">
-                  The Community Environment and
-                  <br />
-                  Natural Resources Office (CENRO)
-                  <br />
-                  San Fernando, La Union
-                </p>
-                <p className="font-semibold text-slate-800 mb-3 text-xs">Subject: Request for Assistance – {request.type}</p>
-                <p className="mb-3 text-xs">Dear Sir/Madam,</p>
-                <p className="mb-3 text-xs">{request.notes}</p>
-                <p className="mb-6 text-xs">Thank you very much for your immediate attention and support.</p>
-                <p className="text-xs">Respectfully yours,</p>
-                <p className="font-semibold text-slate-800 mt-6 text-xs">{request.requestedBy?.name}</p>
-                <p className="text-xs text-slate-500">
-                  {request.requestedBy?.role}
-                  <br />
-                  {request.requestedBy?.barangay}
-                </p>
-              </div>
-            </div>
-          </Card>
-
-          <div className="flex flex-col gap-5">
-            <Card>
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-sm font-semibold text-slate-800">Photo Documentation</h3>
-                <span className={`inline-block rounded-full px-2.5 py-1 text-xs font-medium whitespace-nowrap ${
-                  request.status === "Approved" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"
-                }`}>
-                  {request.status === "Approved" ? "Deployed / Completed" : "Pending Review"}
-                </span>
-              </div>
-
-              {request.status === "Approved" && (
-                <div className="flex items-start gap-2.5 rounded-lg bg-emerald-50 border border-emerald-100 px-3 py-2.5 mb-4">
-                  <CheckCircle2 size={16} className="text-emerald-600 mt-0.5 shrink-0" />
-                  <p className="text-xs text-emerald-800 leading-relaxed">
-                    Clean-up and waste collection were already conducted.
-                    <br />
-                    <span className="text-emerald-600">Date Completed: {request.dateSubmitted}</span>
-                  </p>
-                </div>
-              )}
-
-              <div className="grid grid-cols-3 gap-2.5">
-                {(request.photos || []).map((photo) => (
-                  <div key={photo.id} className="group cursor-pointer">
-                    <div className="aspect-square rounded-lg bg-slate-200 overflow-hidden relative flex items-center justify-center">
-                      <span className="text-slate-400 text-[10px]">Photo {photo.id}</span>
-                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 flex items-center justify-center transition-colors">
-                        <Eye size={16} className="text-white opacity-0 group-hover:opacity-100 transition-opacity" />
-                      </div>
-                    </div>
-                    <p className="text-[11px] font-medium text-slate-700 mt-1.5 leading-tight">{photo.label}</p>
-                    <p className="text-[10px] text-slate-400">{photo.date}</p>
-                  </div>
-                ))}
-                {(request.photos || []).length === 0 && (
-                  <p className="text-xs text-slate-400 col-span-3">No photos uploaded yet.</p>
-                )}
-              </div>
-            </Card>
-
-            <Card title="Status History">
-              <div className="relative pl-5">
-                <div className="absolute left-[5px] top-1.5 bottom-1.5 w-px bg-slate-200" />
-                <div className="flex flex-col gap-5">
-                  {(request.statusHistory || []).map((step, i) => (
-                    <div key={i} className="relative">
-                      <span
-                        className={`absolute -left-5 top-0.5 w-2.5 h-2.5 rounded-full border-2 border-white ring-2 ${
-                          step.state === "current" ? "bg-emerald-500 ring-emerald-100" : "bg-blue-500 ring-blue-100"
-                        }`}
-                      />
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="text-sm font-semibold text-slate-800">{step.label}</p>
-                          <p className="text-xs text-slate-400 mt-0.5">{step.date}</p>
-                        </div>
-                        <div className="text-right shrink-0">
-                          <p className="text-xs font-medium text-slate-600">{step.actor}</p>
-                          <p className="text-[11px] text-slate-400">{step.role}</p>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </Card>
-          </div>
-        </div>
-
-        <div className="mt-6 bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="text-sm font-semibold text-slate-900">View Mode</h3>
-              <p className="text-xs text-slate-500 mt-1">CENRO is in view-only mode. The Mayor's Office is responsible for approving or declining requests.</p>
-            </div>
-            <div className="rounded-lg bg-blue-50 border border-blue-100 px-4 py-2.5 text-sm font-medium text-blue-700">
-              View Only
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-const STATUS_STYLES = {
-  Pending: "bg-amber-50 text-amber-700",
-  Approved: "bg-emerald-50 text-emerald-700",
-  Declined: "bg-red-50 text-red-700",
-};
-
-const STATUS_DOT = {
-  Pending: "bg-amber-500",
-  Approved: "bg-emerald-500",
-  Declined: "bg-red-500",
-};
-
 export default function Requests({ userRole = "admin" }) {
   const [activeTab, setActiveTab] = useState("All Requests");
   const [currentPage, setCurrentPage] = useState(1);
-  const [selectedRequest, setSelectedRequest] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
+  const navigate = useNavigate();
 
   const isCenro = userRole === "admin";
   const isBarangay = userRole === "barangay";
@@ -369,14 +133,14 @@ export default function Requests({ userRole = "admin" }) {
     }
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
-      return (
-        req.id.toLowerCase().includes(q) ||
-        req.type.toLowerCase().includes(q) ||
-        (req.requestedBy?.name || "").toLowerCase().includes(q)
-      );
-    }
-    return true;
-  });
+        return (
+          req.id.toLowerCase().includes(q) ||
+          req.type.toLowerCase().includes(q) ||
+          (req.requestedBy?.name || "").toLowerCase().includes(q)
+        );
+      }
+      return true;
+    });
 
   const filteredByTab = activeTab === "All Requests"
     ? filteredRequests
@@ -400,6 +164,13 @@ export default function Requests({ userRole = "admin" }) {
           <p className="text-slate-500 text-sm mt-1.5 font-medium">{subtitle}</p>
         </div>
         <div className="flex items-center gap-2.5">
+          <button
+            onClick={() => navigate("/admin/request/send-request")}
+            className="flex items-center gap-2 rounded-lg bg-blue-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-blue-700"
+          >
+            <Plus size={15} />
+            Send Request
+          </button>
           <div className="relative">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
@@ -475,7 +246,7 @@ export default function Requests({ userRole = "admin" }) {
                   <td className="px-5 py-3.5">
                     <div className="flex items-center justify-end gap-2">
                       <button
-                        onClick={() => setSelectedRequest(req)}
+                        onClick={() => navigate(`/admin/requests/${req.id}`)}
                         className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-blue-600 hover:bg-blue-50"
                       >
                         <Eye size={13} />
@@ -527,13 +298,6 @@ export default function Requests({ userRole = "admin" }) {
           </div>
         </div>
       </div>
-
-      {selectedRequest && (
-        <RequestDetailsModal
-          request={selectedRequest}
-          onClose={() => setSelectedRequest(null)}
-        />
-      )}
     </div>
   );
 }

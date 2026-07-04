@@ -38,6 +38,18 @@ class RequestSerializer(serializers.ModelSerializer):
     class Meta:
         model = Request
         fields = ['id', 'request_id', 'request_type', 'status', 'date_submitted', 'requested_by_name', 'requested_by_role', 'requested_by_barangay', 'contact', 'email', 'location_name', 'barangay', 'municipality', 'province', 'notes', 'letter_file_name', 'letter_size', 'bot_id', 'operator', 'bags', 'weight_kg', 'non_usable_kg', 'recyclable_kg', 'status_history', 'photos']
+        extra_kwargs = {
+            'request_id': {'required': False, 'allow_blank': True},
+            'email': {'required': False, 'allow_blank': True},
+            'requested_by_name': {'required': False, 'allow_blank': True},
+            'requested_by_role': {'required': False, 'allow_blank': True},
+            'contact': {'required': False, 'allow_blank': True},
+            'location_name': {'required': False, 'allow_blank': True},
+            'requested_by_barangay': {'required': False, 'allow_blank': True},
+            'barangay': {'required': False, 'allow_blank': True},
+            'municipality': {'required': False, 'allow_blank': True},
+            'province': {'required': False, 'allow_blank': True},
+        }
 
 class DeploymentScheduleSerializer(serializers.ModelSerializer):
     class Meta:
