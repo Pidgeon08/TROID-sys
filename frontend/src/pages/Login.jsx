@@ -1,31 +1,33 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 const Login = ({ onLogin }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const navigate = useNavigate();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
     setLoading(true);
-    
+
     try {
-      let userType;
-      if ((email === 'admin' || email === 'admin@cenro.gov.ph') && password === 'admin123') {
-        userType = 'admin';
-      } else if ((email === 'mayor' || email === 'mayor@carlatan.gov.ph') && password === 'mayor123') {
-        userType = 'mayorsoffice';
-      } else if (email === 'barangay' && password === 'barangay123') {
-        userType = 'barangay';
-      } else {
-        setError('Invalid email or password');
+      const res = await fetch('http://localhost:8000/api/login/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || 'Login failed. Please try again.');
         setLoading(false);
         return;
       }
-      
-      await onLogin(userType);
+      const role = data.role || 'admin';
+      await onLogin(role, data);
+      navigate(`/${role === 'mayorsoffice' ? 'mayorsoffice/dashboard' : role === 'barangay' ? 'barangay/dashboard' : 'admin/requests'}`);
     } catch (err) {
       console.error('Login error:', err);
       setError('Login failed. Please try again.');

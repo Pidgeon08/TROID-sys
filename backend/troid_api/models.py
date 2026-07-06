@@ -1,4 +1,5 @@
 from django.db import models
+from django.contrib.auth.hashers import make_password, check_password
 
 class Boat(models.Model):
     name = models.CharField(max_length=100)
@@ -26,7 +27,6 @@ class User(models.Model):
     ROLE_CHOICES = [
         ('admin', 'Admin'),
         ('mayorsoffice', "Mayor's Office"),
-        ('spearhead', 'Spearhead'),
         ('barangay', 'Barangay'),
     ]
     STATUS_CHOICES = [
@@ -35,12 +35,32 @@ class User(models.Model):
         ('offline', 'Offline'),
         ('archived', 'Archived'),
     ]
+    user_id = models.CharField(max_length=10, unique=True, blank=True, null=True)
     name = models.CharField(max_length=100)
     email = models.EmailField(unique=True)
+    password = models.CharField(max_length=128, default='')
     role = models.CharField(max_length=20, choices=ROLE_CHOICES)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='active')
     location = models.CharField(max_length=100, blank=True)
     date_created = models.DateTimeField(auto_now_add=True)
+
+    TYPE_CODE_MAP = {
+        'admin': '03',
+        'mayorsoffice': '04',
+        'barangay': '05',
+    }
+
+    def save(self, *args, **kwargs):
+        if not self.user_id:
+            type_code = self.TYPE_CODE_MAP.get(self.role, '00')
+            from datetime import datetime
+            year_code = str(datetime.now().year)[-2:]
+            same_type_count = self.__class__.objects.filter(role=self.role).exclude(pk=self.pk).count()
+            nth = str(same_type_count).zfill(3)
+            self.user_id = f'{type_code}{year_code}{nth}'
+        if self.password and not self.password.startswith('pbkdf2_'):
+            self.password = make_password(self.password)
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return self.name
@@ -74,7 +94,8 @@ class Operator(models.Model):
 
 class Request(models.Model):
     STATUS_CHOICES = [
-        ('pending', 'Pending'),
+        ('pending_mayor_approval', 'Pending Mayor Approval'),
+        ('pending_admin_approval', 'Pending Admin Approval'),
         ('approved', 'Approved'),
         ('declined', 'Declined'),
         ('processing', 'Processing'),
@@ -83,10 +104,10 @@ class Request(models.Model):
     ]
     request_id = models.CharField(max_length=20, unique=True, blank=True)
     request_type = models.CharField(max_length=50, default='Cleanup')
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    status = models.CharField(max_length=30, choices=STATUS_CHOICES, default='pending_mayor_approval')
     date_submitted = models.DateTimeField(auto_now_add=True)
     requested_by_name = models.CharField(max_length=100, blank=True)
-    requested_by_role = models.CharField(max_length=50, default='CENRO')
+    requested_by_role = models.CharField(max_length=50, default='barangay')
     requested_by_barangay = models.CharField(max_length=100, blank=True)
     contact = models.CharField(max_length=20, blank=True, default="")
     email = models.EmailField(blank=True, null=True, default="")
@@ -130,6 +151,7 @@ class Photo(models.Model):
     label = models.CharField(max_length=100)
     date = models.CharField(max_length=50)
     photo_id = models.IntegerField()
+    image_data = models.TextField(blank=True)
 
     def __str__(self):
         return f"{self.request.request_id} - Photo {self.photo_id}"

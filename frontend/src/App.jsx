@@ -14,6 +14,7 @@ import ViewRequest from './pages/Admin/ViewRequest';
 import SendRequest from './pages/Admin/request/SendRequest';
 import CityHallDashboard from './pages/CityHall/Dashboard';
 import CityHallRequests from './pages/CityHall/Requests';
+import CityHallViewRequest from './pages/CityHall/ViewRequest';
 import DeploymentSchedule from './pages/Admin/DeploymentSchedule';
 import SegregationForm from './pages/Barangay/SegregationForm';
 import LandfillTracking from './pages/Admin/LandfillTracking';
@@ -23,9 +24,9 @@ import BarangayDashboard from './pages/Barangay/Dashboard';
 import BarangayRequestForm from './pages/Barangay/RequestForm';
 import BarangayHeatmap from './pages/Barangay/Heatmap';
 import BarangayRequests from './pages/Barangay/Requests';
+import BarangayViewRequest from './pages/Barangay/ViewRequest';
 import Layout from './components/Layout';
 import { ProtectedRoute } from './components/ProtectedRoute';
-import CollectionSchedule from './pages/Admin/CollectionSchedule';
 
 
 function App() {
@@ -33,11 +34,9 @@ function App() {
   const [userType, setUserType] = useState('admin');
   const [currentUser, setCurrentUser] = useState(null);
 
-  const handleLogin = async (type = 'admin') => {
+  const handleLogin = async (type = 'admin', userData = null) => {
     try {
-      const users = await api.users();
-      const user = users.find(u => u.role === type) || users[0];
-      
+      const user = userData || await api.users().then(users => users.find(u => u.role === type) || users[0]);
       setCurrentUser(user);
       setUserType(type);
       setIsAuthenticated(true);
@@ -63,13 +62,12 @@ function App() {
           <Route element={<ProtectedRoute isAuthenticated={isAuthenticated} userRole={userType} allowedRoles={['admin']} />}>
             <Route path="/admin/dashboard" element={<Dashboard />} />
             <Route path="/admin/manage-bots" element={<ManageBots />} />
-            <Route path="/admin/users" element={<UserManagement />} />
+            <Route path="/admin/users" element={<UserManagement currentUser={currentUser} />} />
             <Route path="/admin/reports/send-report" element={<SendReport />} />
             <Route path="/admin/requests" element={<Requests userRole="admin" />} />
             <Route path="/admin/requests/:id" element={<ViewRequest />} />
             <Route path="/admin/request/send-request" element={<SendRequest />} />
             <Route path="/admin/deployment" element={<DeploymentSchedule />} />
-            <Route path="/admin/collection-schedule" element={<CollectionSchedule />} />
             <Route path="/admin/heatmap" element={<HeatmapView />} />
             <Route path="/admin/reports" element={<Reports />} />
             <Route path="/admin/audit" element={<AuditLogs />} />
@@ -82,23 +80,17 @@ function App() {
           <Route element={<ProtectedRoute isAuthenticated={isAuthenticated} userRole={userType} allowedRoles={['mayorsoffice']} />}>
             <Route path="/mayorsoffice/dashboard" element={<CityHallDashboard />} />
             <Route path="/mayorsoffice/requests" element={<CityHallRequests />} />
-          </Route>
-
-          {/* SPEARHEAD ROUTES */}
-          <Route element={<ProtectedRoute isAuthenticated={isAuthenticated} userRole={userType} allowedRoles={['spearhead']} />}>
-            <Route path="/spearhead/requests" element={<Requests userRole="spearhead" />} />
-            <Route path="/spearhead/requests/:id" element={<ViewRequest />} />
-            <Route path="/spearhead/heatmap" element={<HeatmapView />} />
-            <Route path="/spearhead/reports" element={<Reports />} />
+            <Route path="/mayorsoffice/requests/:id" element={<CityHallViewRequest />} />
           </Route>
 
           {/* BARANGAY ROUTES */}
           <Route element={<ProtectedRoute isAuthenticated={isAuthenticated} userRole={userType} allowedRoles={['barangay']} />}>
-            <Route path="/barangay/dashboard" element={<BarangayDashboard />} />
-            <Route path="/barangay/request" element={<BarangayRequestForm />} />
+            <Route path="/barangay/dashboard" element={<BarangayDashboard currentUser={currentUser} />} />
+            <Route path="/barangay/request" element={<BarangayRequestForm currentUser={currentUser} />} />
             <Route path="/barangay/heatmap" element={<BarangayHeatmap />} />
             <Route path="/barangay/segregation" element={<SegregationForm />} />
-            <Route path="/barangay/requests" element={<BarangayRequests />} />
+            <Route path="/barangay/requests" element={<BarangayRequests currentUser={currentUser} />} />
+            <Route path="/barangay/requests/:id" element={<BarangayViewRequest />} />
           </Route>
 
         </Route>

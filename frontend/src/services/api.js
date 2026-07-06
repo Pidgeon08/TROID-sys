@@ -60,6 +60,9 @@ export const api = {
   createRequest: (data) => api.post('/requests/', data),
   updateRequest: (id, data) => api.put(`/requests/${id}/`, data),
   deleteRequest: (id) => api.delete(`/requests/${id}/`),
+  mayorApproveRequest: (id) => api.post(`/requests/${id}/mayor_approve/`),
+  adminApproveRequest: (id) => api.post(`/requests/${id}/admin_approve/`),
+  declineRequest: (id) => api.post(`/requests/${id}/decline/`),
 
   deploymentSchedules: () => api.get('/deployment-schedules/'),
   deploymentScheduleDetail: (id) => api.get(`/deployment-schedules/${id}/`),
@@ -90,6 +93,8 @@ export const api = {
 
   logDetection: (data) => api.post('/log-detection/', data),
   getHeatmap: () => api.get('/heatmap/'),
+
+  login: (data) => api.post('/login/', data),
 };
 
 export default api;

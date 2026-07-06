@@ -1,14 +1,14 @@
 import { NavLink } from 'react-router-dom';
-import { Home, Map, FileText, Settings as SettingsIcon, LogOut, Shield, ClipboardList, Users, Bot, InboxIcon, Send, CalendarClock, MapPin, Recycle } from 'lucide-react';
+import { Home, Map, FileText, Settings as SettingsIcon, LogOut, Shield, ClipboardList, Users, Bot, InboxIcon, Send, CalendarClock, Recycle } from 'lucide-react';
 
 const navItems = {
   admin: [
     { to: '/admin/dashboard', icon: Home, label: 'Dashboard' },
+    { to: '/admin/manage-bots', icon: Bot, label: 'Bot Management' },
     { to: '/admin/requests', icon: InboxIcon, label: 'Requests' },
+    { to: '/admin/users', icon: Users, label: 'User Management' },
     { to: '/admin/deployment', icon: CalendarClock, label: 'Deployment Schedule' },
     // { to: '/admin/collection-schedule', icon: CalendarClock, label: 'Collection Schedule' },
-    { to: '/admin/manage-bots', icon: Bot, label: 'Bot Management' },
-    { to: '/admin/users', icon: Users, label: 'User Management' },
     // { to: '/admin/landfill', icon: MapPin, label: 'Landfill Tracking' },
     // { to: '/admin/recycling', icon: Recycle, label: 'Recycling Center' },
     { to: '/admin/heatmap', icon: Map, label: 'Heatmap' },
@@ -19,11 +19,6 @@ const navItems = {
   mayorsoffice: [
     { to: '/mayorsoffice/dashboard', icon: Home, label: 'Dashboard' },
     { to: '/mayorsoffice/requests', icon: InboxIcon, label: 'Requests' },
-  ],
-  spearhead: [
-    { to: '/spearhead/requests', icon: InboxIcon, label: 'Requests' },
-    { to: '/spearhead/heatmap', icon: Map, label: 'Heatmap' },
-    { to: '/spearhead/reports', icon: FileText, label: 'Report Generation' },
   ],
   barangay: [
     { to: '/barangay/dashboard', icon: Home, label: 'Dashboard' },
@@ -37,13 +32,11 @@ const navItems = {
   const roleLabel = {
     admin: 'CENRO',
     mayorsoffice: 'Mayor\'s Office',
-    spearhead: 'Spearhead',
     barangay: 'Barangay',
   };
   const roleInitial = {
     admin: 'CE',
     mayorsoffice: 'MO',
-    spearhead: 'SH',
     barangay: 'BG',
   };
 

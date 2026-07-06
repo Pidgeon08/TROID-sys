@@ -6,7 +6,6 @@ import api from '../../services/api';
 const ROLE_LABELS = {
   admin: "Admin",
   mayorsoffice: "Mayor",
-  spearhead: "Spearhead",
   barangay: "Barangay",
   viewer: "Viewer",
 };

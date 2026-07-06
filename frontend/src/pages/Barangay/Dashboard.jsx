@@ -10,19 +10,21 @@ const STATUS_STYLES = {
   Processing: "bg-purple-50 text-purple-700",
 };
 
-const Dashboard = () => {
+const Dashboard = ({ currentUser }) => {
   const [barangayData, setBarangayData] = useState({});
   const [recentRequests, setRecentRequests] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
+      useEffect(() => {
     let cancelled = false;
     async function load() {
       try {
         const all = await api.requests();
-        const barangayRequests = all.filter((r) =>
-          (r.requested_by_barangay || "").toLowerCase().includes("carlatan")
-        );
+        const barangayName = (currentUser?.name || "").toLowerCase();
+        const barangayRequests = all.filter((r) => {
+          const reqBarangay = (r.requested_by_barangay || r.barangay || "").toLowerCase();
+          return reqBarangay.includes(barangayName);
+        });
 
         if (cancelled) return;
 
@@ -55,8 +57,8 @@ const Dashboard = () => {
 
         if (!cancelled) {
           setBarangayData({
-            name: "Carlatan",
-            address: "Carlatan Creek, San Fernando, La Union",
+            name: currentUser?.name || "Barangay",
+            address: currentUser?.location || "",
             stats: {
               totalRequests,
               pendingRequests,
@@ -97,7 +99,7 @@ const Dashboard = () => {
       <header className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-[28px] font-bold text-slate-900 tracking-tight leading-none">Barangay Dashboard</h1>
-          <p className="text-slate-500 text-sm mt-1.5 font-medium">{stats.address || "Carlatan Creek, San Fernando, La Union"}</p>
+          <p className="text-slate-500 text-sm mt-1.5 font-medium">{stats.address || currentUser?.location || ""}</p>
         </div>
         <a
           href="/barangay/request"

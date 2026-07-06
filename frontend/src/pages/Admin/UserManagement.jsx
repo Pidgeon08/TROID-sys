@@ -1,11 +1,15 @@
-import { useState, useMemo, useEffect } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { Search, Plus, User, Pencil, Archive, X, Users, UserCheck, Clock, Ban } from "lucide-react";
-import api from '../../services/api';
+import api from "../../services/api";
+import { useUsers } from "../../hooks/useUsers";
+import { Card } from "../../components/ui/Card";
+import { SearchBar } from "../../components/ui/SearchBar";
+import { Badge } from "../../components/ui/Badge";
+import { EmptyState } from "../../components/ui/EmptyState";
 
 const ROLE_STYLES = {
   Admin: "bg-blue-50 text-blue-700",
   Mayor: "bg-amber-50 text-amber-800",
-  Spearhead: "bg-purple-50 text-purple-700",
   Barangay: "bg-emerald-50 text-emerald-700",
 };
 
@@ -25,62 +29,20 @@ const QUICK_ACTIONS = [
 
 const PAGE_SIZE = 5;
 
-export default function UserManagement() {
+export default function UserManagement({ currentUser }) {
+  const { users, loading, selected, selectedId, setSelectedId, updateUser, addUser } = useUsers();
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState("All roles");
   const [statusFilter, setStatusFilter] = useState("All status");
-  const [selectedId, setSelectedId] = useState(null);
-  const [users, setUsers] = useState([]);
   const [showArchived, setShowArchived] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [activeModal, setActiveModal] = useState(null);
   const [page, setPage] = useState(1);
-  const [loading, setLoading] = useState(true);
   const [pendingApproval, setPendingApproval] = useState(0);
 
   useEffect(() => {
-    const fetchUsers = async () => {
-      try {
-        const res = await api.users();
-        const mapped = Array.isArray(res) ? res.map((u) => ({
-          id: u.id,
-          name: u.name,
-          email: u.email,
-          role: u.role
-            .replace('mayorsoffice', "Mayor")
-            .replace('spearhead', 'Spearhead')
-            .replace('barangay', 'Barangay')
-            .replace('admin', 'Admin'),
-          status: u.status === 'active' ? 'Active' : u.status === 'pending' ? 'Pending' : u.status === 'offline' ? 'Offline' : u.status === 'archived' ? 'Archived' : u.status,
-          location: u.location || '—',
-          date: u.date_created
-            ? new Date(u.date_created).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' })
-            : u.date_created,
-        })) : [];
-        setUsers(mapped);
-        if (mapped.length > 0 && selectedId === null) {
-          setSelectedId(mapped[0].id);
-        }
-      } catch (err) {
-        console.error('Failed to fetch users:', err);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchUsers();
-  }, [selectedId]);
-
-  useEffect(() => {
-    const fetchPendingCount = async () => {
-      try {
-        const res = await api.pendingUserCount();
-        setPendingApproval(res.pending_count || 0);
-      } catch (err) {
-        console.error('Failed to fetch pending count:', err);
-      }
-    };
-    fetchPendingCount();
+    api.pendingUserCount().then(res => setPendingApproval(res.pending_count || 0)).catch(() => {});
   }, []);
 
   const scopedUsers = useMemo(
@@ -102,13 +64,16 @@ export default function UserManagement() {
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
-  const selected = users.find((u) => u.id === selectedId) || null;
+  const goTo = (p) => setPage(Math.max(1, Math.min(totalPages, p)));
 
   const handleArchiveToggle = async (user) => {
+    if (currentUser && String(user.id) === String(currentUser.id)) {
+      return;
+    }
     const newStatus = user.status === 'Archived' ? 'active' : 'archived';
     try {
       await api.updateUser(user.id, { status: newStatus });
-      setUsers((prev) => prev.map((u) => (u.id === user.id ? { ...u, status: newStatus === 'active' ? 'Active' : 'Archived' } : u)));
+      updateUser(user.id, { status: newStatus === 'active' ? 'Active' : 'Archived' });
     } catch (err) {
       console.error('Failed to update user status:', err);
       alert('Failed to update user status. Please try again.');
@@ -120,12 +85,12 @@ export default function UserManagement() {
       const payload = {
         name: updated.name,
         email: updated.email,
-        role: updated.role === 'Admin' ? 'admin' : updated.role === 'Mayor' ? 'mayorsoffice' : updated.role === 'Spearhead' ? 'spearhead' : updated.role === 'Barangay' ? 'barangay' : updated.role,
+        role: updated.role === 'Admin' ? 'admin' : updated.role === 'Mayor' ? 'mayorsoffice' : updated.role === 'Barangay' ? 'barangay' : updated.role,
         status: updated.status === 'Active' ? 'active' : updated.status === 'Pending' ? 'pending' : updated.status === 'Offline' ? 'offline' : updated.status === 'Archived' ? 'archived' : updated.status,
         location: updated.location,
       };
       await api.updateUser(updated.id, payload);
-      setUsers((prev) => prev.map((u) => (u.id === updated.id ? { ...u, ...updated } : u)));
+      updateUser(updated.id, updated);
       setEditingUser(null);
     } catch (err) {
       console.error('Failed to save user:', err);
@@ -138,7 +103,7 @@ export default function UserManagement() {
       const payload = {
         name: form.name,
         email: form.email,
-        role: form.role === 'Admin' ? 'admin' : form.role === 'Mayor' ? 'mayorsoffice' : form.role === 'Spearhead' ? 'spearhead' : form.role === 'Barangay' ? 'barangay' : form.role,
+        role: form.role === 'Admin' ? 'admin' : form.role === 'Mayor' ? 'mayorsoffice' : form.role === 'Barangay' ? 'barangay' : form.role,
         status: form.status === 'Active' ? 'active' : form.status === 'Pending' ? 'pending' : form.status === 'Offline' ? 'offline' : 'active',
         location: form.location || '',
       };
@@ -147,12 +112,12 @@ export default function UserManagement() {
         id: created.id,
         name: created.name,
         email: created.email,
-        role: created.role.replace('mayorsoffice', "Mayor").replace('spearhead', 'Spearhead').replace('barangay', 'Barangay').replace('admin', 'Admin'),
+        role: created.role.replace('mayorsoffice', "Mayor").replace('barangay', 'Barangay').replace('admin', 'Admin'),
         status: created.status === 'active' ? 'Active' : created.status === 'pending' ? 'Pending' : created.status === 'offline' ? 'Offline' : created.status === 'archived' ? 'Archived' : created.status,
         location: created.location || '—',
         date: new Date().toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' }),
       };
-      setUsers((prev) => [newUser, ...prev]);
+      addUser(newUser);
       setShowAddModal(false);
       setSelectedId(newUser.id);
     } catch (err) {
@@ -182,9 +147,9 @@ export default function UserManagement() {
   const handleRoleChange = async (newRole) => {
     if (!selected) return;
     try {
-      const roleValue = newRole === 'Admin' ? 'admin' : newRole === 'Mayor' ? 'mayorsoffice' : newRole === 'Spearhead' ? 'spearhead' : 'barangay';
+      const roleValue = newRole === 'Admin' ? 'admin' : newRole === 'Mayor' ? 'mayorsoffice' : 'barangay';
       await api.updateUser(selected.id, { role: roleValue });
-      setUsers((prev) => prev.map((u) => u.id === selected.id ? { ...u, role: newRole } : u));
+      updateUser(selected.id, { role: newRole });
       closeModal();
     } catch (err) {
       console.error('Failed to update role:', err);
@@ -196,7 +161,7 @@ export default function UserManagement() {
     if (!selected) return;
     try {
       await api.updateUser(selected.id, { location: newLocation });
-      setUsers((prev) => prev.map((u) => u.id === selected.id ? { ...u, location: newLocation } : u));
+      updateUser(selected.id, { location: newLocation });
       closeModal();
     } catch (err) {
       console.error('Failed to reassign area:', err);
@@ -208,7 +173,7 @@ export default function UserManagement() {
     if (!selected) return;
     try {
       await api.updateUser(selected.id, { status: 'archived' });
-      setUsers((prev) => prev.map((u) => u.id === selected.id ? { ...u, status: 'Archived' } : u));
+      updateUser(selected.id, { status: 'Archived' });
       closeModal();
     } catch (err) {
       console.error('Failed to suspend account:', err);
@@ -229,7 +194,6 @@ export default function UserManagement() {
 
   return (
     <div className="max-w-[1400px] mx-auto animate-fade-in pb-12">
-      {/* Page header */}
       <header className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-[28px] font-bold text-slate-900 tracking-tight leading-none">Manage accounts</h1>
@@ -261,13 +225,8 @@ export default function UserManagement() {
         </div>
       </header>
 
-      {/* Two-column layout: main content (left) + details panels (right) */}
       <div className="grid grid-cols-1 xl:grid-cols-[1fr_360px] gap-8 items-start">
-
-        {/* ── LEFT COLUMN ── */}
         <div className="flex flex-col gap-8">
-
-          {/* Summary cards */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
             {[
               { icon: Users, label: "Total accounts", value: users.length, caption: "Registered accounts" },
@@ -275,13 +234,10 @@ export default function UserManagement() {
               { icon: Clock, label: "Pending approval", value: pendingApproval, caption: "Awaiting review" },
               { icon: Ban, label: "Suspended", value: archivedCount, caption: "Archived accounts" },
             ].map(({ icon: Icon, label, value, caption }) => (
-              <div
-                key={label}
-                className="bg-white rounded-xl border border-slate-200 p-6 flex flex-col justify-between min-h-[140px]"
-              >
+              <Card key={label} className="flex flex-col justify-between min-h-[140px]">
                 <div className="flex items-start gap-4">
-                  <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 shrink-0">
-                    <Icon className="w-6 h-6" />
+                  <div className="h-12 w-12 shrink-0 rounded-full bg-slate-100 flex items-center justify-center text-slate-500">
+                    <Icon className="h-6 w-6" />
                   </div>
                   <div className="flex-1 min-w-0">
                     <h3 className="text-sm font-medium text-slate-600">{label}</h3>
@@ -289,45 +245,31 @@ export default function UserManagement() {
                   </div>
                 </div>
                 <p className="text-xs text-slate-400 mt-4">{caption}</p>
-              </div>
+              </Card>
             ))}
           </div>
 
-          {/* Table card */}
-          <div className="bg-white rounded-xl border border-slate-200 p-6">
+          <Card>
             <div className="mb-5 flex flex-wrap items-center gap-3">
-              <div className="relative flex-1 min-w-[200px]">
-                <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                <input
-                  value={search}
-                  onChange={(e) => {
-                    setSearch(e.target.value);
-                    setPage(1);
-                  }}
-                  placeholder="Search by name or email"
-                  className="w-full rounded-lg border border-slate-200 py-2 pl-9 pr-3 text-sm text-slate-700 placeholder:text-slate-400 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
-                />
-              </div>
+              <SearchBar
+                value={search}
+                onChange={(val) => { setSearch(val); setPage(1); }}
+                placeholder="Search by name or email"
+                className="flex-1 min-w-[200px]"
+              />
               <select
                 value={roleFilter}
-                onChange={(e) => {
-                  setRoleFilter(e.target.value);
-                  setPage(1);
-                }}
+                onChange={(e) => { setRoleFilter(e.target.value); setPage(1); }}
                 className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:ring-2 focus:ring-blue-500/30"
               >
                 <option>All roles</option>
                 <option>Admin</option>
                 <option>Mayor</option>
-                <option>Spearhead</option>
                 <option>Barangay</option>
               </select>
               <select
                 value={statusFilter}
-                onChange={(e) => {
-                  setStatusFilter(e.target.value);
-                  setPage(1);
-                }}
+                onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
                 className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:ring-2 focus:ring-blue-500/30"
               >
                 <option>All status</option>
@@ -393,13 +335,16 @@ export default function UserManagement() {
                               e.stopPropagation();
                               handleArchiveToggle(u);
                             }}
+                            disabled={currentUser && String(u.id) === String(currentUser.id)}
                             className={`flex h-7 w-7 items-center justify-center rounded-lg border transition-colors ${
-                              u.status === 'Archived'
+                              currentUser && String(u.id) === String(currentUser.id)
+                                ? "border-slate-200 text-slate-300 cursor-not-allowed"
+                                : u.status === 'Archived'
                                 ? "border-amber-300 bg-amber-50 text-amber-700"
-                                : "border-slate-200 text-slate-500 hover:border-red-300 hover:text-red-700"
+                                : "border-red-200 bg-red-50 text-red-600 hover:bg-red-100"
                             }`}
-                            aria-label={u.status === 'Archived' ? `Restore ${u.name}` : `Archive ${u.name}`}
-                            title={u.status === 'Archived' ? "Restore" : "Archive"}
+                            aria-label={currentUser && String(u.id) === String(currentUser.id) ? "Cannot archive your own account" : u.status === 'Archived' ? `Restore ${u.name}` : `Archive ${u.name}`}
+                            title={currentUser && String(u.id) === String(currentUser.id) ? "Cannot archive your own account" : u.status === 'Archived' ? "Restore" : "Archive"}
                           >
                             <Archive size={14} />
                           </button>
@@ -409,8 +354,8 @@ export default function UserManagement() {
                   ))}
                   {paged.length === 0 && (
                     <tr>
-                      <td colSpan={6} className="px-4 py-10 text-center text-sm text-slate-400">
-                        {showArchived ? "No archived accounts." : "No accounts match your search."}
+                      <td colSpan={6}>
+                        <EmptyState title={showArchived ? "No archived accounts." : "No accounts match your search."} />
                       </td>
                     </tr>
                   )}
@@ -418,7 +363,6 @@ export default function UserManagement() {
               </table>
             </div>
 
-            {/* Pagination */}
             {filtered.length > 0 && (
               <div className="mt-5 flex items-center justify-between text-xs text-slate-500">
                 <span>
@@ -427,7 +371,7 @@ export default function UserManagement() {
                 </span>
                 <div className="flex gap-1">
                   <button
-                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    onClick={() => goTo(page - 1)}
                     disabled={page === 1}
                     className="flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 transition-colors hover:bg-slate-50 disabled:opacity-40"
                   >
@@ -436,16 +380,16 @@ export default function UserManagement() {
                   {Array.from({ length: totalPages }, (_, i) => i + 1).map((n) => (
                     <button
                       key={n}
-                      onClick={() => setPage(n)}
-className={`flex h-7 w-7 items-center justify-center rounded-md text-xs font-medium transition-colors ${
-                      page === n ? "bg-[#1b4de4] text-white" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
-                    }`}
+                      onClick={() => goTo(n)}
+                      className={`flex h-7 w-7 items-center justify-center rounded-md text-xs font-medium transition-colors ${
+                        page === n ? "bg-[#1b4de4] text-white" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                      }`}
                     >
                       {n}
                     </button>
                   ))}
                   <button
-                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                    onClick={() => goTo(page + 1)}
                     disabled={page === totalPages}
                     className="flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 transition-colors hover:bg-slate-50 disabled:opacity-40"
                   >
@@ -454,16 +398,11 @@ className={`flex h-7 w-7 items-center justify-center rounded-md text-xs font-med
                 </div>
               </div>
             )}
-          </div>
-
+          </Card>
         </div>
 
-        {/* ── RIGHT COLUMN (Sidebar panels) ── */}
         <div className="flex flex-col gap-8">
-
-          {/* Panel 1: Selected account information */}
-          <div className="bg-white rounded-xl border border-slate-200 p-6">
-            <h2 className="text-sm font-semibold text-slate-800 mb-5">Selected account information</h2>
+          <Card title="Selected account information">
             {selected ? (
               <div className="grid grid-cols-1 gap-x-8 gap-y-3 sm:grid-cols-2">
                 <div className="space-y-2.5 text-sm">
@@ -502,11 +441,9 @@ className={`flex h-7 w-7 items-center justify-center rounded-md text-xs font-med
             ) : (
               <p className="text-sm text-slate-400">Select an account to see its details.</p>
             )}
-          </div>
+          </Card>
 
-          {/* Panel 2: Quick actions */}
-          <div className="bg-white rounded-xl border border-slate-200 p-6">
-            <h2 className="text-sm font-semibold text-slate-800 mb-5">Quick action</h2>
+          <Card title="Quick action">
             <div className="space-y-2">
               {QUICK_ACTIONS.map((action) => (
                 <button
@@ -519,8 +456,7 @@ className={`flex h-7 w-7 items-center justify-center rounded-md text-xs font-med
                 </button>
               ))}
             </div>
-          </div>
-
+          </Card>
         </div>
       </div>
 
@@ -590,7 +526,6 @@ function EditUserModal({ user, onCancel, onSave }) {
             >
               <option>Admin</option>
               <option>Mayor</option>
-              <option>Spearhead</option>
               <option>Barangay</option>
             </select>
           </div>
@@ -681,7 +616,6 @@ function AddUserModal({ onCancel, onSave }) {
             >
               <option>Admin</option>
               <option>Mayor</option>
-              <option>Spearhead</option>
               <option>Barangay</option>
             </select>
           </div>
@@ -776,7 +710,6 @@ function ChangeRoleModal({ user, onCancel, onSave }) {
           >
             <option>Admin</option>
             <option>Mayor</option>
-            <option>Spearhead</option>
             <option>Barangay</option>
           </select>
         </div>

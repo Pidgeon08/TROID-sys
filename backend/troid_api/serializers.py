@@ -14,7 +14,12 @@ class BoatSerializer(serializers.ModelSerializer):
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ['id', 'name', 'email', 'role', 'status', 'location', 'date_created']
+        fields = ['id', 'user_id', 'name', 'email', 'role', 'status', 'location', 'date_created']
+
+
+class LoginSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+    password = serializers.CharField()
 
 class OperatorSerializer(serializers.ModelSerializer):
     class Meta:
@@ -29,7 +34,7 @@ class StatusHistorySerializer(serializers.ModelSerializer):
 class PhotoSerializer(serializers.ModelSerializer):
     class Meta:
         model = Photo
-        fields = ['id', 'request', 'photo_id', 'label', 'date']
+        fields = ['id', 'request', 'photo_id', 'label', 'date', 'image_data']
 
 class RequestSerializer(serializers.ModelSerializer):
     status_history = StatusHistorySerializer(many=True, read_only=True)

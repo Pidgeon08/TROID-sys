@@ -5,15 +5,12 @@ import {
   ChevronLeft,
   FileText,
   Download,
-  Trash2,
   User,
   MapPin,
-  CheckCircle2,
   Eye,
   X,
-  XCircle,
-  ChevronLeft as ChevronLeftIcon,
-  ChevronRight as ChevronRightIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
 } from "lucide-react";
 import api from "../../services/api";
 import { Card } from "../../components/ui/Card";
@@ -26,64 +23,11 @@ const Field = ({ label, value }) => (
   </div>
 );
 
-function PhotoViewer({ photos, currentIndex, onClose, onNavigate }) {
-  if (!photos || photos.length === 0) return null;
-  
-  const handlePrev = () => {
-    onNavigate(currentIndex > 0 ? currentIndex - 1 : photos.length - 1);
-  };
-  
-  const handleNext = () => {
-    onNavigate(currentIndex < photos.length - 1 ? currentIndex + 1 : 0);
-  };
-  
-  return (
-    <div className="fixed inset-0 z-[100] bg-black/90 flex items-center justify-center" onClick={onClose}>
-      <div className="relative max-w-[90vw] max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
-        <button
-          onClick={onClose}
-          className="fixed top-4 right-4 text-white hover:text-gray-300 transition-colors z-[110]"
-        >
-          <X size={24} />
-        </button>
-        
-        {photos.length > 1 && (
-          <>
-            <button
-              onClick={handlePrev}
-              className="fixed left-4 top-1/2 -translate-y-1/2 text-white hover:text-gray-300 transition-colors bg-black/30 p-2 rounded-full z-[110]"
-            >
-              <ChevronLeftIcon size={24} />
-            </button>
-            <button
-              onClick={handleNext}
-              className="fixed right-4 top-1/2 -translate-y-1/2 text-white hover:text-gray-300 transition-colors bg-black/30 p-2 rounded-full z-[110]"
-            >
-              <ChevronRightIcon size={24} />
-            </button>
-          </>
-        )}
-        
-        <img
-          src={photos[currentIndex]?.image_data}
-          alt={photos[currentIndex]?.label || `Photo ${currentIndex + 1}`}
-          className="max-w-full max-h-[80vh] object-contain"
-        />
-        
-        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-black/50 text-white text-xs px-3 py-1.5 rounded-full">
-          {currentIndex + 1} / {photos.length}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-export default function ViewRequest() {
+export default function BarangayViewRequest() {
   const { id } = useParams();
   const navigate = useNavigate();
   const [request, setRequest] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [archiving, setArchiving] = useState(false);
   const [selectedPhotoIndex, setSelectedPhotoIndex] = useState(0);
   const [showPhotoViewer, setShowPhotoViewer] = useState(false);
 
@@ -102,18 +46,6 @@ export default function ViewRequest() {
     fetchRequest();
     return () => { cancelled = true; };
   }, [id]);
-
-  const handleArchive = async () => {
-    if (!request) return;
-    setArchiving(true);
-    try {
-      await api.deleteRequest(request.id);
-      navigate("/admin/requests");
-    } catch (err) {
-      console.error("Failed to archive request:", err);
-      setArchiving(false);
-    }
-  };
 
   if (loading) {
     return (
@@ -135,7 +67,7 @@ export default function ViewRequest() {
     <div className="max-w-[1400px] mx-auto animate-fade-in pb-12">
       <div className="mb-6 flex items-center justify-between">
         <button
-          onClick={() => navigate(-1)}
+          onClick={() => navigate("/barangay/requests")}
           className="flex items-center gap-1.5 text-sm font-medium text-blue-600 hover:text-blue-700"
         >
           <ChevronLeft size={15} />
@@ -145,14 +77,6 @@ export default function ViewRequest() {
           <button className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
             <FileText size={15} />
             Download All
-          </button>
-          <button
-            onClick={handleArchive}
-            disabled={archiving}
-            className="flex items-center gap-2 rounded-lg border border-red-200 bg-white px-3.5 py-2 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
-          >
-            <Trash2 size={15} />
-            {archiving ? "Archiving..." : "Archive"}
           </button>
         </div>
       </div>
@@ -232,7 +156,7 @@ export default function ViewRequest() {
           </div>
 
           <div className="rounded-lg border border-slate-100 bg-slate-100 p-6 min-h-[560px] flex flex-col">
-            <div className="bg-white rounded shadow-sm p-8 flex-1 text-sm text-slate-700 leading-relaxed break-words">
+            <div className="bg-white rounded shadow-sm p-8 flex-1 text-sm text-slate-700 leading-relaxed">
               <div className="flex items-start gap-3 mb-4">
                 <div className="w-12 h-12 rounded-full border-2 border-blue-800 flex items-center justify-center text-[9px] text-center text-blue-800 font-semibold leading-tight shrink-0">
                   SEAL
@@ -272,7 +196,7 @@ export default function ViewRequest() {
 
         <div className="flex flex-col gap-5">
           <Card>
-            <div className="flex items-center justify-between mb-4">
+<div className="flex items-center justify-between mb-4">
               <h3 className="text-sm font-semibold text-slate-800">Photo Documentation</h3>
               <span className={`inline-block rounded-full px-2.5 py-1 text-xs font-medium whitespace-nowrap ${
                 request.status === "Approved" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"
@@ -283,7 +207,7 @@ export default function ViewRequest() {
 
             {request.status === "Approved" && (
               <div className="flex items-start gap-2.5 rounded-lg bg-emerald-50 border border-emerald-100 px-3 py-2.5 mb-4">
-                <CheckCircle2 size={16} className="text-emerald-600 mt-0.5 shrink-0" />
+                <svg className="text-emerald-600 mt-0.5 shrink-0" size={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M5 13l4 4L19 7"/></svg>
                 <p className="text-xs text-emerald-800 leading-relaxed">
                   Clean-up and waste collection were already conducted.
                   <br />
@@ -295,7 +219,7 @@ export default function ViewRequest() {
             {request.photos && request.photos.length > 0 ? (
               <div className="space-y-4">
                 <div className="relative aspect-video rounded-lg overflow-hidden bg-slate-100 cursor-zoom-in" onClick={() => setShowPhotoViewer(true)}>
-                  <img
+                  <img 
                     src={request.photos[selectedPhotoIndex]?.image_data} 
                     alt={request.photos[selectedPhotoIndex]?.label || `Photo ${selectedPhotoIndex + 1}`}
                     className="w-full h-full object-contain hover:scale-105 transition-transform"
@@ -331,28 +255,21 @@ export default function ViewRequest() {
                 {request.photos.length > 1 && (
                   <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide justify-center items-center">
                     {request.photos.map((photo, idx) => (
-                      <div
+                      <button
                         key={photo.id || idx}
-                        className="relative group flex-shrink-0"
+                        onClick={() => setSelectedPhotoIndex(idx)}
+                        className={`relative flex-shrink-0 transition-all duration-200 ${
+                          idx === selectedPhotoIndex 
+                            ? 'w-20 h-20 opacity-100 scale-105 ring-2 ring-blue-500' 
+                            : 'w-16 h-16 opacity-60 hover:opacity-80'
+                        }`}
                       >
-                        <button
-                          onClick={() => setSelectedPhotoIndex(idx)}
-                          className={`relative transition-all duration-200 ${
-                            idx === selectedPhotoIndex 
-                              ? 'w-20 h-20 opacity-100 scale-105 ring-2 ring-blue-500' 
-                              : 'w-16 h-16 opacity-60 hover:opacity-80'
-                          }`}
-                        >
-                          <img 
-                            src={photo.image_data} 
-                            alt={photo.label || `Photo ${idx + 1}`}
-                            className="w-full h-full object-cover rounded-lg"
-                          />
-                        </button>
-                        <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 text-xs font-medium text-white bg-slate-800 rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-10">
-                          view photo
-                        </span>
-                      </div>
+                        <img 
+                          src={photo.image_data || photo} 
+                          alt={photo.label || `Photo ${idx + 1}`}
+                          className="w-full h-full object-cover rounded-lg"
+                        />
+                      </button>
                     ))}
                   </div>
                 )}
@@ -391,58 +308,83 @@ export default function ViewRequest() {
         </div>
       </div>
 
-      {request.status === "Pending Admin Approval" && (
-        <div className="mt-6 bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="text-sm font-semibold text-slate-900">Take Action on This Request</h3>
-              <p className="text-xs text-slate-500 mt-1">Your decision will be recorded and the request status will update immediately.</p>
-            </div>
-            <div className="flex items-center gap-3">
-              <button
-                onClick={async () => {
-                  await api.declineRequest(request.id);
-                  setRequest(prev => ({ ...prev, status: 'Declined' }));
-                }}
-                className="flex items-center gap-2 rounded-lg border-2 border-red-200 px-4 py-2.5 text-sm font-semibold text-red-700 hover:bg-red-50 transition-colors"
-              >
-                <XCircle size={16} />
-                Decline
-              </button>
-              <button
-                onClick={async () => {
-                  await api.adminApproveRequest(request.id);
-                  setRequest(prev => ({ ...prev, status: 'Approved' }));
-                }}
-                className="flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700 transition-colors"
-              >
-                <CheckCircle2 size={16} />
-                Approve
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <div className="mt-6 bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="text-sm font-semibold text-slate-900">View Mode</h3>
-            <p className="text-xs text-slate-500 mt-1">CENRO is in view-only mode. The Mayor's Office is responsible for approving or declining requests.</p>
-          </div>
-          <div className="rounded-lg bg-blue-50 border border-blue-100 px-4 py-2.5 text-sm font-medium text-blue-700">
-            View Only
-          </div>
-        </div>
-      </div>
-
       {showPhotoViewer && request.photos && createPortal(
-        <PhotoViewer
-          photos={request.photos}
-          currentIndex={selectedPhotoIndex}
-          onClose={() => setShowPhotoViewer(false)}
-          onNavigate={setSelectedPhotoIndex}
-        />,
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80" onClick={() => setShowPhotoViewer(false)}>
+          <div className="relative w-full h-full flex flex-col">
+            <div className="flex items-center justify-between p-4 absolute top-0 left-0 right-0 z-10">
+              <button
+                onClick={() => setShowPhotoViewer(false)}
+                className="text-white p-2 rounded-lg hover:bg-white/10"
+              >
+                <X size={24} />
+              </button>
+              <span className="text-white text-sm font-medium">
+                {selectedPhotoIndex + 1} / {request.photos.length}
+              </span>
+              <div className="w-10" />
+            </div>
+            
+            <div className="flex-1 flex items-center justify-center relative">
+              {selectedPhotoIndex > 0 && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSelectedPhotoIndex(prev => prev - 1);
+                  }}
+                  className="fixed left-4 top-1/2 -translate-y-1/2 text-white p-3 rounded-full bg-black/30 hover:bg-black/50 transition-colors z-[110]"
+                >
+                  <ChevronLeftIcon size={32} />
+                </button>
+              )}
+              
+              <img 
+                src={request.photos[selectedPhotoIndex]?.image_data || request.photos[selectedPhotoIndex]} 
+                alt={request.photos[selectedPhotoIndex]?.label || `Photo ${selectedPhotoIndex + 1}`}
+                className="max-h-[70vh] max-w-[80vw] object-contain rounded-lg shadow-2xl"
+                onClick={(e) => e.stopPropagation()}
+              />
+              
+              {selectedPhotoIndex < request.photos.length - 1 && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSelectedPhotoIndex(prev => prev + 1);
+                  }}
+                  className="fixed right-4 top-1/2 -translate-y-1/2 text-white p-3 rounded-full bg-black/30 hover:bg-black/50 transition-colors z-[110]"
+                >
+                  <ChevronRightIcon size={32} />
+                </button>
+              )}
+            </div>
+            
+            <div className="p-4 bg-black/50">
+              <div className="flex gap-3 overflow-x-auto justify-center items-center scrollbar-hide">
+                {request.photos.map((photo, idx) => (
+                  <button
+                    key={photo.id || idx}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedPhotoIndex(idx);
+                    }}
+                    className={`relative flex-shrink-0 transition-all duration-200 ${
+                      idx === selectedPhotoIndex 
+                        ? 'w-20 h-20 opacity-100 scale-110' 
+                        : 'w-16 h-16 opacity-60 hover:opacity-80'
+                    }`}
+                  >
+                    <img 
+                      src={photo.image_data} 
+                      alt={photo.label || `Photo ${idx + 1}`}
+                      className={`w-full h-full object-cover rounded-lg border-2 ${
+                        idx === selectedPhotoIndex ? 'border-white' : 'border-transparent'
+                      }`}
+                    />
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>,
         document.body
       )}
     </div>

@@ -1,15 +1,49 @@
-from rest_framework import status
-from rest_framework.decorators import api_view
+from rest_framework import status, viewsets
+from rest_framework.decorators import action, api_view
 from rest_framework.response import Response
-from .models import Boat, DetectionEvent, User, Operator, Request, StatusHistory, Photo, DeploymentSchedule, LandfillRecord, RecyclingRecord, SegregationRecord, AuditLog, HeatmapData
+from django.shortcuts import get_object_or_404
+from django.contrib.auth.hashers import check_password
+from django.utils import timezone
+
+try:
+    from rest_framework.routers import DefaultRouter
+except ImportError:
+    from rest_framework.routers import DefaultRouter
+
+from .models import (
+    Boat, DetectionEvent, User, Operator, Request, DeploymentSchedule,
+    LandfillRecord, RecyclingRecord, SegregationRecord,
+    AuditLog, HeatmapData, Photo, StatusHistory
+)
 from .serializers import (
-    DetectionEventSerializer, BoatSerializer, UserSerializer, OperatorSerializer,
-    RequestSerializer, StatusHistorySerializer, PhotoSerializer, DeploymentScheduleSerializer,
-    LandfillRecordSerializer, RecyclingRecordSerializer, SegregationRecordSerializer,
-    AuditLogSerializer, HeatmapDataSerializer
+    BoatSerializer, UserSerializer, OperatorSerializer, RequestSerializer,
+    DeploymentScheduleSerializer, LandfillRecordSerializer, RecyclingRecordSerializer,
+    SegregationRecordSerializer, AuditLogSerializer, HeatmapDataSerializer, LoginSerializer
 )
 
-# --- Robot / Boat endpoints (keep intact) ---
+
+@api_view(['POST'])
+def login(request):
+    serializer = LoginSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    email = serializer.validated_data['email']
+    password = serializer.validated_data['password']
+    try:
+        user = User.objects.get(email=email)
+        if not check_password(password, user.password):
+            return Response({"error": "Invalid email or password"}, status=status.HTTP_401_UNAUTHORIZED)
+        return Response({
+            "id": user.id,
+            "user_id": user.user_id,
+            "name": user.name,
+            "email": user.email,
+            "role": user.role,
+            "status": user.status,
+            "location": user.location,
+        })
+    except User.DoesNotExist:
+        return Response({"error": "Invalid email or password"}, status=status.HTTP_401_UNAUTHORIZED)
+
 
 @api_view(['POST'])
 def log_detection(request):
@@ -37,6 +71,7 @@ def log_detection(request):
     except Boat.DoesNotExist:
         return Response({"error": "Boat not found"}, status=status.HTTP_404_NOT_FOUND)
 
+
 @api_view(['GET'])
 def get_heatmap_data(request):
     detections = DetectionEvent.objects.all()
@@ -46,221 +81,143 @@ def get_heatmap_data(request):
         data.append([d.latitude, d.longitude, weight])
     return Response(data)
 
-# --- Generic CRUD helpers ---
-
-def crud_list(request, model, serializer_class):
-    queryset = model.objects.all()
-    serializer = serializer_class(queryset, many=True)
-    return Response(serializer.data)
-
-def crud_create(request, serializer_class):
-    serializer = serializer_class(data=request.data)
-    if serializer.is_valid():
-        serializer.save()
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
-    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 @api_view(['GET'])
 def pending_user_count(request):
     count = User.objects.filter(status='pending').count()
     return Response({"pending_count": count})
 
-# --- Users ---
-
-@api_view(['GET', 'POST'])
-def users(request):
-    if request.method == 'GET':
-        return crud_list(request, User, UserSerializer)
-    return crud_create(request, UserSerializer)
-
-@api_view(['PUT', 'DELETE'])
-def user_detail(request, pk):
-    try:
-        user = User.objects.get(pk=pk)
-    except User.DoesNotExist:
-        return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
-    if request.method == 'PUT':
-        serializer = UserSerializer(user, data=request.data, partial=True)
-        if serializer.is_valid():
-            serializer.save()
-            return Response(serializer.data)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-    elif request.method == 'DELETE':
-        user.delete()
-        return Response(status=status.HTTP_204_NO_CONTENT)
-
-# --- Operators ---
-
-@api_view(['GET', 'POST'])
-def operators(request):
-    if request.method == 'GET':
-        return crud_list(request, Operator, OperatorSerializer)
-    return crud_create(request, OperatorSerializer)
-
-@api_view(['PUT', 'DELETE'])
-def operator_detail(request, pk):
-    try:
-        op = Operator.objects.get(pk=pk)
-    except Operator.DoesNotExist:
-        return Response({"error": "Operator not found"}, status=status.HTTP_404_NOT_FOUND)
-    if request.method == 'PUT':
-        serializer = OperatorSerializer(op, data=request.data, partial=True)
-        if serializer.is_valid():
-            serializer.save()
-            return Response(serializer.data)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-    elif request.method == 'DELETE':
-        op.delete()
-        return Response(status=status.HTTP_204_NO_CONTENT)
-
-# --- Bots ---
-
-@api_view(['GET', 'POST'])
-def bots(request):
-    if request.method == 'GET':
-        return crud_list(request, Boat, BoatSerializer)
-    return crud_create(request, BoatSerializer)
-
-@api_view(['PUT', 'DELETE'])
-def bot_detail(request, pk):
-    try:
-        bot = Boat.objects.get(pk=pk)
-    except Boat.DoesNotExist:
-        return Response({"error": "Bot not found"}, status=status.HTTP_404_NOT_FOUND)
-    if request.method == 'PUT':
-        serializer = BoatSerializer(bot, data=request.data, partial=True)
-        if serializer.is_valid():
-            serializer.save()
-            return Response(serializer.data)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-    elif request.method == 'DELETE':
-        bot.delete()
-        return Response(status=status.HTTP_204_NO_CONTENT)
-
-# --- Requests ---
 
 @api_view(['GET'])
 def pending_request_count(request):
     count = Request.objects.filter(status='pending').count()
     return Response({"pending_count": count})
 
-@api_view(['GET', 'POST'])
-def requests(request):
-    if request.method == 'GET':
-        return crud_list(request, Request, RequestSerializer)
-    return crud_create(request, RequestSerializer)
 
-@api_view(['GET', 'PUT', 'DELETE'])
-def request_detail(request, pk):
-    try:
-        req = Request.objects.get(pk=pk)
-    except Request.DoesNotExist:
-        return Response({"error": "Request not found"}, status=status.HTTP_404_NOT_FOUND)
-    if request.method == 'GET':
-        serializer = RequestSerializer(req)
-        return Response(serializer.data)
-    elif request.method == 'PUT':
-        serializer = RequestSerializer(req, data=request.data, partial=True)
-        if serializer.is_valid():
-            serializer.save()
-            return Response(serializer.data)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-    elif request.method == 'DELETE':
-        req.delete()
-        return Response(status=status.HTTP_204_NO_CONTENT)
+class BoatViewSet(viewsets.ModelViewSet):
+    queryset = Boat.objects.all()
+    serializer_class = BoatSerializer
 
-# --- Deployment Schedules ---
 
-@api_view(['GET', 'POST'])
-def deployment_schedules(request):
-    if request.method == 'GET':
-        return crud_list(request, DeploymentSchedule, DeploymentScheduleSerializer)
-    return crud_create(request, DeploymentScheduleSerializer)
+class UserViewSet(viewsets.ModelViewSet):
+    queryset = User.objects.all()
+    serializer_class = UserSerializer
 
-@api_view(['PUT', 'DELETE'])
-def deployment_schedule_detail(request, pk):
-    try:
-        ds = DeploymentSchedule.objects.get(pk=pk)
-    except DeploymentSchedule.DoesNotExist:
-        return Response({"error": "Schedule not found"}, status=status.HTTP_404_NOT_FOUND)
-    if request.method == 'PUT':
-        serializer = DeploymentScheduleSerializer(ds, data=request.data, partial=True)
-        if serializer.is_valid():
-            serializer.save()
-            return Response(serializer.data)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-    elif request.method == 'DELETE':
-        ds.delete()
-        return Response(status=status.HTTP_204_NO_CONTENT)
 
-# --- Landfill Records ---
+class OperatorViewSet(viewsets.ModelViewSet):
+    queryset = Operator.objects.all()
+    serializer_class = OperatorSerializer
 
-@api_view(['GET', 'POST'])
-def landfill_records(request):
-    if request.method == 'GET':
-        return crud_list(request, LandfillRecord, LandfillRecordSerializer)
-    return crud_create(request, LandfillRecordSerializer)
 
-@api_view(['PUT', 'DELETE'])
-def landfill_record_detail(request, pk):
-    try:
-        rec = LandfillRecord.objects.get(pk=pk)
-    except LandfillRecord.DoesNotExist:
-        return Response({"error": "Record not found"}, status=status.HTTP_404_NOT_FOUND)
-    if request.method == 'PUT':
-        serializer = LandfillRecordSerializer(rec, data=request.data, partial=True)
-        if serializer.is_valid():
-            serializer.save()
-            return Response(serializer.data)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-    elif request.method == 'DELETE':
-        rec.delete()
-        return Response(status=status.HTTP_204_NO_CONTENT)
+class RequestViewSet(viewsets.ModelViewSet):
+    queryset = Request.objects.all()
+    serializer_class = RequestSerializer
+    lookup_field = 'request_id'
 
-# --- Recycling Records ---
+    def create(self, request, *args, **kwargs):
+        photos_data = request.data.get('photos', [])
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        request_obj = serializer.save()
+        if isinstance(photos_data, list):
+            for idx, photo in enumerate(photos_data):
+                Photo.objects.create(
+                    request=request_obj,
+                    label=photo.get('label') or '',
+                    date=photo.get('date') or '',
+                    photo_id=photo.get('photo_id') or (idx + 1),
+                    image_data=photo.get('image_data') or '',
+                )
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
 
-@api_view(['GET', 'POST'])
-def recycling_records(request):
-    if request.method == 'GET':
-        return crud_list(request, RecyclingRecord, RecyclingRecordSerializer)
-    return crud_create(request, RecyclingRecordSerializer)
+    @action(detail=True, methods=['post'])
+    def mayor_approve(self, request, request_id=None):
+        req = self.get_object()
+        if req.status != 'pending_mayor_approval':
+            return Response({'error': 'Request is not pending mayor approval'}, status=status.HTTP_400_BAD_REQUEST)
+        req.status = 'pending_admin_approval'
+        req.save()
+        StatusHistory.objects.create(
+            request=req,
+            label='Approved by Mayor',
+            date=timezone.now(),
+            actor=request.user.name if hasattr(request, 'user') and hasattr(request.user, 'name') else 'Mayor',
+            role='Mayor',
+            state='current'
+        )
+        return Response({'status': req.status})
 
-@api_view(['PUT', 'DELETE'])
-def recycling_record_detail(request, pk):
-    try:
-        rec = RecyclingRecord.objects.get(pk=pk)
-    except RecyclingRecord.DoesNotExist:
-        return Response({"error": "Record not found"}, status=status.HTTP_404_NOT_FOUND)
-    if request.method == 'PUT':
-        serializer = RecyclingRecordSerializer(rec, data=request.data, partial=True)
-        if serializer.is_valid():
-            serializer.save()
-            return Response(serializer.data)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-    elif request.method == 'DELETE':
-        rec.delete()
-        return Response(status=status.HTTP_204_NO_CONTENT)
+    @action(detail=True, methods=['post'])
+    def admin_approve(self, request, request_id=None):
+        req = self.get_object()
+        if req.status != 'pending_admin_approval':
+            return Response({'error': 'Request is not pending admin approval'}, status=status.HTTP_400_BAD_REQUEST)
+        req.status = 'approved'
+        req.save()
+        StatusHistory.objects.create(
+            request=req,
+            label='Approved by Admin',
+            date=timezone.now(),
+            actor=request.user.name if hasattr(request, 'user') and hasattr(request.user, 'name') else 'Admin',
+            role='Admin',
+            state='current'
+        )
+        return Response({'status': req.status})
 
-# --- Segregation Records ---
+    @action(detail=True, methods=['post'])
+    def decline(self, request, request_id=None):
+        req = self.get_object()
+        req.status = 'declined'
+        req.save()
+        StatusHistory.objects.create(
+            request=req,
+            label='Declined',
+            date=timezone.now(),
+            actor=request.user.name if hasattr(request, 'user') and hasattr(request.user, 'name') else 'User',
+            role=request.user.role if hasattr(request, 'user') and hasattr(request.user, 'role') else 'Unknown',
+            state='current'
+        )
+        return Response({'status': req.status})
 
-@api_view(['GET', 'POST'])
-def segregation_records(request):
-    if request.method == 'GET':
-        return crud_list(request, SegregationRecord, SegregationRecordSerializer)
-    return crud_create(request, SegregationRecordSerializer)
 
-# --- Audit Logs ---
+class DeploymentScheduleViewSet(viewsets.ModelViewSet):
+    queryset = DeploymentSchedule.objects.all()
+    serializer_class = DeploymentScheduleSerializer
 
-@api_view(['GET', 'POST'])
-def audit_logs(request):
-    if request.method == 'GET':
-        return crud_list(request, AuditLog, AuditLogSerializer)
-    return crud_create(request, AuditLogSerializer)
 
-# --- Heatmap Data ---
+class LandfillRecordViewSet(viewsets.ModelViewSet):
+    queryset = LandfillRecord.objects.all()
+    serializer_class = LandfillRecordSerializer
 
-@api_view(['GET', 'POST'])
-def heatmap_data(request):
-    if request.method == 'GET':
-        return crud_list(request, HeatmapData, HeatmapDataSerializer)
-    return crud_create(request, HeatmapDataSerializer)
+
+class RecyclingRecordViewSet(viewsets.ModelViewSet):
+    queryset = RecyclingRecord.objects.all()
+    serializer_class = RecyclingRecordSerializer
+
+
+class SegregationRecordViewSet(viewsets.ModelViewSet):
+    queryset = SegregationRecord.objects.all()
+    serializer_class = SegregationRecordSerializer
+
+
+class AuditLogViewSet(viewsets.ModelViewSet):
+    queryset = AuditLog.objects.all()
+    serializer_class = AuditLogSerializer
+
+
+class HeatmapDataViewSet(viewsets.ModelViewSet):
+    queryset = HeatmapData.objects.all()
+    serializer_class = HeatmapDataSerializer
+
+
+router = DefaultRouter()
+router.register(r'boats', BoatViewSet)
+router.register(r'users', UserViewSet)
+router.register(r'operators', OperatorViewSet)
+router.register(r'requests', RequestViewSet)
+router.register(r'deployment-schedules', DeploymentScheduleViewSet)
+router.register(r'landfill-records', LandfillRecordViewSet)
+router.register(r'recycling-records', RecyclingRecordViewSet)
+router.register(r'segregation-records', SegregationRecordViewSet)
+router.register(r'audit-logs', AuditLogViewSet)
+router.register(r'heatmap-data', HeatmapDataViewSet)
