@@ -15,10 +15,35 @@ import {
   X,
   ChevronLeft,
   ChevronRight,
+  Clock,
 } from "lucide-react";
 import api from "../../services/api";
 
 const REQUEST_TYPES = ["Cleanup", "Maintenance", "Inspection"];
+const TIME_SLOTS = ["06:00 - 10:00", "08:00 - 12:00", "14:00 - 18:00"];
+const DAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+function SlotCell({ label, status, onClick, disabled }) {
+  const base = "flex items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-xs font-semibold transition-colors border";
+  const color = status === "available"
+    ? "border-emerald-200 bg-emerald-50 text-emerald-700 cursor-pointer hover:bg-emerald-100"
+    : status === "full"
+      ? "border-red-200 bg-red-50 text-red-700 cursor-not-allowed opacity-80"
+      : "border-slate-200 bg-slate-50 text-slate-400 cursor-not-allowed";
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled || status !== "available"}
+      className={`${base} ${color}`}
+      title={status === "full" ? "No slot available for this time" : status === "available" ? "Available" : "Pick a date first"}
+    >
+      <span className={`h-2 w-2 rounded-full ${status === "available" ? "bg-emerald-500" : status === "full" ? "bg-red-500" : "bg-slate-300"}`} />
+      {label}
+    </button>
+  );
+}
 
 function RequestForm({ currentUser }) {
   const navigate = useNavigate();
@@ -38,10 +63,39 @@ function RequestForm({ currentUser }) {
   const [viewPhoto, setViewPhoto] = useState(false);
   const [showFullLetter, setShowFullLetter] = useState(false);
   const [selectedPhotoIndex, setSelectedPhotoIndex] = useState(0);
+  const [schedules, setSchedules] = useState([]);
+  const [loadingSlots, setLoadingSlots] = useState(false);
   const LETTER_TRUNCATE_LENGTH = 200;
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoadingSlots(true);
+    api.deploymentSchedules().then((data) => {
+      if (cancelled) return;
+      setSchedules(Array.isArray(data) ? data : []);
+      setLoadingSlots(false);
+    }).catch(() => {
+      if (!cancelled) setLoadingSlots(false);
+    });
+    return () => { cancelled = true; };
+  }, []);
 
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
+  };
+
+  const getSlotStatus = (dateStr, slot) => {
+    if (!dateStr) return "unavailable";
+    const dt = new Date(dateStr);
+    const today = new Date();
+    const start = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    const selected = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate());
+    if (selected < start) return "past";
+    const dayKey = DAYS[dt.getDay()];
+    const isFull = schedules.some(
+      (s) => s.day === dayKey && s.status === "scheduled" && s.label === slot
+    );
+    return isFull ? "full" : "available";
   };
 
   const handleImageChange = (e) => {
@@ -196,6 +250,29 @@ function RequestForm({ currentUser }) {
               </div>
             </div>
 
+            {formData.date && (
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 mb-1.5">Available Time Slots</label>
+                <p className="text-[11px] text-slate-400 mb-2 flex items-center gap-1.5">
+                  <span className="h-2 w-2 rounded-full bg-emerald-500 inline-block" />
+                  <span>Available</span>
+                  <span className="ml-2 h-2 w-2 rounded-full bg-red-500 inline-block" />
+                  <span>Full</span>
+                </p>
+                <div className="grid grid-cols-3 gap-2">
+                  {TIME_SLOTS.map((slot) => (
+                    <SlotCell
+                      key={slot}
+                      label={slot}
+                      status={getSlotStatus(formData.date, slot)}
+                      onClick={() => {}}
+                      disabled={true}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div>
               <label className="block text-xs font-semibold text-slate-500 mb-1.5">Letter Contents</label>
               <textarea
@@ -339,6 +416,32 @@ function RequestForm({ currentUser }) {
                 <span className="text-slate-500">Preferred Date</span>
                 <span className="font-medium text-slate-800 text-right">{formData.date || '—'}</span>
               </div>
+              {formData.date && (
+                <div className="py-2 text-sm border-b border-slate-50">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-slate-500">Deployment Slots</span>
+                    <span className="text-[11px] text-slate-400">on {formData.date}</span>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {TIME_SLOTS.map((slot) => {
+                      const status = getSlotStatus(formData.date, slot);
+                      return (
+                        <span
+                          key={slot}
+                          className={`inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-semibold border ${
+                            status === "available"
+                              ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                              : "border-red-200 bg-red-50 text-red-700"
+                          }`}
+                        >
+                          <span className={`h-1.5 w-1.5 rounded-full ${status === "available" ? "bg-emerald-500" : "bg-red-500"}`} />
+                          {slot}
+                        </span>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
               <div className="py-2 text-sm flex justify-between items-center">
                 <span className="text-slate-500 block">Photos</span>
                 {photoBase64List.length > 0 ? (
