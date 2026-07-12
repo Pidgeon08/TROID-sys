@@ -25,10 +25,19 @@ SECRET_KEY = 'django-insecure-i&l$xyhtr+q=0rqs-0_!=%=(_$+#c@#k0@*0(p*=6pbn2o*xau
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['localhost', '127.0.0.1']
+
+# API is accessed by the React frontend running on another origin.
+# Keep DEBUG for development only.
+REST_FRAMEWORK = {
+    # Avoid SessionAuthentication/CSRF for this project’s simple fetch-based frontend.
+    'DEFAULT_AUTHENTICATION_CLASSES': [],
+    'DEFAULT_PERMISSION_CLASSES': ['rest_framework.permissions.AllowAny'],
+}
 
 
 # Application definition
+
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -119,6 +128,4 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = 'static/'
-MEDIA_URL = '/media/'
-MEDIA_ROOT = BASE_DIR / 'media'
 CORS_ALLOW_ALL_ORIGINS = True

@@ -2,46 +2,37 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 const Login = ({ onLogin }) => {
-  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
+    setLoading(true);
 
     try {
-      const response = await fetch('http://localhost:8000/api/login/', {
+      const res = await fetch('http://localhost:8000/api/login/', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ username, password }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
       });
-
-      if (!response.ok) {
-        const data = await response.json();
-        setError(data.error || 'Login failed');
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || 'Login failed. Please try again.');
+        setLoading(false);
         return;
       }
-
-      const data = await response.json();
-      let role = data.role || data.user?.role;
-      if (!role) {
-        setError('Invalid response from server');
-        return;
-      }
-
-      if (role === 'officemayor') {
-        role = 'mayorsoffice';
-      }
-
-      onLogin({ ...data.user, role });
-      const path = role === 'admin' ? '/admin/dashboard' : role === 'spearhead' ? '/spearhead/requests' : '/mayorsoffice/requests';
-      navigate(path);
+      const role = data.role || 'admin';
+      await onLogin(role, data);
+      navigate(`/${role === 'mayorsoffice' ? 'mayorsoffice/dashboard' : role === 'barangay' ? 'barangay/dashboard' : 'admin/requests'}`);
     } catch (err) {
-      setError('Network error. Please try again.');
+      console.error('Login error:', err);
+      setError('Login failed. Please try again.');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -72,14 +63,13 @@ const Login = ({ onLogin }) => {
           )}
           
           <div className="flex flex-col gap-2">
-            <label htmlFor="username" className="text-[13px] font-bold text-slate-700">Username</label>
+            <label htmlFor="email" className="text-[13px] font-bold text-slate-700">Email</label>
             <input 
               type="text" 
-              id="username" 
+              id="email" 
               className="py-3 px-4 border border-slate-300 rounded-xl text-[15px] font-medium transition-all duration-200 bg-white text-slate-900 placeholder-slate-400 focus:outline-none focus:border-[#0c165a] focus:ring-1 focus:ring-[#0c165a] shadow-sm"
-              value={username} 
-              onChange={(e) => setUsername(e.target.value)} 
-              placeholder="admin_trial"
+              value={email} 
+              onChange={(e) => setEmail(e.target.value)} 
               required 
             />
           </div>
@@ -92,16 +82,16 @@ const Login = ({ onLogin }) => {
               className="py-3 px-4 border border-slate-300 rounded-xl text-[15px] font-medium transition-all duration-200 bg-white text-slate-900 placeholder-slate-400 focus:outline-none focus:border-[#0c165a] focus:ring-1 focus:ring-[#0c165a] shadow-sm"
               value={password} 
               onChange={(e) => setPassword(e.target.value)} 
-              placeholder="••••••••"
               required 
             />
           </div>
           
           <button 
             type="submit" 
-            className="w-full mt-2 bg-[#0c165a] hover:bg-[#070d38] text-white border-none py-3 px-6 rounded-xl font-bold text-[15px] cursor-pointer transition-all duration-200 shadow-md hover:shadow-[0_4px_12px_rgba(12,22,90,0.2)] hover:-translate-y-0.5 active:translate-y-0"
+            disabled={loading}
+            className="w-full mt-2 bg-[#0c165a] hover:bg-[#070d38] text-white border-none py-3 px-6 rounded-xl font-bold text-[15px] cursor-pointer transition-all duration-200 shadow-md hover:shadow-[0_4px_12px_rgba(12,22,90,0.2)] hover:-translate-y-0.5 active:translate-y-0 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            Login
+            {loading ? 'Logging in...' : 'Login'}
           </button>
           
           <div className="mt-4 text-center">
