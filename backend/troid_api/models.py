@@ -115,6 +115,7 @@ class Request(models.Model):
     barangay = models.CharField(max_length=100, blank=True)
     municipality = models.CharField(max_length=100, blank=True)
     province = models.CharField(max_length=100, blank=True)
+    archived = models.BooleanField(default=False)
     notes = models.TextField(blank=True)
     letter_file_name = models.CharField(max_length=100, blank=True)
     letter_size = models.CharField(max_length=20, blank=True)
@@ -164,10 +165,11 @@ class DeploymentSchedule(models.Model):
         ('none', 'None'),
     ]
     bot = models.ForeignKey(Boat, on_delete=models.CASCADE, related_name='deployments')
-    day = models.CharField(max_length=10)
+    day = models.CharField(max_length=20)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='none')
     label = models.CharField(max_length=20, default='Available')
     zone = models.CharField(max_length=100, blank=True)
+    request_id = models.CharField(max_length=20, blank=True, null=True)
 
     class Meta:
         unique_together = ['bot', 'day']

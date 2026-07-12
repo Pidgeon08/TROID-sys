@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import api from "../../services/api";
 import { Card } from "../../components/ui/Card";
-import { REQUEST_STATUS_STYLES, mapRequest } from "../../constants/requests";
+import { REQUEST_STATUS_STYLES, mapRequest, getDeploymentStatus } from "../../constants/requests";
 
 const Field = ({ label, value }) => (
   <div className="flex items-center justify-between py-2 text-sm">
@@ -33,13 +33,19 @@ export default function CityHallViewRequest() {
   const [selectedPhotoIndex, setSelectedPhotoIndex] = useState(0);
   const [showPhotoViewer, setShowPhotoViewer] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [confirmAction, setConfirmAction] = useState(null);
+  const [schedule, setSchedule] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
     const fetchRequest = async () => {
       try {
-        const res = await api.requestDetail(id);
-        if (!cancelled) setRequest(mapRequest(res));
+        const [res, schedulesData] = await Promise.all([api.requestDetail(id), api.deploymentSchedules()]);
+        if (cancelled) return;
+        const mapped = mapRequest(res);
+        setRequest(mapped);
+        const sched = (schedulesData || []).find((s) => s.request_id === mapped.id) || null;
+        setSchedule(sched);
       } catch (err) {
         console.error("Failed to fetch request:", err);
       } finally {
@@ -226,12 +232,10 @@ export default function CityHallViewRequest() {
                 <div className="flex flex-col gap-5">
                   <Card>
                     <div className="flex items-center justify-between mb-4">
-                      <h3 className="text-sm font-semibold text-slate-800">Photo Documentation</h3>
-                      <span className={`inline-block rounded-full px-2.5 py-1 text-xs font-medium whitespace-nowrap ${
-                        request.status === "Approved" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"
-                      }`}>
-                        {request.status === "Approved" ? "Deployed / Completed" : "Pending Review"}
-                      </span>
+              <h3 className="text-sm font-semibold text-slate-800">Photo Documentation</h3>
+              <span className={`inline-block rounded-full px-2.5 py-1 text-xs font-medium whitespace-nowrap ${getDeploymentStatus(schedule).cls}`}>
+                {getDeploymentStatus(schedule).label}
+              </span>
                     </div>
 
 {request.status === "Approved" && (
@@ -344,27 +348,66 @@ export default function CityHallViewRequest() {
                       <h3 className="text-sm font-semibold text-slate-900">Take Action on This Request</h3>
                       <p className="text-xs text-slate-500 mt-1">Your decision will be recorded and the request status will update immediately.</p>
                     </div>
-                    <div className="flex items-center gap-3">
-                      <button
-                        onClick={handleDecline}
-                        disabled={submitting}
-                        className="flex items-center gap-2 rounded-lg border-2 border-red-200 px-4 py-2.5 text-sm font-semibold text-red-700 hover:bg-red-50 transition-colors disabled:opacity-50"
-                      >
-                        <XCircle size={16} />
-                        Decline
-                      </button>
-                      <button
-                        onClick={handleApprove}
-                        disabled={submitting}
-                        className="flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700 transition-colors disabled:opacity-50"
-                      >
-                        <CheckCircle2 size={16} />
-                        Approve
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
+                     <div className="flex items-center gap-3">
+                       <button
+                         onClick={() => setConfirmAction('decline')}
+                         disabled={submitting}
+                         className="flex items-center gap-2 rounded-lg border-2 border-red-200 px-4 py-2.5 text-sm font-semibold text-red-700 hover:bg-red-50 transition-colors disabled:opacity-50"
+                       >
+                         <XCircle size={16} />
+                         Decline
+                       </button>
+                       <button
+                         onClick={() => setConfirmAction('approve')}
+                         disabled={submitting}
+                         className="flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700 transition-colors disabled:opacity-50"
+                       >
+                         <CheckCircle2 size={16} />
+                         Approve
+                       </button>
+                     </div>
+                   </div>
+                 </div>
+               )}
+
+      {confirmAction && createPortal(
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 p-4">
+          <div className="w-full max-w-sm bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden">
+            <div className="p-6 border-b border-slate-100">
+              <h3 className="text-lg font-bold text-slate-900">
+                {confirmAction === 'approve' ? 'Approve Request' : 'Decline Request'}
+              </h3>
+              <p className="text-xs text-slate-500 mt-1">
+                {confirmAction === 'approve'
+                  ? 'This request will be forwarded to CENRO for final approval.'
+                  : 'This request will be declined and the barangay will be notified.'}
+              </p>
+            </div>
+            <div className="p-6 flex gap-3">
+              <button
+                onClick={() => setConfirmAction(null)}
+                disabled={submitting}
+                className="flex-1 rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  const action = confirmAction;
+                  setConfirmAction(null);
+                  if (action === 'approve') await handleApprove();
+                  else await handleDecline();
+                }}
+                disabled={submitting}
+                className={`flex-1 rounded-lg px-4 py-2.5 text-sm font-medium text-white transition-colors disabled:opacity-50 ${confirmAction === 'approve' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-red-600 hover:bg-red-700'}`}
+              >
+                {confirmAction === 'approve' ? 'Approve' : 'Decline'}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
 
       {showPhotoViewer && request.photos && createPortal(
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80" onClick={() => setShowPhotoViewer(false)}>

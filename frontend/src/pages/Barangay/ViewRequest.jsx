@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import api from "../../services/api";
 import { Card } from "../../components/ui/Card";
-import { REQUEST_STATUS_STYLES, mapRequest } from "../../constants/requests";
+import { REQUEST_STATUS_STYLES, mapRequest, getDeploymentStatus } from "../../constants/requests";
 
 const Field = ({ label, value }) => (
   <div className="flex items-center justify-between py-2 text-sm">
@@ -30,13 +30,18 @@ export default function BarangayViewRequest() {
   const [loading, setLoading] = useState(true);
   const [selectedPhotoIndex, setSelectedPhotoIndex] = useState(0);
   const [showPhotoViewer, setShowPhotoViewer] = useState(false);
+  const [schedule, setSchedule] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
     const fetchRequest = async () => {
       try {
-        const res = await api.requestDetail(id);
-        if (!cancelled) setRequest(mapRequest(res));
+        const [res, schedulesData] = await Promise.all([api.requestDetail(id), api.deploymentSchedules()]);
+        if (cancelled) return;
+        const mapped = mapRequest(res);
+        setRequest(mapped);
+        const sched = (schedulesData || []).find((s) => s.request_id === mapped.id) || null;
+        setSchedule(sched);
       } catch (err) {
         console.error("Failed to fetch request:", err);
       } finally {
@@ -198,10 +203,8 @@ export default function BarangayViewRequest() {
           <Card>
 <div className="flex items-center justify-between mb-4">
               <h3 className="text-sm font-semibold text-slate-800">Photo Documentation</h3>
-              <span className={`inline-block rounded-full px-2.5 py-1 text-xs font-medium whitespace-nowrap ${
-                request.status === "Approved" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"
-              }`}>
-                {request.status === "Approved" ? "Deployed / Completed" : "Pending Review"}
+              <span className={`inline-block rounded-full px-2.5 py-1 text-xs font-medium whitespace-nowrap ${getDeploymentStatus(schedule).cls}`}>
+                {getDeploymentStatus(schedule).label}
               </span>
             </div>
 

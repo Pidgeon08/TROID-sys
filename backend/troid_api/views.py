@@ -114,6 +114,12 @@ class RequestViewSet(viewsets.ModelViewSet):
     serializer_class = RequestSerializer
     lookup_field = 'request_id'
 
+    def get_queryset(self):
+        queryset = Request.objects.all()
+        if self.request.query_params.get('archived') == 'true':
+            return queryset.filter(archived=True)
+        return queryset.filter(archived=False)
+
     def create(self, request, *args, **kwargs):
         photos_data = request.data.get('photos', [])
         serializer = self.get_serializer(data=request.data)
@@ -178,6 +184,20 @@ class RequestViewSet(viewsets.ModelViewSet):
             state='current'
         )
         return Response({'status': req.status})
+
+    def destroy(self, request, *args, **kwargs):
+        req = self.get_object()
+        DeploymentSchedule.objects.filter(request_id=req.request_id).delete()
+        req.archived = True
+        req.save()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @action(detail=True, methods=['post'])
+    def restore(self, request, request_id=None):
+        req = Request.objects.get(request_id=request_id)
+        req.archived = False
+        req.save()
+        return Response({'status': req.status, 'archived': req.archived})
 
 
 class DeploymentScheduleViewSet(viewsets.ModelViewSet):

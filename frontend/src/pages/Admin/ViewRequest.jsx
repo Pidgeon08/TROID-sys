@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import api from "../../services/api";
 import { Card } from "../../components/ui/Card";
-import { REQUEST_STATUS_STYLES, mapRequest } from "../../constants/requests";
+import { REQUEST_STATUS_STYLES, mapRequest, getDeploymentStatus } from "../../constants/requests";
 
 const Field = ({ label, value }) => (
   <div className="flex items-center justify-between py-2 text-sm">
@@ -78,21 +78,28 @@ function PhotoViewer({ photos, currentIndex, onClose, onNavigate }) {
   );
 }
 
-export default function ViewRequest() {
-  const { id } = useParams();
+export default function ViewRequest({ id: propId, onClose }) {
+  const { id: routeId } = useParams();
+  const id = propId || routeId;
   const navigate = useNavigate();
   const [request, setRequest] = useState(null);
   const [loading, setLoading] = useState(true);
   const [archiving, setArchiving] = useState(false);
+  const [confirmAction, setConfirmAction] = useState(null);
   const [selectedPhotoIndex, setSelectedPhotoIndex] = useState(0);
   const [showPhotoViewer, setShowPhotoViewer] = useState(false);
+  const [schedule, setSchedule] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
     const fetchRequest = async () => {
       try {
-        const res = await api.requestDetail(id);
-        if (!cancelled) setRequest(mapRequest(res));
+        const [res, schedulesData] = await Promise.all([api.requestDetail(id), api.deploymentSchedules()]);
+        if (cancelled) return;
+        const mapped = mapRequest(res);
+        setRequest(mapped);
+        const sched = (schedulesData || []).find((s) => s.request_id === mapped.id) || null;
+        setSchedule(sched);
       } catch (err) {
         console.error("Failed to fetch request:", err);
       } finally {
@@ -132,10 +139,10 @@ export default function ViewRequest() {
   }
 
   return (
-    <div className="max-w-[1400px] mx-auto animate-fade-in pb-12">
+    <div className="max-w-[1600px] mx-auto animate-fade-in pb-12">
       <div className="mb-6 flex items-center justify-between">
         <button
-          onClick={() => navigate(-1)}
+          onClick={() => (onClose ? onClose() : navigate(-1))}
           className="flex items-center gap-1.5 text-sm font-medium text-blue-600 hover:text-blue-700"
         >
           <ChevronLeft size={15} />
@@ -154,6 +161,15 @@ export default function ViewRequest() {
             <Trash2 size={15} />
             {archiving ? "Archiving..." : "Archive"}
           </button>
+          {onClose && (
+            <button
+              onClick={onClose}
+              className="flex items-center justify-center rounded-lg border border-slate-200 bg-white p-2 text-slate-500 hover:bg-slate-50"
+              aria-label="Close"
+            >
+              <X size={16} />
+            </button>
+          )}
         </div>
       </div>
 
@@ -274,10 +290,8 @@ export default function ViewRequest() {
           <Card>
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-sm font-semibold text-slate-800">Photo Documentation</h3>
-              <span className={`inline-block rounded-full px-2.5 py-1 text-xs font-medium whitespace-nowrap ${
-                request.status === "Approved" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"
-              }`}>
-                {request.status === "Approved" ? "Deployed / Completed" : "Pending Review"}
+              <span className={`inline-block rounded-full px-2.5 py-1 text-xs font-medium whitespace-nowrap ${getDeploymentStatus(schedule).cls}`}>
+                {getDeploymentStatus(schedule).label}
               </span>
             </div>
 
@@ -388,53 +402,76 @@ export default function ViewRequest() {
               </div>
             </div>
           </Card>
+          
+          {request.status === "Pending Admin Approval" && (
+          <Card title="Decision">
+            <div className="flex flex-col gap-4">
+              <p className="text-xs text-slate-500">
+                Your decision will be recorded and the request status will update immediately.
+              </p>
+              <div className="flex items-center justify-evenly gap-3">
+                <button
+                  onClick={() => setConfirmAction('decline')}
+                  className="flex items-center gap-2 rounded-lg border-2 border-red-200 px-4 py-2.5 text-sm font-semibold text-red-700 hover:bg-red-50 transition-colors"
+                >
+                  <XCircle size={16} />
+                  Decline
+                </button>
+                <button
+                  onClick={() => setConfirmAction('approve')}
+                  className="flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700 transition-colors"
+                >
+                  <CheckCircle2 size={16} />
+                  Approve
+                </button>
+              </div>
+            </div>
+          </Card>
+          )}
         </div>
       </div>
 
-      {request.status === "Pending Admin Approval" && (
-        <div className="mt-6 bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="text-sm font-semibold text-slate-900">Take Action on This Request</h3>
-              <p className="text-xs text-slate-500 mt-1">Your decision will be recorded and the request status will update immediately.</p>
+      {confirmAction && createPortal(
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 p-4">
+          <div className="w-full max-w-sm bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden">
+            <div className="p-6 border-b border-slate-100">
+              <h3 className="text-lg font-bold text-slate-900">
+                {confirmAction === 'approve' ? 'Approve Request' : 'Decline Request'}
+              </h3>
+              <p className="text-xs text-slate-500 mt-1">
+                {confirmAction === 'approve'
+                  ? 'This request will be marked approved and ready for deployment.'
+                  : 'This request will be declined and the barangay will be notified.'}
+              </p>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="p-6 flex gap-3">
               <button
-                onClick={async () => {
-                  await api.declineRequest(request.id);
-                  setRequest(prev => ({ ...prev, status: 'Declined' }));
-                }}
-                className="flex items-center gap-2 rounded-lg border-2 border-red-200 px-4 py-2.5 text-sm font-semibold text-red-700 hover:bg-red-50 transition-colors"
+                onClick={() => setConfirmAction(null)}
+                className="flex-1 rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors"
               >
-                <XCircle size={16} />
-                Decline
+                Cancel
               </button>
               <button
                 onClick={async () => {
-                  await api.adminApproveRequest(request.id);
-                  setRequest(prev => ({ ...prev, status: 'Approved' }));
+                  const action = confirmAction;
+                  setConfirmAction(null);
+                  if (action === 'approve') {
+                    await api.adminApproveRequest(request.id);
+                    setRequest(prev => ({ ...prev, status: 'Approved' }));
+                  } else {
+                    await api.declineRequest(request.id);
+                    setRequest(prev => ({ ...prev, status: 'Declined' }));
+                  }
                 }}
-                className="flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700 transition-colors"
+                className={`flex-1 rounded-lg px-4 py-2.5 text-sm font-medium text-white transition-colors ${confirmAction === 'approve' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-red-600 hover:bg-red-700'}`}
               >
-                <CheckCircle2 size={16} />
-                Approve
+                {confirmAction === 'approve' ? 'Approve' : 'Decline'}
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
-
-      <div className="mt-6 bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="text-sm font-semibold text-slate-900">View Mode</h3>
-            <p className="text-xs text-slate-500 mt-1">CENRO is in view-only mode. The Mayor's Office is responsible for approving or declining requests.</p>
-          </div>
-          <div className="rounded-lg bg-blue-50 border border-blue-100 px-4 py-2.5 text-sm font-medium text-blue-700">
-            View Only
-          </div>
-        </div>
-      </div>
 
       {showPhotoViewer && request.photos && createPortal(
         <PhotoViewer

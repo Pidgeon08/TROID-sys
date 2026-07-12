@@ -8,6 +8,14 @@ export const REQUEST_STATUS_STYLES = {
   "Pending Admin Approval": "bg-blue-50 text-blue-700",
 };
 
+export function getDeploymentStatus(schedule) {
+  if (!schedule) return { label: 'Pending Schedule', cls: 'bg-amber-50 text-amber-700' };
+  const dt = new Date(`${schedule.day}T${schedule.label}`);
+  if (isNaN(dt.getTime())) return { label: 'Scheduled', cls: 'bg-blue-50 text-blue-700' };
+  if (dt <= new Date()) return { label: 'Deployed', cls: 'bg-emerald-50 text-emerald-700' };
+  return { label: 'Scheduled', cls: 'bg-blue-50 text-blue-700' };
+}
+
 export function mapRequest(raw) {
   const status = raw.status
     .replace(/_/g, ' ')

@@ -33,6 +33,7 @@ export const api = {
   get: (path) => request(path),
   post: (path, data) => request(path, { method: 'POST', body: JSON.stringify(data) }),
   put: (path, data) => request(path, { method: 'PUT', body: JSON.stringify(data) }),
+  patch: (path, data) => request(path, { method: 'PATCH', body: JSON.stringify(data) }),
   delete: (path) => request(path, { method: 'DELETE' }),
 
   boats: () => api.get('/boats/'),
@@ -44,7 +45,7 @@ export const api = {
   users: () => api.get('/users/'),
   userDetail: (id) => api.get(`/users/${id}/`),
   createUser: (data) => api.post('/users/', data),
-  updateUser: (id, data) => api.put(`/users/${id}/`, data),
+  updateUser: (id, data) => api.patch(`/users/${id}/`, data),
   deleteUser: (id) => api.delete(`/users/${id}/`),
   pendingUserCount: () => api.get('/users/pending-count/'),
   pendingRequestCount: () => api.get('/requests/pending-count/'),
@@ -56,7 +57,9 @@ export const api = {
   deleteOperator: (id) => api.delete(`/operators/${id}/`),
 
   requests: () => api.get('/requests/'),
+  requestsArchived: () => api.get('/requests/?archived=true'),
   requestDetail: (id) => api.get(`/requests/${id}/`),
+  restoreRequest: (id) => api.post(`/requests/${id}/restore/`),
   createRequest: (data) => api.post('/requests/', data),
   updateRequest: (id, data) => api.put(`/requests/${id}/`, data),
   deleteRequest: (id) => api.delete(`/requests/${id}/`),

@@ -1,4 +1,5 @@
 import { useEffect, useState, useMemo } from 'react';
+import Modal from '../../components/Modal';
 import api from '../../services/api';
 import {
     Plus,
@@ -874,7 +875,7 @@ export default function ManageBots() {
 
             {/* 1. ADD BOT MODAL */}
             {isAddBotOpen && (
-                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                <Modal className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
                     <div className="bg-white rounded-2xl shadow-xl w-full max-w-md border border-slate-100 overflow-hidden animate-fade-in">
                         <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50">
                             <h3 className="text-base font-bold text-slate-900">Add New Bot</h3>
@@ -939,13 +940,13 @@ export default function ManageBots() {
                             </div>
                         </form>
                     </div>
-                </div>
+                </Modal>
             )}
 
             {/* 2. ADD OPERATOR MODAL */}
             {/* 2. ADD OPERATOR MODAL */}
             {isAddOpOpen && (
-                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                <Modal className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
                     <div className="bg-white rounded-2xl shadow-xl w-full max-w-md border border-slate-100 overflow-hidden animate-fade-in">
                         <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50">
                             <h3 className="text-base font-bold text-slate-900">Add Operator</h3>
@@ -1018,12 +1019,12 @@ export default function ManageBots() {
                             </div>
                         </form>
                     </div>
-                </div>
+                </Modal>
             )}
 
             {/* 2. EDIT OPERATOR MODAL */}
             {isEditOpOpen && editingOp && (
-                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                <Modal className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
                     <div className="bg-white rounded-2xl shadow-xl w-full max-w-md border border-slate-100 overflow-hidden animate-fade-in">
                         <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50">
                             <h3 className="text-base font-bold text-slate-900">Edit Operator</h3>
@@ -1096,12 +1097,12 @@ export default function ManageBots() {
                             </div>
                         </form>
                     </div>
-                </div>
+                </Modal>
             )}
 
             {/* 3. ASSIGN OPERATOR MODAL */}
             {isAssignOpOpen && selectedBot && (
-                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                <Modal className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
                     <div className="bg-white rounded-2xl shadow-xl w-full max-w-md border border-slate-100 overflow-hidden animate-fade-in">
                         <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50">
                             <div>
@@ -1149,12 +1150,12 @@ export default function ManageBots() {
                             </div>
                         </form>
                     </div>
-                </div>
+                </Modal>
             )}
 
             {/* 4. SCHEDULE MAINTENANCE MODAL */}
             {isMaintenanceOpen && selectedBot && (
-                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                <Modal className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
                     <div className="bg-white rounded-2xl shadow-xl w-full max-w-md border border-slate-100 overflow-hidden animate-fade-in">
                         <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50">
                             <div>
@@ -1219,12 +1220,12 @@ export default function ManageBots() {
                             </div>
                         </form>
                     </div>
-                </div>
+                </Modal>
             )}
 
             {/* 5. MANAGE SCHEDULE MODAL */}
             {isManageScheduleOpen && selectedBot && (
-                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                <Modal className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
                     <div className="bg-white rounded-2xl shadow-xl w-full max-w-md border border-slate-100 overflow-hidden animate-fade-in">
                         <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50">
                             <div>
@@ -1289,12 +1290,12 @@ export default function ManageBots() {
                             </div>
                         </form>
                     </div>
-                </div>
+                </Modal>
             )}
 
             {/* 6. ARCHIVE CONFIRMATION MODAL */}
             {isArchiveConfirmOpen && selectedBot && (
-                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                <Modal className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
                     <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm border border-slate-100 overflow-hidden animate-fade-in">
                         <div className="p-5 pb-3 flex justify-start items-center gap-3">
                             <div className="w-10 h-10 rounded-full bg-red-50 flex items-center justify-center text-red-500 shrink-0">
@@ -1327,12 +1328,12 @@ export default function ManageBots() {
                             </div>
                         </div>
                     </div>
-                </div>
+                </Modal>
             )}
 
             {/* 7. VIEW ALL BOTS MODAL */}
             {isViewAllBotsOpen && (
-                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                <Modal className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
                     <div className="bg-white rounded-2xl shadow-xl w-full max-w-4xl border border-slate-100 overflow-hidden flex flex-col max-h-[90vh] animate-fade-in">
                         <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50 shrink-0">
                             <div>
@@ -1443,12 +1444,12 @@ export default function ManageBots() {
                             </table>
                         </div>
                     </div>
-                </div>
+                </Modal>
             )}
 
             {/* 8. VIEW ALL OPERATORS MODAL */}
             {isViewAllOpsOpen && (
-                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                <Modal className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
                     <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl border border-slate-100 overflow-hidden flex flex-col max-h-[90vh] animate-fade-in">
                         <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50 shrink-0">
                             <div>
@@ -1598,7 +1599,7 @@ export default function ManageBots() {
                             )}
                         </div>
                     </div>
-                </div>
+                </Modal>
             )}
 
         </div>

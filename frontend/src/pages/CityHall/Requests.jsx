@@ -185,20 +185,21 @@ export default function Requests() {
                   </td>
                    <td className="px-5 py-3.5">
                      <div className="flex items-center justify-end gap-2">
-                       <button
-                         onClick={() => navigate(`/mayorsoffice/requests/${req.id}`)}
-                         className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-blue-600 hover:bg-blue-50"
-                       >
-                         <Eye size={13} />
-                         View
-                       </button>
-                       {req.status === "Pending Mayor Approval" && (
+                       {req.status === "Pending Mayor Approval" ? (
                          <button
                            onClick={() => navigate(`/mayorsoffice/requests/${req.id}`)}
                            className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-[#1b4de4] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#153eb8]"
                          >
                            <Signature size={13} />
                            Review
+                         </button>
+                       ) : (
+                         <button
+                           onClick={() => navigate(`/mayorsoffice/requests/${req.id}`)}
+                           className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-blue-600 hover:bg-blue-50"
+                         >
+                           <Eye size={13} />
+                           View
                          </button>
                        )}
                      </div>

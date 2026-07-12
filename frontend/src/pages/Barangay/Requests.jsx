@@ -60,11 +60,11 @@ export default function BarangayRequests({ currentUser }) {
     async function load() {
       try {
         const all = await api.requests();
-        const barangayName = (currentUser?.name || "").toLowerCase();
+        const requesterName = (currentUser?.name || "").toLowerCase();
         const mapped = all
           .filter((r) => {
-            const reqBarangay = (r.requested_by_barangay || r.barangay || "").toLowerCase();
-            return reqBarangay.includes(barangayName);
+            const reqName = (r.requested_by_name || "").toLowerCase();
+            return requesterName.length > 0 && reqName.includes(requesterName);
           })
           .map(mapRequest);
         if (!cancelled) setRequests(mapped);
@@ -161,7 +161,7 @@ export default function BarangayRequests({ currentUser }) {
                 {filtered.map((req) => {
                   const isPendingMayor = req.status === "Pending Mayor Approval";
                   return (
-                  <tr key={req.id} className={`border-t border-slate-50 transition-colors ${isPendingMayor ? 'opacity-50 bg-slate-50/60' : 'hover:bg-slate-50/60'}`}>
+                  <tr key={req.id} className="border-t border-slate-50 transition-colors hover:bg-slate-50/60">
                     <td className="px-5 py-3.5 font-semibold text-slate-800">{req.id}</td>
                     <td className="px-5 py-3.5 text-slate-600">{req.type}</td>
                     <td className="px-5 py-3.5 text-slate-600 flex items-center gap-1"><MapPin className="w-3 h-3 text-slate-400" />{req.location?.barangay}</td>
@@ -174,22 +174,16 @@ export default function BarangayRequests({ currentUser }) {
                        {req.status}
                      </span>
                    </td>
-                    <td className="px-5 py-3.5">
-                      {isPendingMayor ? (
-                        <span className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-400 cursor-not-allowed" title="Awaiting Mayor approval">
-                          <Eye size={13} />
-                          View
-                        </span>
-                      ) : (
+                     <td className="px-5 py-3.5">
                         <button
                           onClick={() => navigate(`/barangay/requests/${req.id}`)}
                           className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-blue-600 hover:bg-blue-50"
+                          title={isPendingMayor ? "Awaiting Mayor approval" : "View request"}
                         >
-                          <Eye size={13} />
-                          View
-                        </button>
-                      )}
-                    </td>
+                         <Eye size={13} />
+                         View
+                       </button>
+                     </td>
                  </tr>
                   );
                 })}

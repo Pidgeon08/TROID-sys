@@ -38,6 +38,8 @@ export default function UserManagement({ currentUser }) {
   const [editingUser, setEditingUser] = useState(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [activeModal, setActiveModal] = useState(null);
+  const [editConfirm, setEditConfirm] = useState(null);
+  const [archiveConfirm, setArchiveConfirm] = useState(null);
   const [page, setPage] = useState(1);
   const [pendingApproval, setPendingApproval] = useState(0);
 
@@ -333,7 +335,7 @@ export default function UserManagement({ currentUser }) {
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              handleArchiveToggle(u);
+                              setArchiveConfirm(u);
                             }}
                             disabled={currentUser && String(u.id) === String(currentUser.id)}
                             className={`flex h-7 w-7 items-center justify-center rounded-lg border transition-colors ${
@@ -461,7 +463,7 @@ export default function UserManagement({ currentUser }) {
       </div>
 
       {editingUser && (
-        <EditUserModal user={editingUser} onCancel={() => setEditingUser(null)} onSave={handleSaveEdit} />
+        <EditUserModal user={editingUser} onCancel={() => setEditingUser(null)} onSave={(form) => setEditConfirm(form)} />
       )}
 
       {activeModal === 'resetPassword' && selected && (
@@ -482,6 +484,22 @@ export default function UserManagement({ currentUser }) {
 
       {showAddModal && (
         <AddUserModal onCancel={() => setShowAddModal(false)} onSave={handleAddUser} />
+      )}
+
+      {editConfirm && (
+        <EditUserConfirmModal
+          form={editConfirm}
+          onCancel={() => setEditConfirm(null)}
+          onConfirm={() => { handleSaveEdit(editConfirm); setEditConfirm(null); }}
+        />
+      )}
+
+      {archiveConfirm && (
+        <ArchiveUserConfirmModal
+          user={archiveConfirm}
+          onCancel={() => setArchiveConfirm(null)}
+          onConfirm={() => { handleArchiveToggle(archiveConfirm); setArchiveConfirm(null); }}
+        />
       )}
     </div>
   );
@@ -782,6 +800,70 @@ function SuspendAccountModal({ user, onCancel, onConfirm }) {
           </button>
           <button onClick={onConfirm} className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700">
             Suspend Account
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EditUserConfirmModal({ form, onCancel, onConfirm }) {
+  const roleLabel = form.role === 'admin' ? 'Admin' : form.role === 'mayorsoffice' ? 'Mayor' : form.role === 'barangay' ? 'Barangay' : form.role;
+  const statusLabel = form.status === 'active' ? 'Active' : form.status === 'Pending' ? 'Pending' : form.status === 'Offline' ? 'Offline' : form.status === 'Archived' ? 'Archived' : form.status;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
+      <div className="w-full max-w-sm rounded-xl bg-white p-6 border border-slate-200">
+        <div className="mb-4 flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-slate-800">Confirm Changes</h3>
+          <button onClick={onCancel} className="text-slate-400 hover:text-slate-600" aria-label="Close">
+            <X size={18} />
+          </button>
+        </div>
+        <p className="text-sm text-slate-600 mb-4">
+          Save the following changes for <strong>{form.name}</strong>?
+        </p>
+        <div className="mb-4 space-y-1.5 rounded-lg bg-slate-50 p-3 text-sm">
+          <p className="text-slate-600"><span className="text-slate-400">Name: </span><span className="font-medium text-slate-800">{form.name}</span></p>
+          <p className="text-slate-600"><span className="text-slate-400">Email: </span><span className="font-medium text-slate-800">{form.email}</span></p>
+          <p className="text-slate-600"><span className="text-slate-400">Role: </span><span className="font-medium text-slate-800">{roleLabel}</span></p>
+          <p className="text-slate-600"><span className="text-slate-400">Status: </span><span className="font-medium text-slate-800">{statusLabel}</span></p>
+          <p className="text-slate-600"><span className="text-slate-400">Assigned location: </span><span className="font-medium text-slate-800">{form.location || '—'}</span></p>
+        </div>
+        <div className="flex justify-end gap-2">
+          <button onClick={onCancel} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
+            Cancel
+          </button>
+          <button onClick={onConfirm} className="rounded-lg bg-[#1b4de4] px-4 py-2 text-sm font-medium text-white hover:bg-[#153eb8]">
+            Save Changes
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ArchiveUserConfirmModal({ user, onCancel, onConfirm }) {
+  const isArchiving = user.status !== 'Archived';
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
+      <div className="w-full max-w-sm rounded-xl bg-white p-6 border border-slate-200">
+        <div className="mb-4 flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-slate-800">{isArchiving ? 'Archive Account' : 'Restore Account'}</h3>
+          <button onClick={onCancel} className="text-slate-400 hover:text-slate-600" aria-label="Close">
+            <X size={18} />
+          </button>
+        </div>
+        <p className="text-sm text-slate-600 mb-4">
+          {isArchiving
+            ? `Archive ${user.name}? This will prevent the account from logging in.`
+            : `Restore ${user.name}? This will reactivate the account.`}
+        </p>
+        <div className="flex justify-end gap-2">
+          <button onClick={onCancel} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
+            Cancel
+          </button>
+          <button onClick={onConfirm} className={`rounded-lg px-4 py-2 text-sm font-medium text-white ${isArchiving ? 'bg-red-600 hover:bg-red-700' : 'bg-emerald-600 hover:bg-emerald-700'}`}>
+            {isArchiving ? 'Archive' : 'Restore'}
           </button>
         </div>
       </div>

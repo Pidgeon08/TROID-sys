@@ -1,6 +1,6 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Eye, Trash2, ChevronLeft, ChevronRight, Plus, Search, Filter, FileText, Clock, CheckCircle2, XCircle, Signature } from "lucide-react";
+import { Eye, Trash2, ChevronLeft, ChevronRight, Plus, Search, Filter, FileText, Clock, CheckCircle2, XCircle, Signature, Archive } from "lucide-react";
 import { TABS } from "../../constants/requests";
 import { useRequests } from "../../hooks/useRequests";
 import { Badge } from "../../components/ui/Badge";
@@ -18,6 +18,30 @@ export default function Requests({ userRole = "admin" }) {
   const { loading, activeTab, setActiveTab, searchQuery, setSearchQuery, filteredByTab, counts, requests, setRequests } = useRequests(userRole);
   const [currentPage, setCurrentPage] = useState(1);
   const [archivingId, setArchivingId] = useState(null);
+  const [showArchived, setShowArchived] = useState(false);
+  const [archivedRequests, setArchivedRequests] = useState([]);
+  const [loadingArchived, setLoadingArchived] = useState(false);
+
+  useEffect(() => {
+    if (!showArchived) return;
+    let cancelled = false;
+    setLoadingArchived(true);
+    api.requestsArchived()
+      .then((res) => { if (!cancelled) setArchivedRequests(Array.isArray(res) ? res.map(mapRequest) : []); })
+      .catch((err) => console.error('Failed to load archived requests:', err))
+      .finally(() => { if (!cancelled) setLoadingArchived(false); });
+    return () => { cancelled = true; };
+  }, [showArchived]);
+
+  const handleRestore = async (req) => {
+    try {
+      await api.restoreRequest(req.id);
+      setArchivedRequests(prev => prev.filter(r => r.id !== req.id));
+    } catch (err) {
+      console.error('Failed to restore request:', err);
+      alert('Failed to restore request. Please try again.');
+    }
+  };
 
   const handleArchive = async (req) => {
     if (!confirm(`Archive request ${req.id}? This action cannot be undone.`)) return;
@@ -33,12 +57,13 @@ export default function Requests({ userRole = "admin" }) {
     }
   };
 
+  const source = showArchived ? archivedRequests : filteredByTab;
   const paginated = useMemo(
-    () => filteredByTab.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE),
-    [filteredByTab, currentPage]
+    () => source.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE),
+    [source, currentPage]
   );
 
-  const totalPages = Math.max(1, Math.ceil(filteredByTab.length / PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(source.length / PAGE_SIZE));
 
   const goTo = (p) => setCurrentPage(Math.max(1, Math.min(totalPages, p)));
 
@@ -65,6 +90,13 @@ export default function Requests({ userRole = "admin" }) {
             <Plus size={15} />
             Send Request
           </button>
+          <button
+            onClick={() => { setShowArchived((v) => !v); setCurrentPage(1); }}
+            className={`flex items-center gap-2 rounded-lg border px-3.5 py-2 text-sm font-medium transition-colors ${showArchived ? 'border-blue-300 bg-blue-50 text-blue-700' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}
+          >
+            <Archive size={15} />
+            {showArchived ? 'Hide Archived' : 'Show Archived'}
+          </button>
           <SearchBar
             value={searchQuery}
             onChange={(val) => { setSearchQuery(val); setCurrentPage(1); }}
@@ -88,20 +120,22 @@ export default function Requests({ userRole = "admin" }) {
       </div>
 
       <Card>
-        <div className="flex items-center gap-6 px-5 border-b border-slate-100 overflow-x-auto">
-          {TABS.map((tab) => (
-            <button
-              key={tab}
-              onClick={() => { setActiveTab(tab); setCurrentPage(1); }}
-              className={`relative py-3.5 text-sm font-medium transition-colors whitespace-nowrap ${
-                activeTab === tab ? "text-blue-600" : "text-slate-500 hover:text-slate-700"
-              }`}
-            >
-              {tab}
-              {activeTab === tab && <span className="absolute left-0 right-0 -bottom-px h-[2px] bg-blue-600 rounded-full" />}
-            </button>
-          ))}
-        </div>
+        {!showArchived && (
+          <div className="flex items-center gap-6 px-5 border-b border-slate-100 overflow-x-auto">
+            {TABS.map((tab) => (
+              <button
+                key={tab}
+                onClick={() => { setActiveTab(tab); setCurrentPage(1); }}
+                className={`relative py-3.5 text-sm font-medium transition-colors whitespace-nowrap ${
+                  activeTab === tab ? "text-blue-600" : "text-slate-500 hover:text-slate-700"
+                }`}
+              >
+                {tab}
+                {activeTab === tab && <span className="absolute left-0 right-0 -bottom-px h-[2px] bg-blue-600 rounded-full" />}
+              </button>
+            ))}
+          </div>
+        )}
 
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -129,30 +163,43 @@ export default function Requests({ userRole = "admin" }) {
                   </td>
                    <td className="px-5 py-3.5">
                      <div className="flex items-center justify-end gap-2">
-                       <button
-                         onClick={() => navigate(`/admin/requests/${req.id}`)}
-                         className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-blue-600 hover:bg-blue-50"
-                       >
-                         <Eye size={13} />
-                         View
-                       </button>
-                       {req.status === "Pending Admin Approval" && (
+                       {showArchived ? (
                          <button
-                           onClick={() => navigate(`/admin/requests/${req.id}`)}
-                           className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-[#1b4de4] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#153eb8]"
+                           onClick={() => handleRestore(req)}
+                           className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-emerald-200 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50"
                          >
-                           <Signature size={13} />
-                           Review
+                           <CheckCircle2 size={13} />
+                           Restore
                          </button>
+                       ) : (
+                         <>
+                           {req.status === "Pending Admin Approval" ? (
+                             <button
+                               onClick={() => navigate(`/admin/requests/${req.id}`)}
+                               className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-[#1b4de4] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#153eb8]"
+                             >
+                               <Signature size={13} />
+                               Review
+                             </button>
+                           ) : (
+                             <button
+                               onClick={() => navigate(`/admin/requests/${req.id}`)}
+                               className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-blue-600 hover:bg-blue-50"
+                             >
+                               <Eye size={13} />
+                               View
+                             </button>
+                           )}
+                           <button
+                             onClick={() => handleArchive(req)}
+                             disabled={archivingId === req.id}
+                             className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
+                           >
+                             <Trash2 size={13} />
+                             {archivingId === req.id ? "Archiving..." : "Archive"}
+                           </button>
+                         </>
                        )}
-                       <button
-                         onClick={() => handleArchive(req)}
-                         disabled={archivingId === req.id}
-                         className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
-                       >
-                         <Trash2 size={13} />
-                         {archivingId === req.id ? "Archiving..." : "Archive"}
-                       </button>
                      </div>
                    </td>
                 </tr>

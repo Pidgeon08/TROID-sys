@@ -25,6 +25,9 @@ class OperatorSerializer(serializers.ModelSerializer):
     class Meta:
         model = Operator
         fields = ['id', 'operator_id', 'name', 'status', 'assigned_bot', 'availability', 'archived']
+        extra_kwargs = {
+            'operator_id': {'required': False, 'allow_blank': True},
+        }
 
 class StatusHistorySerializer(serializers.ModelSerializer):
     class Meta:
@@ -42,7 +45,7 @@ class RequestSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Request
-        fields = ['id', 'request_id', 'request_type', 'status', 'date_submitted', 'requested_by_name', 'requested_by_role', 'requested_by_barangay', 'contact', 'email', 'location_name', 'barangay', 'municipality', 'province', 'notes', 'letter_file_name', 'letter_size', 'bot_id', 'operator', 'bags', 'weight_kg', 'non_usable_kg', 'recyclable_kg', 'status_history', 'photos']
+        fields = ['id', 'request_id', 'request_type', 'status', 'date_submitted', 'requested_by_name', 'requested_by_role', 'requested_by_barangay', 'contact', 'email', 'location_name', 'barangay', 'municipality', 'province', 'notes', 'letter_file_name', 'letter_size', 'bot_id', 'operator', 'bags', 'weight_kg', 'non_usable_kg', 'recyclable_kg', 'archived', 'status_history', 'photos']
         extra_kwargs = {
             'request_id': {'required': False, 'allow_blank': True},
             'email': {'required': False, 'allow_blank': True},
@@ -59,7 +62,7 @@ class RequestSerializer(serializers.ModelSerializer):
 class DeploymentScheduleSerializer(serializers.ModelSerializer):
     class Meta:
         model = DeploymentSchedule
-        fields = ['id', 'bot', 'day', 'status', 'label', 'zone']
+        fields = ['id', 'bot', 'day', 'status', 'label', 'zone', 'request_id']
 
 class LandfillRecordSerializer(serializers.ModelSerializer):
     class Meta:

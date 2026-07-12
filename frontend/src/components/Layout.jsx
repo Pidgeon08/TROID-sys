@@ -9,7 +9,7 @@ const Layout = ({ isAuthenticated, onLogout, userType = 'admin', currentUser = n
   return (
     <div className="flex h-screen w-screen overflow-hidden">
       <Sidebar onLogout={onLogout} userType={userType} currentUser={currentUser} />
-      <main className="flex-1 p-8 overflow-y-auto relative bg-[#f8fafc]">
+      <main className="flex-1 p-8 overflow-y-auto relative z-30 bg-[#f8fafc]">
         <Outlet context={{ currentUser }} />
       </main>
     </div>
