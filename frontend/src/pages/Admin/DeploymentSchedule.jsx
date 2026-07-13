@@ -4,7 +4,7 @@ import {
   Bot,
   CalendarCheck,
   UserRound,
-  Wrench,
+  CheckCircle2,
   Plus,
   Filter,
   Info,
@@ -35,7 +35,6 @@ const TIME_SLOTS = [
 
 const STATUS_STYLES = {
   scheduled: "bg-emerald-50 text-emerald-700 border border-emerald-100",
-  maintenance: "bg-amber-50 text-amber-700 border border-amber-100",
   available: "bg-sky-50 text-sky-700 border border-sky-100",
   none: "bg-slate-50 text-slate-400 border border-slate-100",
 };
@@ -94,7 +93,7 @@ function Cell({ entry, onClick, dateObj }) {
   );
 }
 
-function ScheduleModal({ bots, approvedRequests, scheduledRequestIds = new Set(), onClose, onSave, onViewRequest, prefillBot, prefillZone }) {
+function ScheduleModal({ bots, approvedRequests, scheduledRequestIds = new Set(), onClose, onSave, onViewRequest, prefillBot, prefillZone, schedule }) {
   const [selectedBots, setSelectedBots] = useState(prefillBot ? [prefillBot] : []);
   const [selectedDate, setSelectedDate] = useState(toDateInput(new Date()));
   const [selectedTime, setSelectedTime] = useState("06:00");
@@ -104,6 +103,8 @@ function ScheduleModal({ bots, approvedRequests, scheduledRequestIds = new Set()
   const [confirmData, setConfirmData] = useState(null);
   const [showSetSchedule, setShowSetSchedule] = useState(false);
   const [botPage, setBotPage] = useState(0);
+  const [searchBotId, setSearchBotId] = useState("");
+  const [botFilter, setBotFilter] = useState("all");
 
   const selectSlot = (time, botId) => {
     setSelectedTime(time);
@@ -139,14 +140,24 @@ function ScheduleModal({ bots, approvedRequests, scheduledRequestIds = new Set()
     setSelectedTime("06:00");
     setShowSetSchedule(false);
     setBotPage(0);
+    setSearchBotId("");
+    setBotFilter("all");
   };
 
   const confirmBots = bots.filter((b) => confirmData?.botIds?.includes(b.id));
   const confirmRequest = approvedRequests.find((r) => r.id === confirmData?.requestId);
 
   const BOTS_PER_PAGE = 6;
-  const totalBotPages = Math.max(1, Math.ceil(bots.length / BOTS_PER_PAGE));
-  const pagedBots = bots.slice(botPage * BOTS_PER_PAGE, (botPage + 1) * BOTS_PER_PAGE);
+  const filteredBots = bots.filter((b) => {
+    if (!searchBotId.trim() && botFilter === "all") return true;
+    const query = searchBotId.trim().toLowerCase();
+    const matchesSearch = !searchBotId.trim() || String(b.id).toLowerCase().includes(query) || String(b.name || '').toLowerCase().includes(query);
+    const isScheduled = schedule?.[b.id]?.[selectedDate]?.status === 'scheduled';
+    const matchesFilter = botFilter === "all" || (botFilter === "scheduled" && isScheduled) || (botFilter === "unscheduled" && !isScheduled);
+    return matchesSearch && matchesFilter;
+  });
+  const totalBotPages = Math.max(1, Math.ceil(filteredBots.length / BOTS_PER_PAGE));
+  const pagedBots = filteredBots.slice(botPage * BOTS_PER_PAGE, (botPage + 1) * BOTS_PER_PAGE);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
@@ -218,15 +229,15 @@ function ScheduleModal({ bots, approvedRequests, scheduledRequestIds = new Set()
                   placeholder="e.g. Near the plaza"
                   className="w-full rounded-lg border border-slate-200 bg-white py-2.5 px-3 text-sm text-slate-700 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
                 />
-              </div>
-            </div>
-          <div>
+               </div>
+               </div>
+               <div>
             <label className="block text-xs font-semibold text-slate-500 mb-1.5">Schedule</label>
-            <button
-              type="button"
-              onClick={() => setShowSetSchedule(true)}
-              className="w-full flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white py-2.5 px-3 text-sm text-left outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30 hover:bg-slate-50 transition-colors"
-            >
+              <button
+                type="button"
+                onClick={() => { setShowSetSchedule(true); setSearchBotId(""); setBotPage(0); }}
+                className="w-full flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white py-2.5 px-3 text-sm text-left outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30 hover:bg-slate-50 transition-colors"
+              >
               <span className={selectedBots.length ? "text-slate-700 font-medium" : "text-slate-400"}>
                 {selectedBots.length
                   ? `${selectedBots.map((id) => bots.find((b) => b.id === id)?.name || id).join(", ")} • ${selectedDate} • ${selectedTime}`
@@ -319,10 +330,43 @@ function ScheduleModal({ bots, approvedRequests, scheduledRequestIds = new Set()
                 />
               </div>
               <div>
-                <div className="border border-slate-100 rounded-xl">
-                  <div className="overflow-auto max-h-[55vh]">
-                    <div className="min-w-[640px]">
-                      <div
+                <label className="block text-xs font-semibold text-slate-500 mb-1.5">Search Bot ID</label>
+                <input
+                  type="text"
+                  value={searchBotId}
+                  onChange={(e) => { setSearchBotId(e.target.value); setBotPage(0); }}
+                   placeholder="Search by bot ID or name"
+                   className="w-full rounded-lg border border-slate-200 bg-white py-2.5 px-3 text-sm text-slate-700 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
+                 />
+               </div>
+               <div className="flex items-center gap-2">
+                 <button
+                   type="button"
+                   onClick={() => setBotFilter("all")}
+                   className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors ${botFilter === "all" ? "bg-[#1b4de4] text-white shadow-sm" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
+                 >
+                   All
+                 </button>
+                 <button
+                   type="button"
+                   onClick={() => setBotFilter("scheduled")}
+                   className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors ${botFilter === "scheduled" ? "bg-[#1b4de4] text-white shadow-sm" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
+                 >
+                   Scheduled
+                 </button>
+                 <button
+                   type="button"
+                   onClick={() => setBotFilter("unscheduled")}
+                   className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors ${botFilter === "unscheduled" ? "bg-[#1b4de4] text-white shadow-sm" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
+                 >
+                   Unscheduled
+                 </button>
+               </div>
+               <div>
+                 <div className="border border-slate-100 rounded-xl">
+                   <div className="overflow-auto max-h-[55vh]">
+                     <div className="min-w-[640px]">
+                       <div
                         className="grid gap-1.5 p-2 border-b border-slate-100 bg-slate-50 sticky top-0 z-20"
                         style={{ gridTemplateColumns: `160px repeat(${TIME_SLOTS.length}, minmax(64px, 1fr))` }}
                       >
@@ -342,26 +386,40 @@ function ScheduleModal({ bots, approvedRequests, scheduledRequestIds = new Set()
                             className="grid gap-1.5 p-2 items-center"
                             style={{ gridTemplateColumns: `160px repeat(${TIME_SLOTS.length}, minmax(64px, 1fr))` }}
                           >
-                            <div className="bg-white sticky left-0 z-10 border-r border-slate-200">
-                              <span className="block px-1 py-3 truncate text-xs font-semibold text-slate-500" title={b.name}>{b.name}</span>
-                            </div>
-                            {TIME_SLOTS.map((slot) => {
-                              const isSel = selectedTime === slot && selectedBots.includes(b.id);
-                              return (
-                                <button
-                                  key={slot}
-                                  type="button"
-                                  onClick={() => selectSlot(slot, b.id)}
-                                  className={`h-9 rounded-lg text-[11px] font-medium transition-colors ${
-                                    isSel
-                                      ? "bg-[#1b4de4] text-white"
-                                      : "bg-slate-50 text-slate-500 hover:bg-slate-100"
-                                  }`}
-                                >
-                                  {isSel ? slot : ""}
-                                </button>
-                              );
-                            })}
+                             {(() => {
+                               const alreadyScheduled = schedule?.[b.id]?.[selectedDate]?.status === 'scheduled';
+                               const scheduledSlot = alreadyScheduled ? schedule?.[b.id]?.[selectedDate]?.label : null;
+                               return (
+                                 <>
+                             <div className={`bg-white sticky left-0 z-10 border-r border-slate-200 ${alreadyScheduled ? 'opacity-60' : ''}`}>
+                               <span className={`block px-1 py-3 truncate text-xs font-semibold ${alreadyScheduled ? 'text-slate-400' : 'text-slate-500'}`} title={b.name}>{b.name}</span>
+                             </div>
+                              {TIME_SLOTS.map((slot) => {
+                                const isSel = selectedTime === slot && selectedBots.includes(b.id);
+                                const isScheduledSlot = alreadyScheduled && slot === scheduledSlot;
+                                return (
+                                  <button
+                                    key={slot}
+                                    type="button"
+                                    onClick={() => !alreadyScheduled && selectSlot(slot, b.id)}
+                                    disabled={alreadyScheduled}
+                                    className={`h-9 rounded-lg text-[11px] font-medium transition-colors ${
+                                      isSel
+                                        ? "bg-[#1b4de4] text-white"
+                                        : isScheduledSlot
+                                          ? "bg-amber-50 text-amber-700 border border-amber-200"
+                                          : alreadyScheduled
+                                            ? "bg-slate-100 text-slate-400 cursor-not-allowed"
+                                            : "bg-slate-50 text-slate-500 hover:bg-slate-100"
+                                    }`}
+                                  >
+                                    {isSel || alreadyScheduled ? slot : ""}
+                                  </button>
+                                );
+                              })}
+                                 </>
+                               );
+                             })()}
                           </div>
                         ))}
                       </div>
@@ -408,13 +466,13 @@ function ScheduleModal({ bots, approvedRequests, scheduledRequestIds = new Set()
               </div>
             <div className="p-6 border-t border-slate-100 flex gap-3">
               <button
-                onClick={() => setShowSetSchedule(false)}
+                onClick={() => { setShowSetSchedule(false); setSearchBotId(""); setBotPage(0); setBotFilter("all"); }}
                 className="flex-1 rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors"
               >
                 Cancel
               </button>
               <button
-                onClick={() => setShowSetSchedule(false)}
+                onClick={() => { setShowSetSchedule(false); setSearchBotId(""); setBotPage(0); setBotFilter("all"); }}
                 className="flex-1 rounded-lg bg-[#1b4de4] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#153eb8] transition-colors"
               >
                 Done
@@ -520,9 +578,10 @@ export default function DeploymentSchedule() {
   };
 
   const scheduledToday = Object.values(schedule).filter((s) => s?.[selectedDayKey]?.status === "scheduled").length;
-  const inMaintenance = Object.values(schedule).filter((s) =>
-    Object.values(s).some((d) => d.status === "maintenance")
-  ).length;
+  const completedDeployments = Object.values(schedule).reduce(
+    (acc, botSched) => acc + Object.values(botSched).filter((d) => d.status === "scheduled").length,
+    0
+  );
 
   const handleNext = () => {
     const newDate = new Date(selectedDate);
@@ -600,7 +659,7 @@ export default function DeploymentSchedule() {
             ))}
           </div>
           <div className="divide-y divide-slate-100">
-            {filteredBots.map((bot) => (
+            {pagedBots.map((bot) => (
               <div
                 key={bot.id}
                 className="grid grid-cols-[160px_repeat(7,1fr)] items-center gap-2 py-2.5"
@@ -632,36 +691,54 @@ export default function DeploymentSchedule() {
 
   const renderDayView = () => {
     return (
-      <div className="overflow-x-auto">
-        <div className="min-w-[400px]">
-          <div className="grid grid-cols-[160px_1fr] gap-2 border-b border-slate-100 pb-2">
-            <div className="text-xs font-semibold uppercase tracking-wider text-slate-400">Robot / Operator</div>
-            <div className="text-center text-xs font-semibold uppercase tracking-wider text-slate-400">
-              <div>{selectedDayLabel}</div>
-              <div className="mx-auto mt-0.5 flex h-5 w-5 items-center justify-center rounded-full text-[11px] bg-[#1b4de4] font-medium text-white">
-                {selectedDate.getDate()}
-              </div>
-              <div className="text-[10px] mt-0.5 text-slate-400">{selectedDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}</div>
+      <div className="overflow-auto">
+        <div className="min-w-[760px]">
+          <div
+            className="grid gap-1.5 p-2 border-b border-slate-100 bg-slate-50 sticky top-0 z-20"
+            style={{ gridTemplateColumns: `160px repeat(${TIME_SLOTS.length}, minmax(64px, 1fr))` }}
+          >
+            <div className="bg-slate-50 sticky left-0 z-20 border-r border-slate-200">
+              <span className="block px-1 py-3 text-center text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                {selectedDayLabel} · {selectedDate.getDate()} {selectedDate.toLocaleDateString('en-US', { month: 'short' })}
+              </span>
             </div>
-          </div>
-          <div className="divide-y divide-slate-100">
-            {filteredBots.map((bot) => (
-              <div
-                key={bot.id}
-                className="grid grid-cols-[160px_1fr] items-center gap-2 py-2.5"
-              >
-                <div className="flex items-center gap-2">
-                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500">
-                    <Bot className="h-4 w-4" />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold text-slate-900">{bot.id}</p>
-                    <p className="truncate text-xs text-slate-400">{bot.battery > 0 ? `${bot.battery}% battery` : 'No data'}</p>
-                  </div>
-                </div>
-                <Cell key={selectedDayKey} entry={schedule[bot.id]?.[dateKey(selectedDate)]} onClick={handleCellClick} dateObj={selectedDate} />
+            {TIME_SLOTS.map((slot) => (
+              <div key={slot} className="flex justify-center bg-slate-50 text-[11px] font-semibold uppercase tracking-wider text-slate-400 py-1">
+                {slot}
               </div>
             ))}
+          </div>
+          <div className="divide-y divide-slate-50">
+            {filteredBots.map((bot) => {
+              const dayEntry = schedule[bot.id]?.[dateKey(selectedDate)];
+              const scheduledSlot = dayEntry?.status === "scheduled" ? dayEntry.label : null;
+              return (
+                <div
+                  key={bot.id}
+                  className="grid gap-1.5 p-2 items-center"
+                  style={{ gridTemplateColumns: `160px repeat(${TIME_SLOTS.length}, minmax(64px, 1fr))` }}
+                >
+                  <div className="bg-white sticky left-0 z-10 border-r border-slate-200">
+                    <div className="flex items-center gap-2 px-1 py-1">
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500">
+                        <Bot className="h-4 w-4" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-slate-900">{bot.id}</p>
+                        <p className="truncate text-xs text-slate-400">{bot.battery > 0 ? `${bot.battery}% battery` : 'No data'}</p>
+                      </div>
+                    </div>
+                  </div>
+                  {TIME_SLOTS.map((slot) =>
+                    scheduledSlot === slot ? (
+                      <Cell key={slot} entry={dayEntry} onClick={handleCellClick} dateObj={selectedDate} />
+                    ) : (
+                      <div key={slot} className="rounded-xl border border-dashed border-slate-200 px-2 py-2.5" />
+                    )
+                  )}
+                </div>
+              );
+            })}
             {filteredBots.length === 0 && (
               <p className="py-6 text-center text-sm text-slate-400">
                 No robots match the selected filters.
@@ -697,10 +774,8 @@ export default function DeploymentSchedule() {
                   const isToday = date.toDateString() === new Date().toDateString();
                   const isSelected = date.toDateString() === selectedDate.toDateString();
                   const hasSchedule = filteredBots.some(bot => schedule[bot.id]?.[dayKey]?.status === 'scheduled');
-                  const hasMaintenance = filteredBots.some(bot => schedule[bot.id]?.[dayKey]?.status === 'maintenance');
                   let statusClass = "border border-dashed border-slate-200";
                   if (hasSchedule) statusClass = "bg-emerald-50 border border-emerald-100";
-                  else if (hasMaintenance) statusClass = "bg-amber-50 border border-amber-100";
 
                   return (
                     <div
@@ -714,7 +789,6 @@ export default function DeploymentSchedule() {
                         </span>
                       </div>
                       {hasSchedule && <div className="mt-1 h-1 w-1 rounded-full bg-emerald-500 mx-auto" />}
-                      {hasMaintenance && <div className="mt-1 h-1 w-1 rounded-full bg-amber-500 mx-auto" />}
                     </div>
                   );
                 })}
@@ -754,7 +828,6 @@ export default function DeploymentSchedule() {
           <div className="hidden items-center gap-3 sm:flex">
             <LegendDot className="bg-sky-500" label="Scheduled" />
             <LegendDot className="bg-emerald-500" label="Active" />
-            <LegendDot className="bg-amber-500" label="In Maintenance" />
             <LegendDot className="bg-slate-300" label="Offline" />
           </div>
           <button
@@ -849,10 +922,10 @@ export default function DeploymentSchedule() {
           sub={`Available: ${operators.length - robotsOnDuty}`}
         />
         <SummaryCard
-          icon={Wrench}
-          label="Maintenance"
-          value={inMaintenance}
-          sub="Units"
+          icon={CheckCircle2}
+          label="Deployment Complete"
+          value={completedDeployments}
+          sub="Completed deployments"
         />
       </div>
 
@@ -869,10 +942,49 @@ export default function DeploymentSchedule() {
         {view === 'Week' && renderWeekView()}
         {view === 'Month' && renderMonthView()}
 
+        {view === 'Week' && totalBotPages > 1 && (
+          <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-4">
+            <span className="text-xs text-slate-400">Page {botPage + 1} of {totalBotPages}</span>
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setBotPage((p) => Math.max(0, p - 1))}
+                disabled={botPage === 0}
+                aria-label="Previous page"
+                className="flex items-center justify-center rounded-lg border border-slate-200 w-8 h-8 text-slate-500 hover:bg-slate-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+              {Array.from({ length: totalBotPages }).map((_, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => setBotPage(i)}
+                  className={`flex items-center justify-center rounded-lg border w-8 h-8 text-xs font-medium transition-colors ${
+                    i === botPage
+                      ? "border-[#1b4de4] bg-[#1b4de4] text-white"
+                      : "border-slate-200 text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  {i + 1}
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={() => setBotPage((p) => Math.min(totalBotPages - 1, p + 1))}
+                disabled={botPage >= totalBotPages - 1}
+                aria-label="Next page"
+                className="flex items-center justify-center rounded-lg border border-slate-200 w-8 h-8 text-slate-500 hover:bg-slate-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        )}
+
         <div className="mt-4 flex flex-wrap items-center gap-4 border-t border-slate-100 pt-4">
           <LegendDot className="bg-emerald-500" label="Scheduled" />
           <LegendDot className="bg-sky-500" label="Available" />
-          <LegendDot className="bg-amber-500" label="Maintenance" />
           <LegendDot className="bg-slate-300" label="No Schedule" />
         </div>
       </div>
@@ -887,6 +999,7 @@ export default function DeploymentSchedule() {
           onViewRequest={setOverviewId}
           prefillBot={prefillBot}
           prefillZone={prefillZone}
+          schedule={schedule}
         />,
         document.body
       )}

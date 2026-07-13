@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import api from "../../../services/api";
 
-const REQUEST_TYPES = ["Cleanup", "Maintenance", "Inspection"];
+const REQUEST_TYPES = ["Cleanup", "Inspection"];
 
 export default function SendRequest() {
   const navigate = useNavigate();

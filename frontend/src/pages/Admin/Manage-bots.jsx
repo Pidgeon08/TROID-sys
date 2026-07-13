@@ -10,8 +10,6 @@ import {
     Search,
     Battery,
     BatteryCharging,
-    User,
-    Pencil,
     AlertTriangle,
     Info,
 } from 'lucide-react';
@@ -587,7 +585,6 @@ export default function ManageBots() {
                                             <th className="px-3 sm:px-5 py-3 text-[10px] sm:text-xs font-bold text-slate-400 uppercase tracking-wider">Status</th>
                                             <th className="px-3 sm:px-5 py-3 text-[10px] sm:text-xs font-bold text-slate-400 uppercase tracking-wider">Battery</th>
                                             <th className="px-3 sm:px-5 py-3 text-[10px] sm:text-xs font-bold text-slate-400 uppercase tracking-wider">Assigned Location</th>
-                                            <th className="px-3 sm:px-5 py-3 text-[10px] sm:text-xs font-bold text-slate-400 uppercase tracking-wider">Assigned Operator</th>
                                             <th className="px-3 sm:px-5 py-3 text-[10px] sm:text-xs font-bold text-slate-400 uppercase tracking-wider">Last Active</th>
                                         </tr>
                                     </thead>
@@ -620,7 +617,6 @@ export default function ManageBots() {
                                                     )}
                                                 </td>
                                                 <td className="px-3 sm:px-5 py-2.5 sm:py-3.5 font-semibold text-slate-500">{bot.assignedLocation}</td>
-                                                <td className="px-3 sm:px-5 py-2.5 sm:py-3.5 font-semibold text-slate-500">{bot.assignedOperator}</td>
                                                 <td className="px-3 sm:px-5 py-2.5 sm:py-3.5 font-medium text-slate-400">{bot.lastActive}</td>
                                             </tr>
                                         ))}
@@ -675,21 +671,9 @@ export default function ManageBots() {
                                             </span>
                                         </div>
                                         <div className="flex justify-between items-center py-1.5 border-b border-slate-50">
-                                            <span className="text-[11px] sm:text-xs font-semibold text-slate-400">Assigned Barangay</span>
-                                            <span className="text-xs sm:text-sm font-bold text-slate-800 truncate max-w-[120px] sm:max-w-[150px]" title={selectedBot.barangay}>
-                                                {selectedBot.barangay}
-                                            </span>
-                                        </div>
-                                        <div className="flex justify-between items-center py-1.5 border-b border-slate-50">
                                             <span className="text-[11px] sm:text-xs font-semibold text-slate-400">Scheduled Cleanup</span>
                                             <span className="text-xs sm:text-sm font-bold text-slate-800 truncate max-w-[120px] sm:max-w-[150px]" title={selectedBot.scheduledCleanup}>
                                                 {selectedBot.scheduledCleanup}
-                                            </span>
-                                        </div>
-                                        <div className="flex justify-between items-center py-1.5 border-b border-slate-50">
-                                            <span className="text-[11px] sm:text-xs font-semibold text-slate-400">Assigned Operator</span>
-                                            <span className="text-xs sm:text-sm font-bold text-slate-800 truncate max-w-[120px] sm:max-w-[150px]">
-                                                {selectedBot.assignedOperator}
                                             </span>
                                         </div>
                                         <div className="flex justify-between items-center py-1.5 border-b border-slate-50">
@@ -711,17 +695,6 @@ export default function ManageBots() {
                                 <div className="flex flex-col justify-start">
                                     <h3 className="text-xs sm:text-sm font-bold text-slate-900 mb-3 text-left md:text-right">Quick Actions</h3>
                                     <div className="flex flex-col gap-2.5">
-                                        <button
-                                            onClick={() => {
-                                                setAssignOpId(operators.find(o => o.name === selectedBot.assignedOperator)?.id || '');
-                                                setIsAssignOpOpen(true);
-                                            }}
-                                            className="w-full bg-[#1b4de4] hover:bg-[#153eb8] text-white py-2.5 px-4 rounded-xl text-[11px] sm:text-sm font-bold transition-all flex items-center justify-center gap-2 cursor-pointer shadow-sm"
-                                        >
-                                            <User className="w-4 h-4" />
-                                            <span>Assign Operator</span>
-                                        </button>
-
                                         <button
                                             onClick={() => setIsMaintenanceOpen(true)}
                                             className="w-full bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 py-2.5 px-4 rounded-xl text-[11px] sm:text-sm font-bold transition-all flex items-center justify-center gap-2 cursor-pointer"
@@ -756,116 +729,6 @@ export default function ManageBots() {
                             <p className="text-xs sm:text-sm font-semibold">No active bots available. Add a new bot to get started.</p>
                         </div>
                     )}
-
-                </div>
-
-                {/* ── RIGHT COLUMN: AVAILABLE OPERATORS ── */}
-                <div className="flex flex-col gap-4 lg:gap-6 min-h-0 h-full">
-
-                    <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] overflow-hidden flex flex-col h-full">
-                        <div>
-                            {/* Card Header */}
-                            <div className="p-4 sm:p-5 pb-2 sm:pb-3 flex justify-between items-center border-b border-slate-50">
-                                <h2 className="text-sm sm:text-base font-bold text-slate-950">Available Operators</h2>
-                                <button
-                                    onClick={() => setIsAddOpOpen(true)}
-                                    className="bg-[#1b4de4] hover:bg-[#153eb8] text-white text-xs sm:text-sm font-semibold py-1.5 px-3 rounded-lg shadow-sm flex items-center gap-1 transition-all cursor-pointer"
-                                >
-                                    <Plus className="w-3.5 h-3.5" />
-                                    <span>Add OP</span>
-                                </button>
-                            </div>
-
-                            {/* Operators List */}
-                            <div className="flex-1 overflow-y-auto min-h-0 p-3 sm:p-4 flex flex-col gap-3 sm:gap-3.5">
-                                {operators.filter(op => !op.archived).slice(0, 5).map((op) => (
-                                    <div
-                                        key={op.id}
-                                        className="flex items-center justify-between p-2 sm:p-2.5 rounded-xl border border-slate-50 hover:bg-slate-50/50 transition-colors"
-                                    >
-                                        <div className="flex items-center gap-2.5 sm:gap-3.5 min-w-0">
-                                            {/* Avatar with absolute status indicator */}
-                                            <div className="relative shrink-0">
-                                                <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-slate-200 flex items-center justify-center text-slate-600 font-bold text-[10px] sm:text-xs uppercase">
-                                                    {op.name.split(' ').map(n => n[0]).join('').slice(0, 2)}
-                                                </div>
-                                                <div className={`absolute bottom-0 right-0 w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full border-2 border-white ${getOpDotClass(op.status)}`}></div>
-                                            </div>
-
-                                            {/* Details */}
-                                            <div className="flex flex-col min-w-0">
-                                                <span className="text-xs sm:text-sm font-bold text-slate-900 truncate leading-tight">{op.name}</span>
-                                                <span className="text-[10px] sm:text-xs font-semibold text-slate-400 mt-0.5 flex items-center gap-1 capitalize">
-                                                    <span className={`inline-block w-1 h-1 sm:w-1.5 sm:h-1.5 rounded-full ${op.status === 'available' ? 'bg-emerald-500' : op.status === 'unavailable' ? 'bg-amber-500' : 'bg-slate-400'}`}></span>
-                                                    {op.status}
-                                                </span>
-                                                <span className="text-[10px] sm:text-xs font-bold text-slate-500 mt-1">
-                                                    {op.assignedBot ? `Assigned to: ${op.assignedBot}` : 'No assigned bot'}
-                                                </span>
-                                            </div>
-                                        </div>
-
-                                        {/* Status Pill Badge */}
-                                        <span className={`border text-[10px] sm:text-xs font-bold px-2 sm:px-3 py-0.5 sm:py-1 rounded-full shrink-0 ${getOpStatusBadgeClass(op.availability)}`}>
-                                            {op.availability.charAt(0).toUpperCase() + op.availability.slice(1)}
-                                        </span>
-                                        <button
-                                            onClick={() => {
-                                                setEditingOp(op);
-                                                setEditOpName(op.name);
-                                                setEditOpStatus(op.status);
-                                                setEditOpAssignedBot(op.assignedBot || '');
-                                                setIsEditOpOpen(true);
-                                            }}
-                                            className="text-slate-300 hover:text-[#1b4de4] p-1 rounded-lg hover:bg-slate-50 transition-colors shrink-0"
-                                            title="Edit operator"
-                                        >
-                                            <Pencil className="w-3.5 h-3.5" />
-                                        </button>
-                                        <button
-                                            onClick={async () => {
-                                                if (confirm(`Archive operator ${op.name}?`)) {
-                                                    try {
-                                                        await api.updateOperator(op.backendId, { archived: true, availability: 'unavailable', assigned_bot: null });
-                                                    } catch (err) {
-                                                        console.error('Failed to archive operator:', err);
-                                                    }
-                                                    setOperators(prev => prev.map(o => {
-                                                        if (o.id === op.id) {
-                                                            return { ...o, archived: true, availability: 'Unavailable', assignedBot: null };
-                                                        }
-                                                        return o;
-                                                    }));
-                                                    if (op.assignedBot) {
-                                                        setBots(prev => prev.map(b => {
-                                                            if (b.id === op.assignedBot) {
-                                                                return { ...b, assignedOperator: 'Not Assigned' };
-                                                            }
-                                                            return b;
-                                                        }));
-                                                    }
-                                                }
-                                            }}
-                                            className="text-slate-300 hover:text-amber-500 p-1 rounded-lg hover:bg-slate-50 transition-colors shrink-0"
-                                            title="Archive operator"
-                                        >
-                                            <Archive className="w-3.5 h-3.5" />
-                                        </button>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-
-                        {/* Footer */}
-                        <div className="p-4 border-t border-slate-50 flex justify-center">
-                            <button
-                                onClick={() => setIsViewAllOpsOpen(true)}
-                                className="text-[#1b4de4] hover:text-[#153eb8] text-xs sm:text-sm font-semibold transition-colors cursor-pointer"
-                            >
-                                View all Operators
-                            </button>
-                        </div>
-                    </div>
 
                 </div>
 
@@ -909,20 +772,6 @@ export default function ManageBots() {
                                 />
                             </div>
 
-                            <div>
-                                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Assign Operator</label>
-                                <select
-                                    value={newBot.assignedOperator}
-                                    onChange={(e) => setNewBot({ ...newBot, assignedOperator: e.target.value })}
-                                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl bg-white focus:outline-none focus:border-[#1b4de4]"
-                                >
-                                    <option value="Not Assigned">Not Assigned</option>
-                                    {operators.map(op => (
-                                        <option key={op.id} value={op.name}>{op.name} ({op.id})</option>
-                                    ))}
-                                </select>
-                            </div>
-
                             <div className="flex gap-3 justify-end mt-4 pt-4 border-t border-slate-100">
                                 <button
                                     type="button"
@@ -936,216 +785,6 @@ export default function ManageBots() {
                                     className="px-4 py-2 text-xs font-bold text-white bg-[#1b4de4] hover:bg-[#153eb8] rounded-xl shadow-sm cursor-pointer"
                                 >
                                     Add Bot
-                                </button>
-                            </div>
-                        </form>
-                    </div>
-                </Modal>
-            )}
-
-            {/* 2. ADD OPERATOR MODAL */}
-            {/* 2. ADD OPERATOR MODAL */}
-            {isAddOpOpen && (
-                <Modal className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-                    <div className="bg-white rounded-2xl shadow-xl w-full max-w-md border border-slate-100 overflow-hidden animate-fade-in">
-                        <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-                            <h3 className="text-base font-bold text-slate-900">Add Operator</h3>
-                            <button onClick={() => setIsAddOpOpen(false)} className="text-slate-400 hover:text-slate-600 transition-colors">
-                                <X className="w-5 h-5" />
-                            </button>
-                        </div>
-
-                        <form onSubmit={handleAddOp} className="p-5 flex flex-col gap-4">
-                            <div>
-                                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Operator Name</label>
-                                <input
-                                    type="text"
-                                    required
-                                    placeholder="e.g. Juan Dela Cruz"
-                                    value={newOp.name}
-                                    onChange={(e) => setNewOp({ ...newOp, name: e.target.value })}
-                                    className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-[#1b4de4]"
-                                />
-                            </div>
-
-                            <div>
-                                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Status</label>
-                                <select
-                                    value={newOp.status}
-                                    onChange={(e) => setNewOp({ ...newOp, status: e.target.value })}
-                                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl bg-white focus:outline-none focus:border-[#1b4de4]"
-                                >
-                                    <option value="available">Available</option>
-                                    <option value="unavailable">Unavailable</option>
-                                </select>
-                            </div>
-
-                            <div>
-                                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Assigned Bot</label>
-                                <select
-                                    value={newOp.assignedBot}
-                                    onChange={(e) => setNewOp({ ...newOp, assignedBot: e.target.value })}
-                                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl bg-white focus:outline-none focus:border-[#1b4de4]"
-                                >
-                                    <option value="">Not Assigned</option>
-                                    {bots.filter(b => b.assignedOperator === 'Not Assigned').map(b => (
-                                        <option key={b.id} value={b.id}>{b.id}</option>
-                                    ))}
-                                </select>
-                            </div>
-
-                            <div>
-                                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Availability</label>
-                                <div className={`px-3 py-2 rounded-xl border text-sm font-bold ${newOp.assignedBot ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : newOp.status === 'unavailable' ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-blue-50 text-blue-700 border-blue-200'}`}>
-                                    {newOp.assignedBot ? 'Assigned' : newOp.status === 'unavailable' ? 'Unavailable' : 'Available'}
-                                </div>
-                                <p className="text-[10px] text-slate-400 mt-1">Auto-set based on status and assigned bot</p>
-                            </div>
-
-                            <div className="flex gap-3 justify-end mt-4 pt-4 border-t border-slate-100">
-                                <button
-                                    type="button"
-                                    onClick={() => setIsAddOpOpen(false)}
-                                    className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50 rounded-xl border border-slate-200 cursor-pointer"
-                                >
-                                    Cancel
-                                </button>
-                                <button
-                                    type="submit"
-                                    className="px-4 py-2 text-xs font-bold text-white bg-[#1b4de4] hover:bg-[#153eb8] rounded-xl shadow-sm cursor-pointer"
-                                >
-                                    Add Operator
-                                </button>
-                            </div>
-                        </form>
-                    </div>
-                </Modal>
-            )}
-
-            {/* 2. EDIT OPERATOR MODAL */}
-            {isEditOpOpen && editingOp && (
-                <Modal className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-                    <div className="bg-white rounded-2xl shadow-xl w-full max-w-md border border-slate-100 overflow-hidden animate-fade-in">
-                        <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-                            <h3 className="text-base font-bold text-slate-900">Edit Operator</h3>
-                            <button onClick={() => { setIsEditOpOpen(false); setEditingOp(null); }} className="text-slate-400 hover:text-slate-600 transition-colors">
-                                <X className="w-5 h-5" />
-                            </button>
-                        </div>
-
-                        <form onSubmit={handleEditOp} className="p-5 flex flex-col gap-4">
-                            <div>
-                                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Operator Name</label>
-                                <input
-                                    type="text"
-                                    required
-                                    placeholder="e.g. Juan Dela Cruz"
-                                    value={editOpName}
-                                    onChange={(e) => setEditOpName(e.target.value)}
-                                    className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-[#1b4de4]"
-                                />
-                            </div>
-
-                            <div>
-                                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Status</label>
-                                <select
-                                    value={editOpStatus}
-                                    onChange={(e) => setEditOpStatus(e.target.value)}
-                                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl bg-white focus:outline-none focus:border-[#1b4de4]"
-                                >
-                                    <option value="available">Available</option>
-                                    <option value="unavailable">Unavailable</option>
-                                </select>
-                            </div>
-
-                            <div>
-                                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Assigned Bot</label>
-                                <select
-                                    value={editOpAssignedBot}
-                                    onChange={(e) => setEditOpAssignedBot(e.target.value)}
-                                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl bg-white focus:outline-none focus:border-[#1b4de4]"
-                                >
-                                    <option value="">Not Assigned</option>
-                                    {bots.filter(b => b.assignedOperator === 'Not Assigned' || b.assignedOperator === editingOp.name).map(b => (
-                                        <option key={b.id} value={b.id}>{b.id}</option>
-                                    ))}
-                                </select>
-                            </div>
-
-                            <div>
-                                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Availability</label>
-                                <div className={`px-3 py-2 rounded-xl border text-sm font-bold ${editOpAssignedBot ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : editOpStatus === 'unavailable' ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-blue-50 text-blue-700 border-blue-200'}`}>
-                                    {editOpAssignedBot ? 'Assigned' : editOpStatus === 'unavailable' ? 'Unavailable' : 'Available'}
-                                </div>
-                                <p className="text-[10px] text-slate-400 mt-1">Auto-set based on status and assigned bot</p>
-                            </div>
-
-                            <div className="flex gap-3 justify-end mt-4 pt-4 border-t border-slate-100">
-                                <button
-                                    type="button"
-                                    onClick={() => { setIsEditOpOpen(false); setEditingOp(null); }}
-                                    className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50 rounded-xl border border-slate-200 cursor-pointer"
-                                >
-                                    Cancel
-                                </button>
-                                <button
-                                    type="submit"
-                                    className="px-4 py-2 text-xs font-bold text-white bg-[#1b4de4] hover:bg-[#153eb8] rounded-xl shadow-sm cursor-pointer"
-                                >
-                                    Save Changes
-                                </button>
-                            </div>
-                        </form>
-                    </div>
-                </Modal>
-            )}
-
-            {/* 3. ASSIGN OPERATOR MODAL */}
-            {isAssignOpOpen && selectedBot && (
-                <Modal className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-                    <div className="bg-white rounded-2xl shadow-xl w-full max-w-md border border-slate-100 overflow-hidden animate-fade-in">
-                        <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-                            <div>
-                                <h3 className="text-base font-bold text-slate-900">Assign Operator</h3>
-                                <p className="text-xs text-slate-400 mt-0.5">Assign an operator to bot <strong className="text-slate-600">{selectedBot.id}</strong></p>
-                            </div>
-                            <button onClick={() => setIsAssignOpOpen(false)} className="text-slate-400 hover:text-slate-600 transition-colors">
-                                <X className="w-5 h-5" />
-                            </button>
-                        </div>
-
-                        <form onSubmit={handleAssignOperator} className="p-5 flex flex-col gap-4">
-                            <div>
-                                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Choose Operator</label>
-                                <select
-                                    required
-                                    value={assignOpId}
-                                    onChange={(e) => setAssignOpId(e.target.value)}
-                                    className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl bg-white focus:outline-none focus:border-[#1b4de4]"
-                                >
-                                    <option value="">-- Select Operator --</option>
-                                    <option value="None">None (Unassign Operator)</option>
-                                    {operators.map(op => (
-                                        <option key={op.id} value={op.id}>
-                                            {op.name} ({op.availability.charAt(0).toUpperCase() + op.availability.slice(1)} - {op.status})
-                                        </option>
-                                    ))}
-                                </select>
-                            </div>
-
-                            <div className="flex gap-3 justify-end mt-4 pt-4 border-t border-slate-100">
-                                <button
-                                    type="button"
-                                    onClick={() => setIsAssignOpOpen(false)}
-                                    className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50 rounded-xl border border-slate-200 cursor-pointer"
-                                >
-                                    Cancel
-                                </button>
-                                <button
-                                    type="submit"
-                                    className="px-4 py-2 text-xs font-bold text-white bg-[#1b4de4] hover:bg-[#153eb8] rounded-xl shadow-sm cursor-pointer"
-                                >
-                                    Apply Assignment
                                 </button>
                             </div>
                         </form>
@@ -1381,7 +1020,6 @@ export default function ManageBots() {
                                         <th className="px-5 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider bg-slate-50">Status</th>
                                         <th className="px-5 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider bg-slate-50">Battery</th>
                                         <th className="px-5 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider bg-slate-50">Barangay</th>
-                                        <th className="px-5 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider bg-slate-50">Operator</th>
                                         <th className="px-5 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider bg-slate-50">Scheduled cleanup</th>
                                         <th className="px-5 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider bg-slate-50 font-medium">Runtime today</th>
                                         <th className="px-5 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider bg-slate-50 font-sans text-center">Trash</th>
@@ -1416,7 +1054,6 @@ export default function ManageBots() {
                                                 )}
                                             </td>
                                             <td className="px-5 py-3 font-semibold text-slate-500">{bot.barangay}</td>
-                                            <td className="px-5 py-3 font-semibold text-slate-500">{bot.assignedOperator}</td>
                                             <td className="px-5 py-3 font-semibold text-slate-400">{bot.scheduledCleanup}</td>
                                             <td className="px-5 py-3 font-medium text-slate-400">{bot.runtimeToday}</td>
                                             <td className="px-5 py-3 font-bold text-blue-600 text-center">{bot.totalTrash}</td>
@@ -1435,168 +1072,13 @@ export default function ManageBots() {
                                     ))}
                                     {filteredBots.length === 0 && (
                                         <tr>
-                                            <td colSpan="9" className="text-center py-8 text-slate-400 font-semibold">
+                                            <td colSpan="8" className="text-center py-8 text-slate-400 font-semibold">
                                                 No bots found matching your search.
                                             </td>
                                         </tr>
                                     )}
                                 </tbody>
                             </table>
-                        </div>
-                    </div>
-                </Modal>
-            )}
-
-            {/* 8. VIEW ALL OPERATORS MODAL */}
-            {isViewAllOpsOpen && (
-                <Modal className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-                    <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl border border-slate-100 overflow-hidden flex flex-col max-h-[90vh] animate-fade-in">
-                        <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50 shrink-0">
-                            <div>
-                                <h3 className="text-base font-bold text-slate-900">All Operators Directory</h3>
-                                <p className="text-xs text-slate-400 mt-0.5">Search and edit all CENRO field operators</p>
-                            </div>
-                            <button onClick={() => setIsViewAllOpsOpen(false)} className="text-slate-400 hover:text-slate-600 transition-colors">
-                                <X className="w-5 h-5" />
-                            </button>
-                        </div>
-
-                        {/* Filters bar */}
-                        <div className="p-4 bg-slate-50/50 border-b border-slate-100 flex flex-col sm:flex-row justify-between gap-3 shrink-0">
-                            <div className="relative flex-1">
-                                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                                <input
-                                    type="text"
-                                    placeholder="Search operators by name, ID or bot..."
-                                    value={opSearch}
-                                    onChange={(e) => setOpSearch(e.target.value)}
-                                    className="w-full pl-10 pr-4 py-2 text-xs border border-slate-200 rounded-xl focus:outline-none bg-white"
-                                />
-                            </div>
-                            <div className="flex gap-2">
-                                <select
-                                    value={opFilterAvail}
-                                    onChange={(e) => setOpFilterAvail(e.target.value)}
-                                    className="px-3 py-2 text-xs border border-slate-200 rounded-xl bg-white text-slate-700 outline-none"
-                                >
-                                    <option value="All">All Availabilities</option>
-                                    <option value="Available">Available</option>
-                                    <option value="Assigned">Assigned</option>
-                                    <option value="Unavailable">Unavailable</option>
-                                </select>
-                                <select
-                                    value={opFilterArchived}
-                                    onChange={(e) => setOpFilterArchived(e.target.value)}
-                                    className="px-3 py-2 text-xs border border-slate-200 rounded-xl bg-white text-slate-700 outline-none"
-                                >
-                                    <option value="Not Archived">Active</option>
-                                    <option value="All">All</option>
-                                    <option value="Archived">Archived</option>
-                                </select>
-                            </div>
-                        </div>
-
-                        {/* List */}
-                        <div className="overflow-y-auto flex-1 p-5 flex flex-col gap-3">
-                            {filteredOperators.map((op) => (
-                                <div
-                                    key={op.id}
-                                    className="flex items-center justify-between p-3 rounded-xl border border-slate-100 hover:bg-slate-50/40 transition-colors"
-                                >
-                                    <div className="flex items-center gap-3.5 min-w-0">
-                                        <div className="relative shrink-0">
-                                            <div className="w-10 h-10 rounded-full bg-slate-200 flex items-center justify-center text-slate-600 font-bold text-xs uppercase">
-                                                {op.name.split(' ').map(n => n[0]).join('').slice(0, 2)}
-                                            </div>
-                                            <div className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2 border-white ${getOpDotClass(op.status)}`}></div>
-                                        </div>
-
-                                        <div className="flex flex-col min-w-0">
-                                            <div className="flex items-center gap-2">
-                                                <span className="text-sm font-bold text-slate-900 truncate leading-none">{op.name}</span>
-                                                <span className="text-[10px] text-slate-400 font-bold">({op.id})</span>
-                                            </div>
-                                            <span className="text-[10px] font-semibold text-slate-400 mt-1 flex items-center gap-1 capitalize">
-                                                <span className={`inline-block w-1.5 h-1.5 rounded-full ${op.status === 'available' ? 'bg-emerald-500' : op.status === 'unavailable' ? 'bg-amber-500' : 'bg-slate-400'}`}></span>
-                                                {op.status}
-                                            </span>
-                                            <span className="text-[10px] font-bold text-slate-500 mt-1.5 bg-slate-100 px-2 py-0.5 rounded w-max">
-                                                {op.assignedBot ? `Assigned Bot: ${op.assignedBot}` : 'No bot assigned'}
-                                            </span>
-                                        </div>
-                                    </div>
-
-                                    <div className="flex items-center gap-3">
-                                        <span className={`border text-xs font-bold px-3 py-1 rounded-full ${getOpStatusBadgeClass(op.availability)}`}>
-                                            {op.availability.charAt(0).toUpperCase() + op.availability.slice(1)}
-                                        </span>
-                                        {/* Edit operator option */}
-                                        <button
-                                            onClick={() => {
-                                                setEditingOp(op);
-                                                setEditOpName(op.name);
-                                                setEditOpStatus(op.status);
-                                                setEditOpAssignedBot(op.assignedBot || '');
-                                                setIsEditOpOpen(true);
-                                            }}
-                                            className="text-slate-300 hover:text-[#1b4de4] p-1.5 rounded-lg hover:bg-slate-50 transition-colors"
-                                            title="Edit operator"
-                                        >
-                                            <Pencil className="w-4 h-4" />
-                                        </button>
-                                        {/* Archive / Unarchive operator option */}
-                                        <button
-                                            onClick={async () => {
-                                                const isArchived = op.archived;
-                                                const confirmMessage = isArchived ? `Unarchive operator ${op.name}?` : `Archive operator ${op.name}?`;
-                                                if (confirm(confirmMessage)) {
-                                                    try {
-                                                        if (isArchived) {
-                                                            await api.updateOperator(op.backendId, { archived: false, availability: 'available' });
-                                                        } else {
-                                                            await api.updateOperator(op.backendId, { archived: true, availability: 'unavailable', assigned_bot: null });
-                                                        }
-                                                    } catch (err) {
-                                                        console.error('Failed to update operator archive status:', err);
-                                                    }
-                                                    setOperators(prev => prev.map(o => {
-                                                        if (o.id === op.id) {
-                                                            if (isArchived) {
-                                                                return { ...o, archived: false, availability: 'Available' };
-                                                            } else {
-                                                                return { ...o, archived: true, availability: 'Unavailable', assignedBot: null };
-                                                            }
-                                                        }
-                                                        return o;
-                                                    }));
-                                                    // Update assigned bot if archiving
-                                                    if (!isArchived && op.assignedBot) {
-                                                        setBots(prev => prev.map(b => {
-                                                            if (b.id === op.assignedBot) {
-                                                                 return { ...b, assignedOperator: 'Not Assigned' };
-                                                            }
-                                                            return b;
-                                                        }));
-                                                    }
-                                                }
-                                            }}
-                                            className={`p-1.5 rounded-lg hover:bg-slate-50 transition-colors shrink-0 ${op.archived ? 'text-slate-300 hover:text-emerald-500' : 'text-slate-300 hover:text-amber-500'}`}
-                                            title={op.archived ? 'Unarchive operator' : 'Archive operator'}
-                                        >
-                                            {op.archived ? (
-                                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m3 3 7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/><path d="m13 13 6 6"/></svg>
-                                            ) : (
-                                                <Archive className="w-4 h-4" />
-                                            )}
-                                        </button>
-                                    </div>
-                                </div>
-                            ))}
-                            {filteredOperators.length === 0 && (
-                                <div className="text-center py-8 text-slate-400 font-semibold">
-                                    No operators found matching your search.
-                                </div>
-                            )}
                         </div>
                     </div>
                 </Modal>

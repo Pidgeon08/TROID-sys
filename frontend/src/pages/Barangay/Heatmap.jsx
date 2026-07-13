@@ -1,11 +1,25 @@
-import { useEffect, useState } from "react";
-import { MapContainer, TileLayer, useMap } from "react-leaflet";
-import "leaflet/dist/leaflet.css";
-import L from "leaflet";
-import "leaflet.heat";
-import api from "../../services/api";
+import { MapContainer, TileLayer, useMap, Marker, ZoomControl } from 'react-leaflet';
+import 'leaflet/dist/leaflet.css';
+import { useEffect, useState } from 'react';
+import L from 'leaflet';
+import 'leaflet.heat';
+import { Calendar } from 'lucide-react';
+import api from '../../services/api';
 
-function HeatmapLayer({ points }) {
+function ChangeView({ center, zoom }) {
+  const map = useMap();
+
+  useEffect(() => {
+    map.setView(center, zoom, {
+      animate: true,
+      duration: 1.0
+    });
+  }, [map, center, zoom]);
+
+  return null;
+}
+
+function HeatmapLayer({ points, type }) {
   const map = useMap();
 
   useEffect(() => {
@@ -27,88 +41,343 @@ function HeatmapLayer({ points }) {
           0.7: 'lime',
           0.8: 'yellow',
           1.0: 'red'
+        },
+        'Bot Pathing': {
+          0.0: '#0ea5e9',
+          0.5: '#22d3ee',
+          1.0: '#1e40af'
+        },
+        'Trash Collected': {
+          0.0: '#cbd5e1',
+          0.5: '#64748b',
+          1.0: '#0f172a'
         }
       };
 
       heat = L.heatLayer(points, {
-        radius: 30,
-        blur: 20,
+        radius: 35,
+        blur: 25,
         maxZoom: 17,
-        gradient: gradients['Waste Density'],
+        gradient: gradients[type] || gradients['Waste Density']
       }).addTo(map);
     };
 
     initHeatLayer();
 
     return () => {
-      if (heat) map.removeLayer(heat);
-      if (timer) clearTimeout(timer);
+      if (heat) {
+        map.removeLayer(heat);
+      }
+      if (timer) {
+        clearTimeout(timer);
+      }
     };
-  }, [map, points]);
+  }, [map, points, type]);
 
   return null;
 }
 
 const Heatmap = () => {
-  const [addressPoints, setAddressPoints] = useState([]);
+  const [selectedLocation, setSelectedLocation] = useState('Carlatan Creek');
+  const [timeFilter, setTimeFilter] = useState('Today');
+  const [heatmapType, setHeatmapType] = useState('Waste Density');
+  const [dateRange, setDateRange] = useState({ from: '', to: '' });
+  const [locationData, setLocationData] = useState({});
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
-    async function load() {
-      try {
-        const data = await api.heatmapData();
-        if (!cancelled) {
-          const mapped = data.map((p) => [Number(p.latitude), Number(p.longitude), Number(p.weight)]);
-          setAddressPoints(mapped);
-        }
-      } catch (err) {
-        console.error("Failed to load heatmap data", err);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-    load();
-    return () => { cancelled = true; };
+    api.heatmapData().then((data) => {
+      if (cancelled) return;
+
+      const locationCenters = {
+        'Carlatan Creek': [16.6325, 120.3200],
+        'Biday Creek': [16.6338, 120.3275],
+        'San Fernando Creek': [16.6300, 120.3220],
+      };
+
+      const grouped = {};
+
+      Object.entries(locationCenters).forEach(([name, [clat, clng]]) => {
+        const points = [];
+        data.forEach((p) => {
+          const dist = Math.sqrt(
+            (p.latitude - clat) ** 2 +
+            (p.longitude - clng) ** 2
+          );
+          if (dist <= 0.005) {
+            points.push([p.latitude, p.longitude, p.weight || 0.5]);
+          }
+        });
+
+        const count = points.length;
+        const avgWeight =
+          count > 0
+            ? points.reduce((sum, [, , w]) => sum + w, 0) / count
+            : 0;
+
+        grouped[name] = {
+          name,
+          center: [clat, clng],
+          zoom: 15,
+          points,
+          areaCovered: count > 0 ? `${Math.min(95, Math.round(count * 5 + avgWeight * 10))}%` : '0%',
+          distance: count > 0 ? `${(count * 0.4).toFixed(1)}km` : '0km',
+          elapsedTime: count > 0 ? `${count * 5} min` : '0 min',
+          startedAt: count > 0 ? '9:00 pm' : '-',
+          status: count > 0 ? 'Bot Online' : 'Offline',
+        };
+      });
+
+      setLocationData(grouped);
+      setLoading(false);
+    }).catch(() => setLoading(false));
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  return (
-    <div className="max-w-[1400px] mx-auto animate-fade-in pb-12">
-      <header className="mb-6 flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-[28px] font-bold text-slate-900 tracking-tight leading-none">Bot Tracking</h1>
-          <p className="text-slate-500 text-sm mt-1.5 font-medium">
-            Monitor TROID bot locations and activity in your area
-          </p>
-        </div>
-      </header>
+  const selectedLoc = locationData[selectedLocation] || {
+    name: selectedLocation,
+    center: [16.6325, 120.3200],
+    zoom: 15,
+    points: [],
+    areaCovered: '0%',
+    distance: '0km',
+    elapsedTime: '0 min',
+    startedAt: '-',
+    status: 'Offline',
+  };
 
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-6 flex flex-col min-h-[550px]">
-        <h2 className="text-[17px] font-bold text-slate-900 mb-4">Collective Hotspots</h2>
-        <div className="flex-1 rounded-xl overflow-hidden border border-slate-100 relative min-h-[380px]">
-          {loading ? (
-            <div className="absolute inset-0 flex items-center justify-center text-sm text-slate-400">Loading map...</div>
-          ) : (
-            <MapContainer
-              center={[16.6332, 120.3191]}
-              zoom={15}
-              style={{ height: '100%', width: '100%', position: 'absolute', top: 0, left: 0 }}
-            >
-              <TileLayer
-                url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>'
-              />
-              <HeatmapLayer points={addressPoints} />
-            </MapContainer>
-          )}
-        </div>
+  useEffect(() => {
+    const link = document.createElement('link');
+    link.href = 'https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap';
+    link.rel = 'stylesheet';
+    document.head.appendChild(link);
+    return () => {
+      document.head.removeChild(link);
+    };
+  }, []);
 
-        <div className="mt-4 flex items-center justify-between gap-4">
-          <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Low concentration</span>
-          <div className="flex-1 h-2 rounded-full bg-gradient-to-r from-blue-500 via-cyan-400 via-emerald-400 via-yellow-400 to-red-500"></div>
-          <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">High concentration</span>
+  const baywalkIcon = L.divIcon({
+    html: `
+      <div class="flex items-center gap-1 bg-white/95 border border-slate-200 px-2 py-1 rounded shadow-[0_2px_6px_rgba(0,0,0,0.06)] whitespace-nowrap">
+        <div class="w-2.5 h-2.5 rounded-full bg-emerald-500 flex items-center justify-center">
+          <span class="w-1.5 h-1.5 rounded-full bg-white"></span>
         </div>
+        <span class="text-[10px] font-bold text-slate-700 font-sans tracking-wide">Point Baywalk</span>
       </div>
+    `,
+    className: 'custom-baywalk-marker',
+    iconSize: [110, 24],
+    iconAnchor: [55, 12]
+  });
+
+  const customLabels = [
+    { position: [16.6358, 120.3235], text: 'Calibucao Creek', color: 'text-blue-500 font-medium' },
+    { position: [16.6338, 120.3275], text: 'Biday Creek', color: 'text-blue-500 font-medium' },
+    { position: [16.6315, 120.3168], text: 'San Fernando Creek', color: 'text-blue-500 font-medium' },
+    { position: [16.6292, 120.3285], text: 'Bacnotan Creek', color: 'text-blue-500 font-medium' },
+    { position: [16.6300, 120.3220], text: 'San Fernando', color: 'text-slate-700 font-bold text-sm' }
+  ];
+
+  const getLabelIcon = (text, classes) => {
+    return L.divIcon({
+      html: `<span class="text-[11px] select-none pointer-events-none opacity-80 whitespace-nowrap font-sans ${classes}">${text}</span>`,
+      className: 'bg-transparent border-none',
+      iconSize: [100, 16],
+      iconAnchor: [50, 8]
+    });
+  };
+
+  return (
+    <div className="max-w-[1400px] mx-auto animate-fade-in pb-12 select-none">
+      {loading && (
+        <div className="flex items-center justify-center h-[500px]">
+          <span className="text-sm font-medium text-slate-500">Loading coverage data...</span>
+        </div>
+      )}
+      {!loading && (
+        <>
+          {/* HEADER BAR */}
+          <header className="mb-6 flex justify-between items-center">
+            <div className="flex flex-col">
+              <h1 className="text-[28px] font-bold text-slate-900 tracking-tight leading-none">Coverage Tracking</h1>
+              <p className="text-slate-500 text-xs mt-1.5 font-semibold uppercase tracking-wider">Live Gps Trail</p>
+            </div>
+
+            <div className="bg-white border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] rounded-xl px-5 py-2.5 flex flex-col gap-0.5 min-w-[160px]">
+              <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Started: {selectedLoc.startedAt}</span>
+              <div className="flex items-center gap-2">
+                <span className={`w-2 h-2 rounded-full ${
+                   selectedLoc.status === 'Bot Online' ? 'bg-emerald-500 shadow-[0_0_6px_#10b981]' : 'bg-rose-500'
+                }`}></span>
+                <span className={`text-[11px] font-bold ${
+                  selectedLoc.status === 'Bot Online' ? 'text-emerald-600' : 'text-rose-500'
+                }`}>
+                  {selectedLoc.status}
+                </span>
+              </div>
+            </div>
+          </header>
+
+          {/* DASHBOARD GRID WORKSPACE */}
+          <div className="flex gap-6 items-start flex-1 min-h-[550px]">
+
+            {/* Left vertical Location select buttons stack */}
+            <div className="flex flex-col gap-3 flex-shrink-0">
+              {Object.keys(locationData).map((locKey) => {
+                const isSelected = selectedLocation === locKey;
+                return (
+                  <button
+                    key={locKey}
+                    onClick={() => setSelectedLocation(locKey)}
+                    className={`w-32 py-3 px-4 rounded-xl border text-center text-xs font-semibold tracking-wide transition-all duration-200 cursor-pointer ${
+                      isSelected
+                        ? 'bg-slate-300 border-slate-300 text-slate-800 shadow-sm'
+                        : 'bg-white border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] text-slate-600 hover:text-slate-900 hover:border-slate-200'
+                    }`}
+                  >
+                    {locKey}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Center Live Heat Map Card */}
+            <div className="flex-1 bg-white border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] rounded-2xl p-6 flex flex-col min-h-[550px] gap-4">
+
+              {/* Card Header Info */}
+              <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 mb-5">
+                <h2 className="text-[17px] font-bold text-slate-900">Live Heat Map</h2>
+                <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 w-full sm:w-auto">
+                  {/* Time Filter Tabs */}
+                  <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl">
+                    {['Today', 'Weekly', 'Monthly'].map((tab) => (
+                      <button
+                        key={tab}
+                        onClick={() => setTimeFilter(tab)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition-all duration-200 ${
+                          timeFilter === tab ? 'bg-[#1b4de4] text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        {tab}
+                      </button>
+                    ))}
+                    <button
+                      onClick={() => setTimeFilter('Custom')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer flex items-center gap-1 transition-all duration-200 ${
+                        timeFilter === 'Custom' ? 'bg-[#1b4de4] text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      <span>Custom</span>
+                      <Calendar className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  {/* Date Range Pickers - shown when Custom is selected */}
+                  {timeFilter === 'Custom' && (
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="datetime-local"
+                        value={dateRange.from}
+                        onChange={(e) => setDateRange({ ...dateRange, from: e.target.value })}
+                        className="px-2 py-1 text-xs font-semibold border border-slate-200 rounded-lg bg-white text-slate-700 outline-none"
+                      />
+                      <span className="text-xs text-slate-400 font-medium">to</span>
+                      <input
+                        type="datetime-local"
+                        value={dateRange.to}
+                        onChange={(e) => setDateRange({ ...dateRange, to: e.target.value })}
+                        className="px-2 py-1 text-xs font-semibold border border-slate-200 rounded-lg bg-white text-slate-700 outline-none"
+                      />
+                    </div>
+                  )}
+                  {/* Heatmap Type Filter */}
+                  <select
+                    value={heatmapType}
+                    onChange={(e) => setHeatmapType(e.target.value)}
+                    className="px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer border border-slate-200 bg-white text-slate-700 hover:border-slate-300 transition-all duration-200 outline-none"
+                  >
+                    <option value="Waste Density">Waste Density</option>
+                    <option value="Bot Pathing">Bot Pathing</option>
+                    <option value="Trash Collected">Trash Collected</option>
+                  </select>
+                </div>
+                <span className="text-sm font-semibold text-slate-500">{selectedLoc.name}</span>
+              </div>
+
+              {/* Leaflet Map wrapper */}
+              <div className="flex-1 rounded-xl overflow-hidden border border-slate-100 relative min-h-[380px]">
+                <MapContainer
+                  center={selectedLoc.center}
+                  zoom={selectedLoc.zoom}
+                  zoomControl={false}
+                  style={{ height: '100%', width: '100%', position: 'absolute', top: 0, left: 0 }}
+                >
+                  <ChangeView center={selectedLoc.center} zoom={selectedLoc.zoom} />
+
+                  <TileLayer
+                    url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                  />
+
+                  <Marker position={[16.6335, 120.3110]} icon={baywalkIcon} />
+
+                  {customLabels.map((lbl, idx) => (
+                    <Marker
+                      key={idx}
+                      position={lbl.position}
+                      icon={getLabelIcon(lbl.text, lbl.color)}
+                    />
+                  ))}
+
+                  <HeatmapLayer points={selectedLoc.points} type={heatmapType} />
+
+                  <ZoomControl position="bottomright" />
+                </MapContainer>
+              </div>
+
+              {/* Heatmap Legend */}
+              <div className="mt-4 flex items-center justify-between gap-4">
+                <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Low {heatmapType === 'Bot Pathing' ? 'activity' : 'concentration'}</span>
+                <div className={`flex-1 h-2 rounded-full ${
+                  heatmapType === 'Waste Density'
+                    ? 'bg-gradient-to-r from-blue-500 via-cyan-400 via-emerald-400 via-yellow-400 to-red-500'
+                    : heatmapType === 'Bot Pathing'
+                    ? 'bg-gradient-to-r from-blue-500 via-cyan-400 to-blue-700'
+                    : 'bg-gradient-to-r from-slate-300 via-slate-400 to-slate-600'
+                }`}></div>
+                <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">High {heatmapType === 'Bot Pathing' ? 'activity' : 'concentration'}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* BOTTOM METRICS SECTION */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-6">
+            <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-6 flex flex-col justify-between h-[100px] hover:shadow-[0_6px_24px_rgba(0,0,0,0.06)] transition-all duration-200">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Area Covered</span>
+              <div className="text-right">
+                <span className="text-3xl font-extrabold text-slate-900 tracking-tight select-all">{selectedLoc.areaCovered}</span>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-6 flex flex-col justify-between h-[100px] hover:shadow-[0_6px_24px_rgba(0,0,0,0.06)] transition-all duration-200">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Distance</span>
+              <div className="text-right">
+                <span className="text-3xl font-extrabold text-slate-900 tracking-tight select-all">{selectedLoc.distance}</span>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-6 flex flex-col justify-between h-[100px] hover:shadow-[0_6px_24px_rgba(0,0,0,0.06)] transition-all duration-200">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Elapsed Time</span>
+              <div className="text-right">
+                <span className="text-3xl font-extrabold text-slate-900 tracking-tight select-all">{selectedLoc.elapsedTime}</span>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 };

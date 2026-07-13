@@ -208,9 +208,9 @@ export default function BarangayViewRequest() {
               </span>
             </div>
 
-            {request.status === "Approved" && (
+            {request.status === "Approved" && getDeploymentStatus(schedule).label === "Deployed" && (
               <div className="flex items-start gap-2.5 rounded-lg bg-emerald-50 border border-emerald-100 px-3 py-2.5 mb-4">
-                <svg className="text-emerald-600 mt-0.5 shrink-0" size={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M5 13l4 4L19 7"/></svg>
+                <svg className="text-emerald-600 mt-0.5 shrink-0 w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><path d="M5 13l4 4L19 7"/></svg>
                 <p className="text-xs text-emerald-800 leading-relaxed">
                   Clean-up and waste collection were already conducted.
                   <br />

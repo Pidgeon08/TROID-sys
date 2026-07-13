@@ -300,7 +300,7 @@ const Dashboard = () => {
                 style={{ height: '100%', width: '100%', position: 'absolute', top: 0, left: 0 }}
               >
                 <TileLayer
-                  url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+                  url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
                   attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
                 />
                 <HeatmapLayer points={addressPoints} type={heatmapType} />

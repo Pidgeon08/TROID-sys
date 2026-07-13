@@ -25,6 +25,7 @@ import BarangayRequestForm from './pages/Barangay/RequestForm';
 import BarangayHeatmap from './pages/Barangay/Heatmap';
 import BarangayRequests from './pages/Barangay/Requests';
 import BarangayViewRequest from './pages/Barangay/ViewRequest';
+import BarangayAreas from './pages/Barangay/Areas';
 import Layout from './components/Layout';
 import { ProtectedRoute } from './components/ProtectedRoute';
 
@@ -91,6 +92,7 @@ function App() {
             <Route path="/barangay/segregation" element={<SegregationForm />} />
             <Route path="/barangay/requests" element={<BarangayRequests currentUser={currentUser} />} />
             <Route path="/barangay/requests/:id" element={<BarangayViewRequest />} />
+            <Route path="/barangay/areas" element={<BarangayAreas />} />
           </Route>
 
         </Route>

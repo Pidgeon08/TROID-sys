@@ -337,40 +337,39 @@ export default function CityHallViewRequest() {
                         ))}
                       </div>
                     </div>
-                  </Card>
-                </div>
-              </div>
+                   </Card>
 
-              {request.status === "Pending Mayor Approval" && (
-                <div className="mt-6 bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-6">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h3 className="text-sm font-semibold text-slate-900">Take Action on This Request</h3>
-                      <p className="text-xs text-slate-500 mt-1">Your decision will be recorded and the request status will update immediately.</p>
-                    </div>
-                     <div className="flex items-center gap-3">
-                       <button
-                         onClick={() => setConfirmAction('decline')}
-                         disabled={submitting}
-                         className="flex items-center gap-2 rounded-lg border-2 border-red-200 px-4 py-2.5 text-sm font-semibold text-red-700 hover:bg-red-50 transition-colors disabled:opacity-50"
-                       >
-                         <XCircle size={16} />
-                         Decline
-                       </button>
-                       <button
-                         onClick={() => setConfirmAction('approve')}
-                         disabled={submitting}
-                         className="flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700 transition-colors disabled:opacity-50"
-                       >
-                         <CheckCircle2 size={16} />
-                         Approve
-                       </button>
+                   {request.status === "Pending Mayor Approval" && (
+                   <Card title="Decision">
+                     <div className="flex flex-col gap-4">
+                       <p className="text-xs text-slate-500">
+                         Your decision will be recorded and the request status will update immediately.
+                       </p>
+                       <div className="flex items-center justify-evenly gap-3">
+                         <button
+                           onClick={() => setConfirmAction('decline')}
+                           disabled={submitting}
+                           className="flex items-center gap-2 rounded-lg border-2 border-red-200 px-4 py-2.5 text-sm font-semibold text-red-700 hover:bg-red-50 transition-colors disabled:opacity-50"
+                         >
+                           <XCircle size={16} />
+                           Decline
+                         </button>
+                         <button
+                           onClick={() => setConfirmAction('approve')}
+                           disabled={submitting}
+                           className="flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700 transition-colors disabled:opacity-50"
+                         >
+                           <CheckCircle2 size={16} />
+                           Approve
+                         </button>
+                       </div>
                      </div>
-                   </div>
+                   </Card>
+                   )}
                  </div>
-               )}
+               </div>
 
-      {confirmAction && createPortal(
+       {confirmAction && createPortal(
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 p-4">
           <div className="w-full max-w-sm bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden">
             <div className="p-6 border-b border-slate-100">
