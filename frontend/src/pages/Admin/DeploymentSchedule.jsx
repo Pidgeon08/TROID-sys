@@ -659,7 +659,7 @@ export default function DeploymentSchedule() {
             ))}
           </div>
           <div className="divide-y divide-slate-100">
-            {pagedBots.map((bot) => (
+            {filteredBots.map((bot) => (
               <div
                 key={bot.id}
                 className="grid grid-cols-[160px_repeat(7,1fr)] items-center gap-2 py-2.5"
@@ -941,46 +941,6 @@ export default function DeploymentSchedule() {
         {view === 'Day' && renderDayView()}
         {view === 'Week' && renderWeekView()}
         {view === 'Month' && renderMonthView()}
-
-        {view === 'Week' && totalBotPages > 1 && (
-          <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-4">
-            <span className="text-xs text-slate-400">Page {botPage + 1} of {totalBotPages}</span>
-            <div className="flex items-center gap-1.5">
-              <button
-                type="button"
-                onClick={() => setBotPage((p) => Math.max(0, p - 1))}
-                disabled={botPage === 0}
-                aria-label="Previous page"
-                className="flex items-center justify-center rounded-lg border border-slate-200 w-8 h-8 text-slate-500 hover:bg-slate-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <ChevronLeft className="h-4 w-4" />
-              </button>
-              {Array.from({ length: totalBotPages }).map((_, i) => (
-                <button
-                  key={i}
-                  type="button"
-                  onClick={() => setBotPage(i)}
-                  className={`flex items-center justify-center rounded-lg border w-8 h-8 text-xs font-medium transition-colors ${
-                    i === botPage
-                      ? "border-[#1b4de4] bg-[#1b4de4] text-white"
-                      : "border-slate-200 text-slate-500 hover:bg-slate-50"
-                  }`}
-                >
-                  {i + 1}
-                </button>
-              ))}
-              <button
-                type="button"
-                onClick={() => setBotPage((p) => Math.min(totalBotPages - 1, p + 1))}
-                disabled={botPage >= totalBotPages - 1}
-                aria-label="Next page"
-                className="flex items-center justify-center rounded-lg border border-slate-200 w-8 h-8 text-slate-500 hover:bg-slate-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <ChevronRight className="h-4 w-4" />
-              </button>
-            </div>
-          </div>
-        )}
 
         <div className="mt-4 flex flex-wrap items-center gap-4 border-t border-slate-100 pt-4">
           <LegendDot className="bg-emerald-500" label="Scheduled" />
