@@ -4,6 +4,7 @@ from django.contrib.auth.hashers import make_password, check_password
 class Boat(models.Model):
     name = models.CharField(max_length=100)
     is_active = models.BooleanField(default=False)
+    is_online = models.BooleanField(default=False)
     archived = models.BooleanField(default=False)
     last_latitude = models.FloatField(null=True, blank=True)
     last_longitude = models.FloatField(null=True, blank=True)
@@ -19,6 +20,9 @@ class DetectionEvent(models.Model):
     latitude = models.FloatField()
     longitude = models.FloatField()
     trash_count = models.IntegerField(default=1)
+    categories = models.JSONField(default=dict, blank=True)
+    confidence = models.FloatField(default=0.0)
+    is_verified = models.BooleanField(default=False)
 
     def __str__(self):
         return f"Detection by {self.boat.name} at {self.timestamp}"

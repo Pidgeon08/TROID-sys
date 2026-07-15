@@ -4,12 +4,12 @@ from .models import Boat, DetectionEvent, User, Operator, Request, StatusHistory
 class DetectionEventSerializer(serializers.ModelSerializer):
     class Meta:
         model = DetectionEvent
-        fields = ['id', 'boat', 'timestamp', 'latitude', 'longitude', 'trash_count']
+        fields = ['id', 'boat', 'timestamp', 'latitude', 'longitude', 'trash_count', 'categories', 'confidence', 'is_verified']
 
 class BoatSerializer(serializers.ModelSerializer):
     class Meta:
         model = Boat
-        fields = ['id', 'name', 'is_active', 'archived', 'last_latitude', 'last_longitude', 'battery_level', 'last_seen']
+        fields = ['id', 'name', 'is_active', 'is_online', 'archived', 'last_latitude', 'last_longitude', 'battery_level', 'last_seen']
 
 class UserSerializer(serializers.ModelSerializer):
     class Meta:

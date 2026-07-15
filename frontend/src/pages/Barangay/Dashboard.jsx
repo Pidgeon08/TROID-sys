@@ -15,46 +15,68 @@ function HeatmapLayer({ points, type }) {
     let timer;
 
     const initHeatLayer = () => {
-      const size = map.getSize();
-      if (size.x === 0 || size.y === 0) {
-        timer = setTimeout(initHeatLayer, 50);
-        return;
-      }
-      map.invalidateSize();
-
-      const gradients = {
-        'Waste Density': {
-          0.4: 'blue',
-          0.6: 'cyan',
-          0.7: 'lime',
-          0.8: 'yellow',
-          1.0: 'red'
-        },
-        'Bot Pathing': {
-          0.0: '#0ea5e9',
-          0.5: '#22d3ee',
-          1.0: '#1e40af'
-        },
-        'Trash Collected': {
-          0.0: '#cbd5e1',
-          0.5: '#64748b',
-          1.0: '#0f172a'
+      try {
+        const size = map.getSize();
+        if (!size || size.x === 0 || size.y === 0) {
+          timer = setTimeout(initHeatLayer, 50);
+          return;
         }
-      };
+        map.invalidateSize();
 
-      heat = L.heatLayer(points, {
-        radius: 30,
-        blur: 20,
-        maxZoom: 17,
-        gradient: gradients[type] || gradients['Waste Density'],
-      }).addTo(map);
+        const validPoints = (Array.isArray(points) ? points : [])
+          .filter(p => {
+            if (!p || typeof p[0] !== 'number' || typeof p[1] !== 'number') return false;
+            if (isNaN(p[0]) || isNaN(p[1])) return false;
+            if (p[0] === 0 && p[1] === 0) return false;
+            return true;
+          });
+
+        if (validPoints.length === 0) return;
+
+        const gradients = {
+          'Waste Density': {
+            0.4: 'blue',
+            0.6: 'cyan',
+            0.7: 'lime',
+            0.8: 'yellow',
+            1.0: 'red'
+          },
+          'Bot Pathing': {
+            0.0: '#0ea5e9',
+            0.5: '#22d3ee',
+            1.0: '#1e40af'
+          },
+          'Trash Collected': {
+            0.0: '#cbd5e1',
+            0.5: '#64748b',
+            1.0: '#0f172a'
+          }
+        };
+
+        heat = L.heatLayer(validPoints, {
+          radius: 30,
+          blur: 20,
+          maxZoom: 17,
+          gradient: gradients[type] || gradients['Waste Density'],
+        }).addTo(map);
+      } catch (err) {
+        console.error('Heatmap render error:', err);
+      }
     };
 
     initHeatLayer();
 
     return () => {
-      if (heat) map.removeLayer(heat);
-      if (timer) clearTimeout(timer);
+      if (heat && map) {
+        try {
+          map.removeLayer(heat);
+        } catch (e) {
+          // ignore cleanup errors
+        }
+      }
+      if (timer) {
+        clearTimeout(timer);
+      }
     };
   }, [map, points, type]);
 

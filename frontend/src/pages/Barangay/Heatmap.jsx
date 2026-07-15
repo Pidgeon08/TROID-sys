@@ -27,46 +27,64 @@ function HeatmapLayer({ points, type }) {
     let timer;
 
     const initHeatLayer = () => {
-      const size = map.getSize();
-      if (size.x === 0 || size.y === 0) {
-        timer = setTimeout(initHeatLayer, 50);
-        return;
-      }
-      map.invalidateSize();
-
-      const gradients = {
-        'Waste Density': {
-          0.4: 'blue',
-          0.6: 'cyan',
-          0.7: 'lime',
-          0.8: 'yellow',
-          1.0: 'red'
-        },
-        'Bot Pathing': {
-          0.0: '#0ea5e9',
-          0.5: '#22d3ee',
-          1.0: '#1e40af'
-        },
-        'Trash Collected': {
-          0.0: '#cbd5e1',
-          0.5: '#64748b',
-          1.0: '#0f172a'
+      try {
+        const size = map.getSize();
+        if (!size || size.x === 0 || size.y === 0) {
+          timer = setTimeout(initHeatLayer, 50);
+          return;
         }
-      };
+        map.invalidateSize();
 
-      heat = L.heatLayer(points, {
-        radius: 35,
-        blur: 25,
-        maxZoom: 17,
-        gradient: gradients[type] || gradients['Waste Density']
-      }).addTo(map);
+        const validPoints = (Array.isArray(points) ? points : [])
+          .filter(p => {
+            if (!p || typeof p[0] !== 'number' || typeof p[1] !== 'number') return false;
+            if (isNaN(p[0]) || isNaN(p[1])) return false;
+            if (p[0] === 0 && p[1] === 0) return false;
+            return true;
+          });
+
+        if (validPoints.length === 0) return;
+
+        const gradients = {
+          'Waste Density': {
+            0.4: 'blue',
+            0.6: 'cyan',
+            0.7: 'lime',
+            0.8: 'yellow',
+            1.0: 'red'
+          },
+          'Bot Pathing': {
+            0.0: '#0ea5e9',
+            0.5: '#22d3ee',
+            1.0: '#1e40af'
+          },
+          'Trash Collected': {
+            0.0: '#cbd5e1',
+            0.5: '#64748b',
+            1.0: '#0f172a'
+          }
+        };
+
+        heat = L.heatLayer(validPoints, {
+          radius: 35,
+          blur: 25,
+          maxZoom: 17,
+          gradient: gradients[type] || gradients['Waste Density']
+        }).addTo(map);
+      } catch (err) {
+        console.error('Heatmap render error:', err);
+      }
     };
 
     initHeatLayer();
 
     return () => {
-      if (heat) {
-        map.removeLayer(heat);
+      if (heat && map) {
+        try {
+          map.removeLayer(heat);
+        } catch (e) {
+          // ignore cleanup errors
+        }
       }
       if (timer) {
         clearTimeout(timer);
@@ -87,54 +105,85 @@ const Heatmap = () => {
 
   useEffect(() => {
     let cancelled = false;
-    api.heatmapData().then((data) => {
-      if (cancelled) return;
+    
+    const fetchHeatmapData = async () => {
+      try {
+        const data = await api.getHeatmap();
+        if (cancelled) return;
 
-      const locationCenters = {
-        'Carlatan Creek': [16.6325, 120.3200],
-        'Biday Creek': [16.6338, 120.3275],
-        'San Fernando Creek': [16.6300, 120.3220],
-      };
+        const locationCenters = {
+          'Carlatan Creek': [16.6325, 120.3200],
+          'Biday Creek': [16.6338, 120.3275],
+          'San Fernando Creek': [16.6300, 120.3220],
+        };
 
-      const grouped = {};
+        const grouped = {};
 
-      Object.entries(locationCenters).forEach(([name, [clat, clng]]) => {
-        const points = [];
-        data.forEach((p) => {
-          const dist = Math.sqrt(
-            (p.latitude - clat) ** 2 +
-            (p.longitude - clng) ** 2
-          );
-          if (dist <= 0.005) {
-            points.push([p.latitude, p.longitude, p.weight || 0.5]);
-          }
+        Object.entries(locationCenters).forEach(([name, [clat, clng]]) => {
+          const points = [];
+          const categories = {};
+          let totalTrash = 0;
+
+          data.forEach((p) => {
+            // Skip invalid coordinates
+            if (!p.latitude || !p.longitude) return;
+            if (isNaN(p.latitude) || isNaN(p.longitude)) return;
+            if (p.latitude === 0 && p.longitude === 0) return;
+
+            const dist = Math.sqrt(
+              (p.latitude - clat) ** 2 +
+              (p.longitude - clng) ** 2
+            );
+            if (dist <= 0.005) {
+              points.push([p.latitude, p.longitude, p.weight || 0.5]);
+              
+              if (p.trash_count) {
+                totalTrash += p.trash_count;
+              }
+              
+              if (p.categories) {
+                Object.entries(p.categories).forEach(([cat, count]) => {
+                  categories[cat] = (categories[cat] || 0) + count;
+                });
+              }
+            }
+          });
+
+          const count = points.length;
+          const avgWeight =
+            count > 0
+              ? points.reduce((sum, [, , w]) => sum + w, 0) / count
+              : 0;
+
+          grouped[name] = {
+            name,
+            center: [clat, clng],
+            zoom: 15,
+            points,
+            categories,
+            totalTrash,
+            areaCovered: count > 0 ? `${Math.min(95, Math.round(count * 5 + avgWeight * 10))}%` : '0%',
+            distance: count > 0 ? `${(count * 0.4).toFixed(1)}km` : '0km',
+            elapsedTime: count > 0 ? `${count * 5} min` : '0 min',
+            startedAt: count > 0 ? '9:00 pm' : '-',
+            status: count > 0 ? 'Bot Online' : 'Offline',
+          };
         });
 
-        const count = points.length;
-        const avgWeight =
-          count > 0
-            ? points.reduce((sum, [, , w]) => sum + w, 0) / count
-            : 0;
+        setLocationData(grouped);
+        setLoading(false);
+      } catch (err) {
+        console.error('Failed to fetch heatmap data:', err);
+        setLoading(false);
+      }
+    };
 
-        grouped[name] = {
-          name,
-          center: [clat, clng],
-          zoom: 15,
-          points,
-          areaCovered: count > 0 ? `${Math.min(95, Math.round(count * 5 + avgWeight * 10))}%` : '0%',
-          distance: count > 0 ? `${(count * 0.4).toFixed(1)}km` : '0km',
-          elapsedTime: count > 0 ? `${count * 5} min` : '0 min',
-          startedAt: count > 0 ? '9:00 pm' : '-',
-          status: count > 0 ? 'Bot Online' : 'Offline',
-        };
-      });
-
-      setLocationData(grouped);
-      setLoading(false);
-    }).catch(() => setLoading(false));
+    fetchHeatmapData();
+    const interval = setInterval(fetchHeatmapData, 5000);
 
     return () => {
       cancelled = true;
+      clearInterval(interval);
     };
   }, []);
 
@@ -143,6 +192,8 @@ const Heatmap = () => {
     center: [16.6325, 120.3200],
     zoom: 15,
     points: [],
+    categories: {},
+    totalTrash: 0,
     areaCovered: '0%',
     distance: '0km',
     elapsedTime: '0 min',
@@ -350,6 +401,27 @@ const Heatmap = () => {
                 }`}></div>
                 <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">High {heatmapType === 'Bot Pathing' ? 'activity' : 'concentration'}</span>
               </div>
+
+              {/* Category Breakdown */}
+              {selectedLoc.categories && Object.keys(selectedLoc.categories).length > 0 && (
+                <div className="mt-4 bg-white border border-slate-100 rounded-xl p-4">
+                  <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Trash Categories Detected</h3>
+                  <div className="flex flex-wrap gap-3">
+                    {Object.entries(selectedLoc.categories).map(([category, count]) => (
+                      <div key={category} className="flex items-center gap-2 bg-slate-50 border border-slate-100 rounded-lg px-3 py-2">
+                        <span className="text-xs font-semibold text-slate-600 capitalize">{category}</span>
+                        <span className="text-sm font-bold text-[#1b4de4]">{count}</span>
+                      </div>
+                    ))}
+                  </div>
+                  {selectedLoc.totalTrash > 0 && (
+                    <div className="mt-3 pt-3 border-t border-slate-100 flex items-center justify-between">
+                      <span className="text-xs font-semibold text-slate-500">Total Trash Collected</span>
+                      <span className="text-lg font-bold text-[#1b4de4]">{selectedLoc.totalTrash} items</span>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 

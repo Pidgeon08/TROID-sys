@@ -35,6 +35,7 @@ export default function ManageBots() {
                         backendId: b.id,
                         id: `TRD-${String(b.id).padStart(3, '0')}`,
                         status: b.is_active ? 'Active' : 'Offline',
+                        online: b.is_online ? 'Online' : 'Offline',
                         battery: b.battery_level,
                         assignedLocation: 'Not Assigned',
                         assignedOperator: op ? op.name : 'Not Assigned',
@@ -72,6 +73,9 @@ export default function ManageBots() {
         };
 
         fetchData();
+
+        const interval = setInterval(fetchData, 5000);
+        return () => clearInterval(interval);
     }, [selectedBotId]);
 
     // --- Modals State ---
@@ -502,6 +506,12 @@ export default function ManageBots() {
         }
     };
 
+    const getOnlineBadgeClass = (online) => {
+        return online === 'Online'
+            ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+            : 'bg-red-100 text-red-800 border border-red-200';
+    };
+
     const getOpStatusBadgeClass = (availability) => {
         const avail = typeof availability === 'string' ? availability.charAt(0).toUpperCase() + availability.slice(1) : availability;
         switch (avail) {
@@ -582,6 +592,7 @@ export default function ManageBots() {
                                     <thead>
                                         <tr className="border-b border-slate-100 bg-slate-50/50">
                                             <th className="px-3 sm:px-5 py-3 text-[10px] sm:text-xs font-bold text-slate-400 uppercase tracking-wider">BotID</th>
+                                            <th className="px-3 sm:px-5 py-3 text-[10px] sm:text-xs font-bold text-slate-400 uppercase tracking-wider">Connection</th>
                                             <th className="px-3 sm:px-5 py-3 text-[10px] sm:text-xs font-bold text-slate-400 uppercase tracking-wider">Status</th>
                                             <th className="px-3 sm:px-5 py-3 text-[10px] sm:text-xs font-bold text-slate-400 uppercase tracking-wider">Battery</th>
                                             <th className="px-3 sm:px-5 py-3 text-[10px] sm:text-xs font-bold text-slate-400 uppercase tracking-wider">Assigned Location</th>
@@ -597,6 +608,11 @@ export default function ManageBots() {
                                                     }`}
                                             >
                                                 <td className="px-3 sm:px-5 py-2.5 sm:py-3.5 font-bold text-slate-900">{bot.id}</td>
+                                                <td className="px-3 sm:px-5 py-2.5 sm:py-3.5">
+                                                    <span className={`px-2 sm:px-2.5 py-0.5 rounded-full text-[10px] sm:text-xs font-semibold inline-block ${getOnlineBadgeClass(bot.online)}`}>
+                                                        {bot.online}
+                                                    </span>
+                                                </td>
                                                 <td className="px-3 sm:px-5 py-2.5 sm:py-3.5">
                                                     <span className={`px-2 sm:px-2.5 py-0.5 rounded-full text-[10px] sm:text-xs font-semibold inline-block ${getBotStatusBadgeClass(bot.status)}`}>
                                                         {bot.status}
@@ -647,6 +663,12 @@ export default function ManageBots() {
                                     <h2 className="text-xl sm:text-2xl lg:text-3xl font-extrabold text-slate-950 mt-1 leading-none tracking-tight">{selectedBot.id}</h2>
 
                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 lg:gap-x-8 gap-y-3 lg:gap-y-4 mt-4 lg:mt-6">
+                                        <div className="flex justify-between items-center py-1.5 border-b border-slate-50">
+                                            <span className="text-[11px] sm:text-xs font-semibold text-slate-400">Connection</span>
+                                            <span className={`px-2.5 py-0.5 rounded-full text-[11px] sm:text-xs font-bold ${getOnlineBadgeClass(selectedBot.online)}`}>
+                                                {selectedBot.online}
+                                            </span>
+                                        </div>
                                         <div className="flex justify-between items-center py-1.5 border-b border-slate-50">
                                             <span className="text-[11px] sm:text-xs font-semibold text-slate-400">Status</span>
                                             <span className={`px-2.5 py-0.5 rounded-full text-[11px] sm:text-xs font-bold ${getBotStatusBadgeClass(selectedBot.status)}`}>

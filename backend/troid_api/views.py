@@ -51,6 +51,9 @@ def log_detection(request):
     lat = request.data.get('latitude')
     lng = request.data.get('longitude')
     count = request.data.get('trash_count', 1)
+    categories = request.data.get('categories', {})
+    confidence = request.data.get('confidence', 0.0)
+    is_verified = request.data.get('is_verified', False)
 
     if boat_id is None or lat is None or lng is None:
         return Response({"error": "Missing required fields"}, status=status.HTTP_400_BAD_REQUEST)
@@ -65,7 +68,10 @@ def log_detection(request):
             boat=boat,
             latitude=lat,
             longitude=lng,
-            trash_count=count
+            trash_count=count,
+            categories=categories,
+            confidence=confidence,
+            is_verified=is_verified
         )
         return Response({"status": "Detection logged successfully"}, status=status.HTTP_201_CREATED)
     except Boat.DoesNotExist:
@@ -74,11 +80,20 @@ def log_detection(request):
 
 @api_view(['GET'])
 def get_heatmap_data(request):
-    detections = DetectionEvent.objects.all()
+    detections = DetectionEvent.objects.filter(is_verified=True)
     data = []
     for d in detections:
         weight = min(d.trash_count * 0.2, 1.0)
-        data.append([d.latitude, d.longitude, weight])
+        data.append({
+            'latitude': d.latitude,
+            'longitude': d.longitude,
+            'weight': weight,
+            'trash_count': d.trash_count,
+            'categories': d.categories or {},
+            'timestamp': d.timestamp,
+            'boat': d.boat.name,
+            'confidence': d.confidence,
+        })
     return Response(data)
 
 
