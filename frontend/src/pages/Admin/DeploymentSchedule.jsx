@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useOutletContext } from "react-router-dom";
 import { createPortal } from "react-dom";
 import {
   Bot,
@@ -16,6 +17,7 @@ import {
   X,
 } from "lucide-react";
 import { api } from '../../services/api';
+import { logAudit } from '../../services/auditLog';
 import ViewRequest from './ViewRequest';
 
 const DAYS = [
@@ -48,6 +50,16 @@ function toDateInput(date) {
 
 function dateKey(date) {
   return toDateInput(date);
+}
+
+function formatTime12h(time) {
+  if (!time) return time;
+  const [hourStr, minuteStr = "00"] = time.split(":");
+  const hour = parseInt(hourStr, 10);
+  if (Number.isNaN(hour)) return time;
+  const period = hour >= 12 ? "PM" : "AM";
+  const hour12 = hour % 12 === 0 ? 12 : hour % 12;
+  return `${hour12}:${minuteStr} ${period}`;
 }
 
 function SummaryCard({ icon: Icon, label, value, sub }) {
@@ -87,13 +99,13 @@ function Cell({ entry, onClick, dateObj }) {
         entry.status === 'scheduled' ? 'cursor-pointer hover:brightness-95' : ''
       } ${styles}`}
     >
-      <p className="font-semibold leading-tight">{entry.label}</p>
+      <p className="font-semibold leading-tight">{formatTime12h(entry.label)}</p>
       {entry.zone && <p className="mt-0.5 truncate leading-tight opacity-80 flex items-center gap-1"><MapPin className="w-3 h-3" />{entry.zone}</p>}
     </button>
   );
 }
 
-function ScheduleModal({ bots, approvedRequests, scheduledRequestIds = new Set(), onClose, onSave, onViewRequest, prefillBot, prefillZone, schedule }) {
+function ScheduleModal({ bots, operators, approvedRequests, scheduledRequestIds = new Set(), onClose, onSave, onViewRequest, prefillBot, prefillZone, schedule }) {
   const [selectedBots, setSelectedBots] = useState(prefillBot ? [prefillBot] : []);
   const [selectedDate, setSelectedDate] = useState(toDateInput(new Date()));
   const [selectedTime, setSelectedTime] = useState("06:00");
@@ -105,12 +117,23 @@ function ScheduleModal({ bots, approvedRequests, scheduledRequestIds = new Set()
   const [botPage, setBotPage] = useState(0);
   const [searchBotId, setSearchBotId] = useState("");
   const [botFilter, setBotFilter] = useState("all");
+  const [selectedOperators, setSelectedOperators] = useState([]);
+  const [showSelectOperator, setShowSelectOperator] = useState(false);
+  const [opSearch, setOpSearch] = useState("");
 
   const selectSlot = (time, botId) => {
     setSelectedTime(time);
     setSelectedBots((prev) => {
       if (time !== selectedTime) return [botId];
       return prev.includes(botId) ? prev.filter((b) => b !== botId) : [...prev, botId];
+    });
+  };
+
+  const toggleOperator = (opId) => {
+    setSelectedOperators((prev) => {
+      if (prev.includes(opId)) return prev.filter((id) => id !== opId);
+      if (prev.length >= selectedBots.length) return prev;
+      return [...prev, opId];
     });
   };
 
@@ -123,16 +146,18 @@ function ScheduleModal({ bots, approvedRequests, scheduledRequestIds = new Set()
 
   const openConfirm = () => {
     if (!selectedBots.length || !selectedRequestId || !selectedDate || !selectedTime) return;
-    setConfirmData({ botIds: selectedBots, date: selectedDate, time: selectedTime, zone, landmark, requestId: selectedRequestId });
+    if (selectedOperators.length !== selectedBots.length) return;
+    setConfirmData({ botIds: selectedBots, operatorIds: selectedOperators, date: selectedDate, time: selectedTime, zone, landmark, requestId: selectedRequestId });
   };
 
   const doSave = () => {
     if (!confirmData) return;
-    confirmData.botIds.forEach((botId) => {
-      onSave(botId, confirmData.date, confirmData.time, confirmData.zone, confirmData.landmark, confirmData.requestId);
+    confirmData.botIds.forEach((botId, idx) => {
+      onSave(botId, confirmData.date, confirmData.time, confirmData.zone, confirmData.landmark, confirmData.requestId, confirmData.operatorIds[idx]);
     });
     setConfirmData(null);
     setSelectedBots([]);
+    setSelectedOperators([]);
     setSelectedRequestId("");
     setZone("");
     setLandmark("");
@@ -144,8 +169,11 @@ function ScheduleModal({ bots, approvedRequests, scheduledRequestIds = new Set()
     setBotFilter("all");
   };
 
-  const confirmBots = bots.filter((b) => confirmData?.botIds?.includes(b.id));
   const confirmRequest = approvedRequests.find((r) => r.id === confirmData?.requestId);
+  const confirmPairs = confirmData?.botIds.map((botId, idx) => ({
+    bot: bots.find((b) => b.id === botId),
+    operator: operators.find((o) => o.id === confirmData.operatorIds[idx]),
+  })) || [];
 
   const BOTS_PER_PAGE = 6;
   const filteredBots = bots.filter((b) => {
@@ -240,11 +268,34 @@ function ScheduleModal({ bots, approvedRequests, scheduledRequestIds = new Set()
               >
               <span className={selectedBots.length ? "text-slate-700 font-medium" : "text-slate-400"}>
                 {selectedBots.length
-                  ? `${selectedBots.map((id) => bots.find((b) => b.id === id)?.name || id).join(", ")} • ${selectedDate} • ${selectedTime}`
+                  ? `${selectedBots.map((id) => bots.find((b) => b.id === id)?.name || id).join(", ")} • ${selectedDate} • ${formatTime12h(selectedTime)}`
                   : "Set schedule"}
               </span>
               <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />
             </button>
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-slate-500 mb-1.5">Operator</label>
+            <button
+              type="button"
+              onClick={() => selectedBots.length && setShowSelectOperator(true)}
+              disabled={!selectedBots.length}
+              className="w-full flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white py-2.5 px-3 text-sm text-left outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30 hover:bg-slate-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <span className={selectedOperators.length ? "text-slate-700 font-medium" : "text-slate-400"}>
+                {!selectedBots.length
+                  ? "Select bots first"
+                  : selectedOperators.length
+                    ? `${selectedOperators.map((id) => operators.find((o) => o.id === id)?.name || id).join(", ")} (${selectedOperators.length}/${selectedBots.length})`
+                    : `Select operator (0/${selectedBots.length})`}
+              </span>
+              <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />
+            </button>
+            {selectedBots.length > 0 && selectedOperators.length !== selectedBots.length && (
+              <p className="mt-1.5 text-xs text-amber-600">
+                Select {selectedBots.length} operator{selectedBots.length === 1 ? "" : "s"} to match the {selectedBots.length} bot{selectedBots.length === 1 ? "" : "s"} chosen.
+              </p>
+            )}
           </div>
           <div className="flex gap-3 pt-2">
             <button
@@ -255,7 +306,7 @@ function ScheduleModal({ bots, approvedRequests, scheduledRequestIds = new Set()
             </button>
             <button
               onClick={openConfirm}
-              disabled={!selectedBots.length || !selectedRequestId}
+              disabled={!selectedBots.length || !selectedRequestId || selectedOperators.length !== selectedBots.length}
               className="flex-1 rounded-lg bg-[#1b4de4] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#153eb8] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Save Schedule
@@ -271,9 +322,16 @@ function ScheduleModal({ bots, approvedRequests, scheduledRequestIds = new Set()
               <p className="text-xs text-slate-500 mt-1">Please review the schedule details before saving.</p>
             </div>
             <div className="p-7 space-y-3 text-sm">
-              <div className="flex justify-between gap-4">
-                <span className="text-slate-500">Bots</span>
-                <span className="font-semibold text-slate-900 text-right">{confirmBots.map((b) => `${b.name} (${b.id})`).join(", ")}</span>
+              <div>
+                <span className="text-slate-500">Bots &amp; Operators</span>
+                <div className="mt-1.5 space-y-1">
+                  {confirmPairs.map(({ bot, operator }) => (
+                    <div key={bot?.id} className="flex justify-between gap-4 rounded-lg bg-slate-50 px-3 py-1.5">
+                      <span className="font-semibold text-slate-900">{bot ? `${bot.name} (${bot.id})` : '—'}</span>
+                      <span className="text-slate-600">{operator?.name || '—'}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
               <div className="flex justify-between gap-4">
                 <span className="text-slate-500">Request</span>
@@ -285,7 +343,7 @@ function ScheduleModal({ bots, approvedRequests, scheduledRequestIds = new Set()
               </div>
               <div className="flex justify-between gap-4">
                 <span className="text-slate-500">Time</span>
-                <span className="font-semibold text-slate-900">{confirmData.time}</span>
+                <span className="font-semibold text-slate-900">{formatTime12h(confirmData.time)}</span>
               </div>
               {confirmData.landmark && (
                 <div className="flex justify-between gap-4">
@@ -375,7 +433,7 @@ function ScheduleModal({ bots, approvedRequests, scheduledRequestIds = new Set()
                         </div>
                         {TIME_SLOTS.map((slot) => (
                           <div key={slot} className="flex justify-center bg-slate-50 text-[11px] font-semibold uppercase tracking-wider text-slate-400 py-1">
-                            {slot}
+                            {formatTime12h(slot)}
                           </div>
                         ))}
                       </div>
@@ -413,7 +471,7 @@ function ScheduleModal({ bots, approvedRequests, scheduledRequestIds = new Set()
                                             : "bg-slate-50 text-slate-500 hover:bg-slate-100"
                                     }`}
                                   >
-                                    {isSel || alreadyScheduled ? slot : ""}
+                                    {isSel || alreadyScheduled ? formatTime12h(slot) : ""}
                                   </button>
                                 );
                               })}
@@ -482,6 +540,78 @@ function ScheduleModal({ bots, approvedRequests, scheduledRequestIds = new Set()
         </div>
       </div>
     )}
+
+    {showSelectOperator && (
+      <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/60 p-4">
+        <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden">
+          <div className="p-7 border-b border-slate-100">
+            <h3 className="text-lg font-bold text-slate-900">Select Operator</h3>
+            <p className="text-xs text-slate-500 mt-1">
+              Choose exactly {selectedBots.length} operator{selectedBots.length === 1 ? "" : "s"} to match the {selectedBots.length} bot{selectedBots.length === 1 ? "" : "s"} selected.
+            </p>
+          </div>
+          <div className="p-7 space-y-4">
+            <input
+              type="text"
+              value={opSearch}
+              onChange={(e) => setOpSearch(e.target.value)}
+              placeholder="Search operators"
+              className="w-full rounded-lg border border-slate-200 bg-white py-2.5 px-3 text-sm text-slate-700 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
+            />
+            <div className="max-h-[45vh] overflow-y-auto space-y-1.5 border border-slate-100 rounded-xl p-2">
+              {operators
+                .filter((o) => !o.archived)
+                .filter((o) => o.name.toLowerCase().includes(opSearch.trim().toLowerCase()))
+                .map((o) => {
+                  const isSelected = selectedOperators.includes(o.id);
+                  const disabled = !isSelected && selectedOperators.length >= selectedBots.length;
+                  return (
+                    <button
+                      key={o.id}
+                      type="button"
+                      onClick={() => toggleOperator(o.id)}
+                      disabled={disabled}
+                      className={`w-full flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5 text-left text-sm transition-colors ${
+                        isSelected
+                          ? "border-[#1b4de4] bg-blue-50 text-[#1b4de4] font-medium"
+                          : disabled
+                            ? "border-slate-100 bg-slate-50 text-slate-300 cursor-not-allowed"
+                            : "border-slate-200 text-slate-600 hover:bg-slate-50"
+                      }`}
+                    >
+                      <span>{o.name}</span>
+                      <span className="text-xs uppercase tracking-wide opacity-70">
+                        {o.availability === 'assigned' ? 'Assigned' : o.availability === 'unavailable' ? 'Unavailable' : 'Available'}
+                      </span>
+                    </button>
+                  );
+                })}
+              {operators.filter((o) => !o.archived).length === 0 && (
+                <p className="py-6 text-center text-sm text-slate-400">No operators available.</p>
+              )}
+            </div>
+            <p className="text-xs font-medium text-slate-500 text-right">
+              {selectedOperators.length} / {selectedBots.length} selected
+            </p>
+          </div>
+          <div className="p-6 border-t border-slate-100 flex gap-3">
+            <button
+              onClick={() => setShowSelectOperator(false)}
+              className="flex-1 rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => setShowSelectOperator(false)}
+              disabled={selectedOperators.length !== selectedBots.length}
+              className="flex-1 rounded-lg bg-[#1b4de4] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#153eb8] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Done
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
     </div>
   );
 }
@@ -489,6 +619,7 @@ function ScheduleModal({ bots, approvedRequests, scheduledRequestIds = new Set()
 const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 export default function DeploymentSchedule() {
+  const { currentUser } = useOutletContext() || {};
   const [view, setView] = useState("Week");
   const [showModal, setShowModal] = useState(false);
   const [prefillBot, setPrefillBot] = useState("");
@@ -602,7 +733,7 @@ export default function DeploymentSchedule() {
     });
   });
 
-  const handleSaveSchedule = (botId, day, timeSlot, zone, landmark, requestId) => {
+  const handleSaveSchedule = (botId, day, timeSlot, zone, landmark, requestId, operatorId) => {
     const bot = bots.find(b => String(b.id) === String(botId));
     if (!bot) return;
 
@@ -624,9 +755,30 @@ export default function DeploymentSchedule() {
       }));
     }).catch(console.error);
 
+    if (operatorId) {
+      const operator = operators.find((o) => o.id === operatorId);
+      if (operator) {
+        api.updateOperator(operator.id, {
+          name: operator.name,
+          assigned_bot: botId,
+          availability: 'assigned',
+        }).then(() => {
+          setOperators((prev) => prev.map((o) => (o.id === operatorId ? { ...o, assigned_bot: botId, availability: 'assigned' } : o)));
+        }).catch(console.error);
+      }
+    }
+
     setShowModal(false);
     setPrefillBot("");
     setPrefillZone("");
+
+    const operatorName = operatorId ? operators.find((o) => o.id === operatorId)?.name : null;
+    logAudit({
+      currentUser,
+      action: 'Schedule edited',
+      module: 'Collection Schedule',
+      details: `${bot.name} scheduled for ${zone || 'unspecified zone'} on ${day} at ${timeSlot}${operatorName ? ` with ${operatorName}` : ''}`,
+    });
   };
 
   const handleCellClick = (entry) => {
@@ -704,7 +856,7 @@ export default function DeploymentSchedule() {
             </div>
             {TIME_SLOTS.map((slot) => (
               <div key={slot} className="flex justify-center bg-slate-50 text-[11px] font-semibold uppercase tracking-wider text-slate-400 py-1">
-                {slot}
+                {formatTime12h(slot)}
               </div>
             ))}
           </div>
@@ -952,6 +1104,7 @@ export default function DeploymentSchedule() {
       {showModal && createPortal(
         <ScheduleModal
           bots={bots}
+          operators={operators}
           approvedRequests={approvedRequests}
           scheduledRequestIds={scheduledRequestIds}
           onClose={() => { setShowModal(false); setPrefillBot(""); setPrefillZone(""); }}

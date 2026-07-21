@@ -107,14 +107,14 @@ export default function Dashboard() {
         <SummaryCard icon={FileText} label="Total Requests" value={stats.total ?? 0} sub="All time" color={STAT_COLORS.total} />
         <SummaryCard icon={Clock} label="Pending Review" value={stats.pending ?? 0} sub="Requires your action" color={STAT_COLORS.pending} />
         <SummaryCard icon={CheckCircle2} label="Approved" value={stats.approved ?? 0} sub="Sent to CENRO" color={STAT_COLORS.approved} />
-        <SummaryCard icon={XCircle} label="Declined" value={stats.declined ?? 0} sub="This month" color={STAT_COLORS.declined} />
+        <SummaryCard icon={XCircle} label="Declined" value={stats.declined ?? 0} sub="All time" color={STAT_COLORS.declined} />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] overflow-hidden">
           <div className="p-5 border-b border-slate-100 flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <h2 className="text-[17px] font-bold text-slate-900">Pending Your Approval</h2>
+              <h2 className="text-[17px] font-bold text-slate-900">Pending Approval</h2>
               <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-amber-100 text-amber-700 text-xs font-bold">
                 {pendingRequests.length}
               </span>

@@ -92,7 +92,6 @@ const Dashboard = () => {
   const [addressPoints, setAddressPoints] = useState([]);
   const [topCreeks, setTopCreeks] = useState([]);
   const [recentActivities, setRecentActivities] = useState([]);
-  const [creekConditions, setCreekConditions] = useState([]);
   const [boatsData, setBoatsData] = useState([]);
   const [requestsData, setRequestsData] = useState([]);
 
@@ -128,31 +127,6 @@ const Dashboard = () => {
               : req.date_submitted,
           }))
         );
-
-        const latestPerLocation = {};
-        requestsRes.forEach(req => {
-          if (req.location_name) {
-            const current = latestPerLocation[req.location_name];
-            if (!current || new Date(req.date_submitted) > new Date(current.date_submitted)) {
-              latestPerLocation[req.location_name] = req;
-            }
-          }
-        });
-        const statusToColor = {
-          'Pending': 'red',
-          'Approved': 'green',
-          'Declined': 'yellow',
-          'Processing': 'yellow',
-          'Completed': 'green',
-          'Segregated': 'green',
-        };
-        setCreekConditions(
-          Object.values(latestPerLocation).map(req => ({
-            name: req.location_name,
-            status: req.status.charAt(0).toUpperCase() + req.status.slice(1),
-            color: statusToColor[req.status] || 'green',
-          }))
-        );
       } catch (err) {
         console.error('Failed to fetch dashboard data:', err);
       } finally {
@@ -175,22 +149,22 @@ const Dashboard = () => {
   }
 
   return (
-    <div className="max-w-[1400px] mx-auto animate-fade-in pb-12">
+    <div className="h-full max-w-[1400px] mx-auto animate-fade-in flex flex-col overflow-hidden">
 
       {/* Page header */}
-      <header className="mb-6">
+      <header className="mb-6 shrink-0">
         <h1 className="text-[28px] font-bold text-slate-900 tracking-tight leading-none">Dashboard</h1>
         <p className="text-slate-500 text-sm mt-1.5 font-medium">Welcome back, John</p>
       </header>
 
       {/* Two-column layout */}
-      <div className="grid grid-cols-1 xl:grid-cols-[1fr_360px] gap-6 items-start">
+      <div className="grid grid-cols-1 xl:grid-cols-[1fr_360px] gap-6 items-start flex-1 min-h-0 overflow-hidden">
 
         {/* ── LEFT COLUMN ── */}
-        <div className="flex flex-col gap-6">
+        <div className="flex flex-col gap-6 h-full min-h-0">
 
           {/* ── STAT CARDS ROW ── */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 shrink-0">
 
             {/* Stat Card: Trash Collected */}
             <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] flex flex-col justify-between overflow-hidden relative group hover:shadow-[0_6px_24px_rgba(0,0,0,0.06)] transition-all duration-200">
@@ -259,7 +233,7 @@ const Dashboard = () => {
           </div>
 
           {/* ── HEATMAP CARD ── */}
-          <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-6 flex flex-col min-h-[550px] gap-4">
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-6 flex flex-col flex-1 min-h-0 gap-4">
 
             <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 mb-5">
               <h2 className="text-[17px] font-bold text-slate-900">Collective Hotspots</h2>
@@ -315,7 +289,7 @@ const Dashboard = () => {
               </div>
             </div>
 
-            <div className="flex-1 rounded-xl overflow-hidden border border-slate-100 relative min-h-[380px]">
+            <div className="flex-1 min-h-0 rounded-xl overflow-hidden border border-slate-100 relative">
               <MapContainer
                 center={[16.6332, 120.3191]}
                 zoom={15}
@@ -345,10 +319,10 @@ const Dashboard = () => {
         </div>
 
         {/* ── RIGHT COLUMN (Sidebar Panels) ── */}
-        <div className="flex flex-col gap-6">
+        <div className="flex flex-col gap-6 h-full min-h-0 overflow-hidden">
 
           {/* Panel 1: Most Trash Collected */}
-          <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-5">
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-5 shrink-0">
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-[15px] font-bold text-slate-900">Most Trash Collected</h2>
               <button className="text-xs font-semibold text-slate-500 hover:text-[#1b4de4] border border-slate-200 rounded-lg px-2.5 py-1 transition-all cursor-pointer">
@@ -379,7 +353,7 @@ const Dashboard = () => {
           </div>
 
           {/* Panel 2: Recent Activities */}
-          <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-5">
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-5 shrink-0">
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-[15px] font-bold text-slate-900">Recent Activities</h2>
               <button className="text-xs font-semibold text-slate-500 hover:text-[#1b4de4] border border-slate-200 rounded-lg px-2.5 py-1 transition-all cursor-pointer">
@@ -401,39 +375,6 @@ const Dashboard = () => {
             </div>
           </div>
 
-          {/* Panel 3: Creek Conditions */}
-          <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-5">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-[15px] font-bold text-slate-900">Creek Conditions</h2>
-              <button className="text-xs font-semibold text-slate-500 hover:text-[#1b4de4] border border-slate-200 rounded-lg px-2.5 py-1 transition-all cursor-pointer">
-                View in map
-              </button>
-            </div>
-            <div className="flex flex-col gap-3">
-              {creekConditions.map((creek, idx) => (
-                <div key={idx} className="flex items-center justify-between p-2.5 rounded-xl border border-slate-50 hover:bg-slate-50/50 transition-colors">
-                  <div className="flex items-center gap-3.5 min-w-0">
-                    <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-900 shrink-0">
-                      <MapPin className="w-4 h-4" />
-                    </div>
-                    <span className="text-xs font-bold text-slate-900 truncate">{creek.name}</span>
-                  </div>
-                  <div className="flex items-center gap-3 shrink-0">
-                    <span className={`text-[11px] font-semibold ${
-                      creek.color === 'red' ? 'text-red-500' :
-                      creek.color === 'yellow' ? 'text-yellow-600' : 'text-emerald-500'
-                    }`}>
-                      {creek.status}
-                    </span>
-                    <div className={`w-3 h-3 rounded-full ${
-                      creek.color === 'red' ? 'bg-red-500 shadow-[0_0_6px_#ef4444]' :
-                      creek.color === 'yellow' ? 'bg-yellow-400 shadow-[0_0_6px_#facc15]' : 'bg-emerald-500 shadow-[0_0_6px_#10b981]'
-                    }`}></div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
 
         </div>
       </div>

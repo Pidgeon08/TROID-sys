@@ -1,5 +1,20 @@
 const API_BASE = 'http://localhost:8000/api';
 
+function extractErrorMessage(errorJson) {
+  if (!errorJson) return null;
+  if (typeof errorJson === 'string') return errorJson;
+  if (errorJson.error) return errorJson.error;
+  if (errorJson.detail) return errorJson.detail;
+  // DRF's default validation-error shape: { field: ["message", ...], ... }
+  const firstKey = Object.keys(errorJson)[0];
+  if (firstKey) {
+    const value = errorJson[firstKey];
+    const message = Array.isArray(value) ? value[0] : value;
+    return firstKey === 'non_field_errors' ? message : `${firstKey}: ${message}`;
+  }
+  return null;
+}
+
 async function request(path, options = {}) {
   const url = `${API_BASE}${path}`;
   const response = await fetch(url, {
@@ -15,7 +30,7 @@ async function request(path, options = {}) {
     let errorMessage = `API error: ${response.status}`;
     try {
       const errorJson = JSON.parse(text);
-      errorMessage = errorJson.error || errorMessage;
+      errorMessage = extractErrorMessage(errorJson) || errorMessage;
     } catch {
       errorMessage = text || errorMessage;
     }
@@ -47,6 +62,9 @@ export const api = {
   createUser: (data) => api.post('/users/', data),
   updateUser: (id, data) => api.patch(`/users/${id}/`, data),
   deleteUser: (id) => api.delete(`/users/${id}/`),
+  resetUserPassword: (id) => api.post(`/users/${id}/reset-password/`),
+  changeUserPassword: (id, data) => api.post(`/users/${id}/change-password/`, data),
+  checkUserSession: (id, token) => api.get(`/users/${id}/session-check/?token=${encodeURIComponent(token)}`),
   pendingUserCount: () => api.get('/users/pending-count/'),
   pendingRequestCount: () => api.get('/requests/pending-count/'),
 
@@ -65,7 +83,7 @@ export const api = {
   deleteRequest: (id) => api.delete(`/requests/${id}/`),
   mayorApproveRequest: (id) => api.post(`/requests/${id}/mayor_approve/`),
   adminApproveRequest: (id) => api.post(`/requests/${id}/admin_approve/`),
-  declineRequest: (id) => api.post(`/requests/${id}/decline/`),
+  declineRequest: (id, data) => api.post(`/requests/${id}/decline/`, data),
 
   deploymentSchedules: () => api.get('/deployment-schedules/'),
   deploymentScheduleDetail: (id) => api.get(`/deployment-schedules/${id}/`),
@@ -95,9 +113,16 @@ export const api = {
   createHeatmapData: (data) => api.post('/heatmap-data/', data),
 
   logDetection: (data) => api.post('/log-detection/', data),
-  getHeatmap: () => api.get('/heatmap/'),
+  getHeatmap: (params = {}) => {
+    const qs = new URLSearchParams();
+    if (params.category) qs.set('category', params.category);
+    if (params.time_filter) qs.set('time_filter', params.time_filter);
+    const q = qs.toString();
+    return api.get(`/heatmap/${q ? `?${q}` : ''}`);
+  },
 
   login: (data) => api.post('/login/', data),
+  forgotPassword: (email) => api.post('/forgot-password/', { email }),
 };
 
 export default api;

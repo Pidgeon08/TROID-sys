@@ -4,6 +4,7 @@ from . import views
 urlpatterns = [
     path('', include(views.router.urls)),
     path('login/', views.login, name='login'),
+    path('forgot-password/', views.forgot_password, name='forgot-password'),
     path('log-detection/', views.log_detection, name='log-detection'),
     path('heatmap/', views.get_heatmap_data, name='get-heatmap'),
     path('users/pending-count/', views.pending_user_count, name='pending-user-count'),

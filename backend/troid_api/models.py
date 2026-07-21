@@ -47,6 +47,8 @@ class User(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='active')
     location = models.CharField(max_length=100, blank=True)
     date_created = models.DateTimeField(auto_now_add=True)
+    must_change_password = models.BooleanField(default=False)
+    session_token = models.CharField(max_length=64, blank=True, null=True, default=None)
 
     TYPE_CODE_MAP = {
         'admin': '03',
@@ -121,6 +123,7 @@ class Request(models.Model):
     province = models.CharField(max_length=100, blank=True)
     archived = models.BooleanField(default=False)
     notes = models.TextField(blank=True)
+    decline_reason = models.TextField(blank=True, default="")
     letter_file_name = models.CharField(max_length=100, blank=True)
     letter_size = models.CharField(max_length=20, blank=True)
     bot_id = models.ForeignKey(Boat, on_delete=models.SET_NULL, null=True, blank=True, related_name='requests', db_column='bot_id')
@@ -147,6 +150,7 @@ class StatusHistory(models.Model):
     actor = models.CharField(max_length=100)
     role = models.CharField(max_length=50)
     state = models.CharField(max_length=20, default='done')
+    details = models.TextField(blank=True, default="")
 
     def __str__(self):
         return f"{self.request.request_id} - {self.label}"

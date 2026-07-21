@@ -1,7 +1,10 @@
 import { useState, useEffect } from "react";
 import { useOutletContext } from "react-router-dom";
-import { User, Camera } from "lucide-react";
+import { User, Camera, Lock, Eye, EyeOff } from "lucide-react";
 import api from '../../services/api';
+import { logAudit } from '../../services/auditLog';
+import PasswordRulesChecklist from '../../components/PasswordRulesChecklist';
+import { passwordRuleResults } from '../../utils/passwordRules';
 
 const ROLE_LABELS = {
   admin: "Admin",
@@ -12,7 +15,7 @@ const ROLE_LABELS = {
 
 /**
  * Main Settings page component allowing users to manage
- * their profile information.
+ * their profile information and password. Shared across all roles.
  */
 const Settings = () => {
    const context = useOutletContext() || {};
@@ -22,6 +25,15 @@ const Settings = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
+  const [activeTab, setActiveTab] = useState("profile");
+
+  const [oldPassword, setOldPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [showPasswords, setShowPasswords] = useState(false);
+  const [changingPassword, setChangingPassword] = useState(false);
+  const [passwordMessage, setPasswordMessage] = useState("");
+  const [passwordError, setPasswordError] = useState(false);
 
   useEffect(() => {
     // Use currentUser from context if available, otherwise fetch
@@ -70,11 +82,47 @@ const Settings = () => {
         email: profile.email,
       });
       setMessage("Profile updated successfully");
+      logAudit({
+        currentUser,
+        action: 'Settings updated',
+        module: 'Settings',
+        details: `Profile updated for ${profile.fullName}`,
+      });
     } catch (err) {
       console.error('Failed to update profile:', err);
       setMessage("Failed to update profile");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const passwordsMatch = newPassword.length > 0 && newPassword === confirmPassword;
+  const newPasswordValid = passwordRuleResults(newPassword).every((r) => r.met);
+  const canChangePassword = oldPassword.length > 0 && newPasswordValid && passwordsMatch && !changingPassword;
+
+  const handleChangePassword = async () => {
+    if (!profileId || !canChangePassword) return;
+    setChangingPassword(true);
+    setPasswordMessage("");
+    setPasswordError(false);
+    try {
+      await api.changeUserPassword(profileId, { old_password: oldPassword, password: newPassword });
+      setPasswordMessage("Password changed successfully.");
+      setOldPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+      logAudit({
+        currentUser,
+        action: 'Settings updated',
+        module: 'Settings',
+        details: `Password changed for ${profile.fullName}`,
+      });
+    } catch (err) {
+      console.error('Failed to change password:', err);
+      setPasswordError(true);
+      setPasswordMessage(err.message || "Failed to change password.");
+    } finally {
+      setChangingPassword(false);
     }
   };
 
@@ -102,7 +150,7 @@ const Settings = () => {
         </p>
       </header>
 
-      {message && (
+      {activeTab === "profile" && message && (
         <div className={`mb-4 rounded-xl border px-4 py-2.5 text-sm font-medium ${
           message.includes("success")
             ? "border-emerald-200 bg-emerald-50 text-emerald-700"
@@ -117,16 +165,29 @@ const Settings = () => {
         {/* Sidebar tab navigation */}
         <nav className="flex flex-col gap-1">
           <button
-            className="flex items-center gap-2.5 rounded-xl px-3.5 py-2.5 text-sm font-semibold text-left transition-all duration-200 cursor-pointer bg-[#1b4de4] text-white shadow-sm"
+            onClick={() => setActiveTab("profile")}
+            className={`flex items-center gap-2.5 rounded-xl px-3.5 py-2.5 text-sm font-semibold text-left transition-all duration-200 cursor-pointer ${
+              activeTab === "profile" ? "bg-[#1b4de4] text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"
+            }`}
           >
             <User size={16} className="stroke-[2.2]" />
             Profile
+          </button>
+          <button
+            onClick={() => setActiveTab("security")}
+            className={`flex items-center gap-2.5 rounded-xl px-3.5 py-2.5 text-sm font-semibold text-left transition-all duration-200 cursor-pointer ${
+              activeTab === "security" ? "bg-[#1b4de4] text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"
+            }`}
+          >
+            <Lock size={16} className="stroke-[2.2]" />
+            Security
           </button>
         </nav>
 
         {/* Main content area */}
         <div>
           {/* Profile settings tab */}
+          {activeTab === "profile" && (
           <section>
             <h2 className="text-xl font-bold text-slate-900 mb-5">Profile</h2>
 
@@ -162,15 +223,6 @@ const Settings = () => {
                 />
               </div>
               <div>
-                <label className="block text-xs font-semibold text-slate-500 mb-1.5">Role</label>
-                <input
-                  type="text"
-                  className="w-full flex items-center gap-2.5 bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-medium text-slate-700 hover:border-slate-300 transition-colors"
-                  value={profile.role}
-                  readOnly
-                />
-              </div>
-              <div>
                 <label className="block text-xs font-semibold text-slate-500 mb-1.5">Email address</label>
                 <input
                   type="email"
@@ -189,6 +241,86 @@ const Settings = () => {
                {saving ? "Saving..." : "Save Changes"}
              </button>
           </section>
+          )}
+
+          {/* Security / change password tab */}
+          {activeTab === "security" && (
+          <section>
+            <h2 className="text-xl font-bold text-slate-900 mb-5">Change password</h2>
+            <p className="text-sm text-slate-500 mb-5 max-w-md">
+              Enter your current password, then choose a new one that meets all of the requirements below.
+            </p>
+
+            {passwordMessage && (
+              <div className={`mb-5 max-w-md rounded-xl border px-4 py-2.5 text-sm font-medium ${
+                passwordError
+                  ? "border-red-200 bg-red-50 text-red-700"
+                  : "border-emerald-200 bg-emerald-50 text-emerald-700"
+              }`}>
+                {passwordMessage}
+              </div>
+            )}
+
+            <div className="max-w-md space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 mb-1.5">Current password</label>
+                <div className="relative">
+                  <input
+                    type={showPasswords ? "text" : "password"}
+                    value={oldPassword}
+                    onChange={(e) => setOldPassword(e.target.value)}
+                    className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 pr-10 text-sm font-medium text-slate-700 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPasswords((v) => !v)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                    aria-label={showPasswords ? "Hide passwords" : "Show passwords"}
+                  >
+                    {showPasswords ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 mb-1.5">New password</label>
+                <input
+                  type={showPasswords ? "text" : "password"}
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-medium text-slate-700 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 mb-1.5">Confirm new password</label>
+                <input
+                  type={showPasswords ? "text" : "password"}
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  className={`w-full bg-white border rounded-xl px-4 py-2.5 text-sm font-medium text-slate-700 outline-none focus:ring-2 ${
+                    confirmPassword.length > 0 && !passwordsMatch
+                      ? "border-red-300 focus:border-red-400 focus:ring-red-500/20"
+                      : "border-slate-200 focus:border-blue-400 focus:ring-blue-500/30"
+                  }`}
+                />
+                {confirmPassword.length > 0 && !passwordsMatch && (
+                  <p className="mt-1 text-xs text-red-600">Passwords do not match.</p>
+                )}
+              </div>
+
+              <PasswordRulesChecklist value={newPassword} />
+
+              <button
+                onClick={handleChangePassword}
+                disabled={!canChangePassword}
+                className="flex items-center justify-center gap-2 bg-[#1b4de4] hover:bg-[#153eb8] text-white font-semibold text-sm rounded-xl px-5 py-2.5 transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {changingPassword ? "Saving..." : "Change password"}
+              </button>
+            </div>
+          </section>
+          )}
         </div>
       </div>
       </>

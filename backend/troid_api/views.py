@@ -1,8 +1,14 @@
+import re
+import secrets
+import string
+
 from rest_framework import status, viewsets
 from rest_framework.decorators import action, api_view
 from rest_framework.response import Response
 from django.shortcuts import get_object_or_404
 from django.contrib.auth.hashers import check_password
+from django.core.mail import send_mail
+from django.conf import settings
 from django.utils import timezone
 
 try:
@@ -21,6 +27,60 @@ from .serializers import (
     SegregationRecordSerializer, AuditLogSerializer, HeatmapDataSerializer, LoginSerializer
 )
 
+SPECIAL_CHARS = '!@#$%^&*()-_=+?'
+
+
+def generate_temp_password(length=12):
+    all_chars = string.ascii_lowercase + string.ascii_uppercase + string.digits + SPECIAL_CHARS
+    while True:
+        pwd = ''.join(secrets.choice(all_chars) for _ in range(length))
+        if (
+            any(c.islower() for c in pwd)
+            and any(c.isupper() for c in pwd)
+            and any(c.isdigit() for c in pwd)
+            and any(c in SPECIAL_CHARS for c in pwd)
+        ):
+            return pwd
+
+
+def validate_password_strength(password):
+    errors = []
+    if len(password) < 8:
+        errors.append('Password must be at least 8 characters long.')
+    if not any(c.islower() for c in password):
+        errors.append('Password must include a lowercase letter.')
+    if not any(c.isupper() for c in password):
+        errors.append('Password must include an uppercase letter.')
+    if not re.search(r'[^A-Za-z0-9]', password):
+        errors.append('Password must include a special character.')
+    return errors
+
+
+def send_temp_password_email(user, temp_password):
+    """Returns True if the email backend accepted/sent the message, False if it failed.
+    Errors are caught (not fail_silently) so we can report the real outcome to the caller
+    instead of always claiming success."""
+    subject = 'Your CENRO TROID account'
+    message = (
+        f'Hi {user.name},\n\n'
+        f'An account has been created for you on the CENRO TROID Aquatic Management System.\n\n'
+        f'Email: {user.email}\n'
+        f'Temporary password: {temp_password}\n\n'
+        f'For security, you will be asked to set a new password the first time you sign in.\n'
+    )
+    try:
+        sent = send_mail(
+            subject,
+            message,
+            getattr(settings, 'DEFAULT_FROM_EMAIL', None),
+            [user.email],
+            fail_silently=False,
+        )
+        return sent > 0
+    except Exception as exc:
+        print(f'[email] Failed to send temp password email to {user.email}: {exc}')
+        return False
+
 
 @api_view(['POST'])
 def login(request):
@@ -32,6 +92,11 @@ def login(request):
         user = User.objects.get(email=email)
         if not check_password(password, user.password):
             return Response({"error": "Invalid email or password"}, status=status.HTTP_401_UNAUTHORIZED)
+        # Only one active session per account: each login mints a new token,
+        # invalidating whatever session was previously active for this user.
+        session_token = secrets.token_hex(16)
+        user.session_token = session_token
+        user.save(update_fields=['session_token'])
         return Response({
             "id": user.id,
             "user_id": user.user_id,
@@ -40,9 +105,33 @@ def login(request):
             "role": user.role,
             "status": user.status,
             "location": user.location,
+            "must_change_password": user.must_change_password,
+            "session_token": session_token,
         })
     except User.DoesNotExist:
         return Response({"error": "Invalid email or password"}, status=status.HTTP_401_UNAUTHORIZED)
+
+
+@api_view(['POST'])
+def forgot_password(request):
+    email = (request.data.get('email') or '').strip()
+    generic_response = Response({
+        'message': "If an account exists with that email, a temporary password has been sent to it."
+    })
+    if not email:
+        return Response({'error': 'Email is required.'}, status=status.HTTP_400_BAD_REQUEST)
+    try:
+        user = User.objects.get(email=email)
+    except User.DoesNotExist:
+        # Don't reveal whether the email exists.
+        return generic_response
+
+    temp_password = generate_temp_password()
+    user.password = temp_password
+    user.must_change_password = True
+    user.save()
+    send_temp_password_email(user, temp_password)
+    return generic_response
 
 
 @api_view(['POST'])
@@ -80,7 +169,30 @@ def log_detection(request):
 
 @api_view(['GET'])
 def get_heatmap_data(request):
+    category = request.query_params.get('category')
+    time_filter = request.query_params.get('time_filter', 'today')
+
     detections = DetectionEvent.objects.filter(is_verified=True)
+
+    if category:
+        detections = detections.filter(categories__has_key=category)
+
+    if time_filter == 'today':
+        from django.utils import timezone
+        from datetime import timedelta
+        start = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        detections = detections.filter(timestamp__gte=start)
+    elif time_filter == 'weekly':
+        from django.utils import timezone
+        from datetime import timedelta
+        start = timezone.now() - timedelta(days=7)
+        detections = detections.filter(timestamp__gte=start)
+    elif time_filter == 'monthly':
+        from django.utils import timezone
+        from datetime import timedelta
+        start = timezone.now() - timedelta(days=30)
+        detections = detections.filter(timestamp__gte=start)
+
     data = []
     for d in detections:
         weight = min(d.trash_count * 0.2, 1.0)
@@ -117,6 +229,49 @@ class BoatViewSet(viewsets.ModelViewSet):
 class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all()
     serializer_class = UserSerializer
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        temp_password = generate_temp_password()
+        user = serializer.save(password=temp_password, must_change_password=True)
+        email_sent = send_temp_password_email(user, temp_password)
+        headers = self.get_success_headers(serializer.data)
+        data = dict(serializer.data)
+        data['email_sent'] = email_sent
+        return Response(data, status=status.HTTP_201_CREATED, headers=headers)
+
+    @action(detail=True, methods=['post'], url_path='reset-password')
+    def reset_password(self, request, pk=None):
+        user = self.get_object()
+        temp_password = generate_temp_password()
+        user.password = temp_password
+        user.must_change_password = True
+        user.save()
+        email_sent = send_temp_password_email(user, temp_password)
+        return Response({'status': 'password reset', 'email_sent': email_sent})
+
+    @action(detail=True, methods=['post'], url_path='change-password')
+    def change_password(self, request, pk=None):
+        user = self.get_object()
+        old_password = request.data.get('old_password') or ''
+        new_password = request.data.get('password') or ''
+        if not check_password(old_password, user.password):
+            return Response({'error': 'Current password is incorrect.'}, status=status.HTTP_400_BAD_REQUEST)
+        errors = validate_password_strength(new_password)
+        if errors:
+            return Response({'error': errors[0]}, status=status.HTTP_400_BAD_REQUEST)
+        user.password = new_password
+        user.must_change_password = False
+        user.save()
+        return Response({'status': 'password changed'})
+
+    @action(detail=True, methods=['get'], url_path='session-check')
+    def session_check(self, request, pk=None):
+        user = self.get_object()
+        token = request.query_params.get('token')
+        valid = bool(token) and bool(user.session_token) and token == user.session_token
+        return Response({'valid': valid})
 
 
 class OperatorViewSet(viewsets.ModelViewSet):
@@ -188,7 +343,9 @@ class RequestViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def decline(self, request, request_id=None):
         req = self.get_object()
+        reason = (request.data.get('reason') or '').strip()
         req.status = 'declined'
+        req.decline_reason = reason
         req.save()
         StatusHistory.objects.create(
             request=req,
@@ -196,9 +353,10 @@ class RequestViewSet(viewsets.ModelViewSet):
             date=timezone.now(),
             actor=request.user.name if hasattr(request, 'user') and hasattr(request.user, 'name') else 'User',
             role=request.user.role if hasattr(request, 'user') and hasattr(request.user, 'role') else 'Unknown',
-            state='current'
+            state='current',
+            details=reason,
         )
-        return Response({'status': req.status})
+        return Response({'status': req.status, 'decline_reason': req.decline_reason})
 
     def destroy(self, request, *args, **kwargs):
         req = self.get_object()
@@ -236,8 +394,16 @@ class SegregationRecordViewSet(viewsets.ModelViewSet):
 
 
 class AuditLogViewSet(viewsets.ModelViewSet):
-    queryset = AuditLog.objects.all()
+    queryset = AuditLog.objects.all().order_by('-id')
     serializer_class = AuditLogSerializer
+
+    def perform_create(self, serializer):
+        ip = self.request.META.get('REMOTE_ADDR') or '-'
+        time_str = timezone.localtime().strftime('%b %d, %Y %I:%M %p')
+        serializer.save(
+            time=serializer.validated_data.get('time') or time_str,
+            ip=serializer.validated_data.get('ip') or ip,
+        )
 
 
 class HeatmapDataViewSet(viewsets.ModelViewSet):

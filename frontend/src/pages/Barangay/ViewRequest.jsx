@@ -11,6 +11,7 @@ import {
   X,
   ChevronLeftIcon,
   ChevronRightIcon,
+  XCircle,
 } from "lucide-react";
 import api from "../../services/api";
 import { Card } from "../../components/ui/Card";
@@ -31,6 +32,7 @@ export default function BarangayViewRequest() {
   const [selectedPhotoIndex, setSelectedPhotoIndex] = useState(0);
   const [showPhotoViewer, setShowPhotoViewer] = useState(false);
   const [schedule, setSchedule] = useState(null);
+  const [reasonStep, setReasonStep] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -97,6 +99,18 @@ export default function BarangayViewRequest() {
           {request.id} &bull; {request.type}
         </p>
       </div>
+
+      {request.status === "Declined" && (
+        <div className="mb-6 flex items-start gap-3 rounded-xl border border-red-100 bg-red-50 px-4 py-3.5">
+          <XCircle size={18} className="text-red-600 mt-0.5 shrink-0" />
+          <div>
+            <p className="text-sm font-semibold text-red-800">This request was declined</p>
+            <p className="text-sm text-red-700 mt-0.5">
+              See the reason under Status History below.
+            </p>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr_360px] gap-5 items-start">
         <div className="flex flex-col gap-5">
@@ -297,6 +311,15 @@ export default function BarangayViewRequest() {
                       <div>
                         <p className="text-sm font-semibold text-slate-800">{step.label}</p>
                         <p className="text-xs text-slate-400 mt-0.5">{step.date}</p>
+                        {step.details && (
+                          <button
+                            type="button"
+                            onClick={() => setReasonStep(step)}
+                            className="mt-1 text-xs font-semibold text-red-600 hover:text-red-700 underline underline-offset-2"
+                          >
+                            View reason
+                          </button>
+                        )}
                       </div>
                       <div className="text-right shrink-0">
                         <p className="text-xs font-medium text-slate-600">{step.actor}</p>
@@ -310,6 +333,34 @@ export default function BarangayViewRequest() {
           </Card>
         </div>
       </div>
+
+      {reasonStep && createPortal(
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 p-4" onClick={() => setReasonStep(null)}>
+          <div className="w-full max-w-sm bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="p-6 border-b border-slate-100 flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-bold text-slate-900">{reasonStep.label}</h3>
+                <p className="text-xs text-slate-500 mt-1">{reasonStep.date}</p>
+              </div>
+              <button onClick={() => setReasonStep(null)} className="text-slate-400 hover:text-slate-600" aria-label="Close">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="p-6">
+              <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">{reasonStep.details}</p>
+            </div>
+            <div className="px-6 pb-6 flex justify-end">
+              <button
+                onClick={() => setReasonStep(null)}
+                className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
 
       {showPhotoViewer && request.photos && createPortal(
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80" onClick={() => setShowPhotoViewer(false)}>

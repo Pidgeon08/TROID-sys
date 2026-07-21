@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useOutletContext } from "react-router-dom";
 import { createPortal } from "react-dom";
 import {
   ChevronLeft,
@@ -16,6 +16,7 @@ import {
   ChevronRight as ChevronRightIcon,
 } from "lucide-react";
 import api from "../../services/api";
+import { logAudit } from "../../services/auditLog";
 import { Card } from "../../components/ui/Card";
 import { REQUEST_STATUS_STYLES, mapRequest, getDeploymentStatus } from "../../constants/requests";
 
@@ -79,6 +80,7 @@ function PhotoViewer({ photos, currentIndex, onClose, onNavigate }) {
 }
 
 export default function ViewRequest({ id: propId, onClose }) {
+  const { currentUser } = useOutletContext() || {};
   const { id: routeId } = useParams();
   const id = propId || routeId;
   const navigate = useNavigate();
@@ -86,6 +88,8 @@ export default function ViewRequest({ id: propId, onClose }) {
   const [loading, setLoading] = useState(true);
   const [archiving, setArchiving] = useState(false);
   const [confirmAction, setConfirmAction] = useState(null);
+  const [declineReason, setDeclineReason] = useState("");
+  const [reasonStep, setReasonStep] = useState(null);
   const [selectedPhotoIndex, setSelectedPhotoIndex] = useState(0);
   const [showPhotoViewer, setShowPhotoViewer] = useState(false);
   const [schedule, setSchedule] = useState(null);
@@ -391,6 +395,15 @@ export default function ViewRequest({ id: propId, onClose }) {
                       <div>
                         <p className="text-sm font-semibold text-slate-800">{step.label}</p>
                         <p className="text-xs text-slate-400 mt-0.5">{step.date}</p>
+                        {step.details && (
+                          <button
+                            type="button"
+                            onClick={() => setReasonStep(step)}
+                            className="mt-1 text-xs font-semibold text-red-600 hover:text-red-700 underline underline-offset-2"
+                          >
+                            View reason
+                          </button>
+                        )}
                       </div>
                       <div className="text-right shrink-0">
                         <p className="text-xs font-medium text-slate-600">{step.actor}</p>
@@ -441,31 +454,89 @@ export default function ViewRequest({ id: propId, onClose }) {
               <p className="text-xs text-slate-500 mt-1">
                 {confirmAction === 'approve'
                   ? 'This request will be marked approved and ready for deployment.'
-                  : 'This request will be declined and the barangay will be notified.'}
+                  : 'This request will be declined and the barangay will be notified with your remarks.'}
               </p>
             </div>
+            {confirmAction === 'decline' && (
+              <div className="px-6 pt-4">
+                <label className="mb-1.5 block text-xs font-semibold text-slate-500">
+                  Reason for declining <span className="text-red-500">*</span>
+                </label>
+                <textarea
+                  value={declineReason}
+                  onChange={(e) => setDeclineReason(e.target.value)}
+                  rows={3}
+                  placeholder="Explain why this request is being declined..."
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-red-400 focus:ring-2 focus:ring-red-500/20"
+                />
+              </div>
+            )}
             <div className="p-6 flex gap-3">
               <button
-                onClick={() => setConfirmAction(null)}
+                onClick={() => { setConfirmAction(null); setDeclineReason(""); }}
                 className="flex-1 rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors"
               >
                 Cancel
               </button>
               <button
+                disabled={confirmAction === 'decline' && !declineReason.trim()}
                 onClick={async () => {
                   const action = confirmAction;
+                  const reason = declineReason.trim();
                   setConfirmAction(null);
+                  setDeclineReason("");
                   if (action === 'approve') {
                     await api.adminApproveRequest(request.id);
                     setRequest(prev => ({ ...prev, status: 'Approved' }));
+                    logAudit({
+                      currentUser,
+                      action: 'Request approved',
+                      module: 'Requests',
+                      details: `${request.id} (${request.location?.barangay || 'unknown zone'}) approved`,
+                    });
                   } else {
-                    await api.declineRequest(request.id);
-                    setRequest(prev => ({ ...prev, status: 'Declined' }));
+                    await api.declineRequest(request.id, { reason });
+                    setRequest(prev => ({ ...prev, status: 'Declined', declineReason: reason }));
+                    logAudit({
+                      currentUser,
+                      action: 'Request declined',
+                      module: 'Requests',
+                      details: `${request.id} (${request.location?.barangay || 'unknown zone'}) declined: ${reason}`,
+                      status: 'warning',
+                    });
                   }
                 }}
-                className={`flex-1 rounded-lg px-4 py-2.5 text-sm font-medium text-white transition-colors ${confirmAction === 'approve' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-red-600 hover:bg-red-700'}`}
+                className={`flex-1 rounded-lg px-4 py-2.5 text-sm font-medium text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${confirmAction === 'approve' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-red-600 hover:bg-red-700'}`}
               >
                 {confirmAction === 'approve' ? 'Approve' : 'Decline'}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {reasonStep && createPortal(
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 p-4" onClick={() => setReasonStep(null)}>
+          <div className="w-full max-w-sm bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="p-6 border-b border-slate-100 flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-bold text-slate-900">{reasonStep.label}</h3>
+                <p className="text-xs text-slate-500 mt-1">{reasonStep.date}</p>
+              </div>
+              <button onClick={() => setReasonStep(null)} className="text-slate-400 hover:text-slate-600" aria-label="Close">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="p-6">
+              <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">{reasonStep.details}</p>
+            </div>
+            <div className="px-6 pb-6 flex justify-end">
+              <button
+                onClick={() => setReasonStep(null)}
+                className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors"
+              >
+                Close
               </button>
             </div>
           </div>

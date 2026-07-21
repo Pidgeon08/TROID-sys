@@ -14,7 +14,7 @@ class BoatSerializer(serializers.ModelSerializer):
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ['id', 'user_id', 'name', 'email', 'role', 'status', 'location', 'date_created']
+        fields = ['id', 'user_id', 'name', 'email', 'role', 'status', 'location', 'date_created', 'must_change_password']
 
 
 class LoginSerializer(serializers.Serializer):
@@ -32,7 +32,7 @@ class OperatorSerializer(serializers.ModelSerializer):
 class StatusHistorySerializer(serializers.ModelSerializer):
     class Meta:
         model = StatusHistory
-        fields = ['id', 'request', 'label', 'date', 'actor', 'role', 'state']
+        fields = ['id', 'request', 'label', 'date', 'actor', 'role', 'state', 'details']
 
 class PhotoSerializer(serializers.ModelSerializer):
     class Meta:
@@ -45,9 +45,10 @@ class RequestSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Request
-        fields = ['id', 'request_id', 'request_type', 'status', 'date_submitted', 'requested_by_name', 'requested_by_role', 'requested_by_barangay', 'contact', 'email', 'location_name', 'barangay', 'municipality', 'province', 'notes', 'letter_file_name', 'letter_size', 'bot_id', 'operator', 'bags', 'weight_kg', 'non_usable_kg', 'recyclable_kg', 'archived', 'status_history', 'photos']
+        fields = ['id', 'request_id', 'request_type', 'status', 'date_submitted', 'requested_by_name', 'requested_by_role', 'requested_by_barangay', 'contact', 'email', 'location_name', 'barangay', 'municipality', 'province', 'notes', 'decline_reason', 'letter_file_name', 'letter_size', 'bot_id', 'operator', 'bags', 'weight_kg', 'non_usable_kg', 'recyclable_kg', 'archived', 'status_history', 'photos']
         extra_kwargs = {
             'request_id': {'required': False, 'allow_blank': True},
+            'decline_reason': {'required': False, 'allow_blank': True},
             'email': {'required': False, 'allow_blank': True},
             'requested_by_name': {'required': False, 'allow_blank': True},
             'requested_by_role': {'required': False, 'allow_blank': True},
@@ -83,6 +84,10 @@ class AuditLogSerializer(serializers.ModelSerializer):
     class Meta:
         model = AuditLog
         fields = ['id', 'time', 'user', 'role', 'action', 'details', 'module', 'ip', 'status']
+        extra_kwargs = {
+            'time': {'required': False, 'allow_blank': True},
+            'ip': {'required': False, 'allow_blank': True},
+        }
 
 
 class HeatmapDataSerializer(serializers.ModelSerializer):

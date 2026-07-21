@@ -82,7 +82,7 @@ function HeatmapLayer({ points, type }) {
       if (heat && map) {
         try {
           map.removeLayer(heat);
-        } catch (e) {
+        } catch {
           // ignore cleanup errors
         }
       }
@@ -96,81 +96,57 @@ function HeatmapLayer({ points, type }) {
 }
 
 const Heatmap = () => {
-  const [selectedLocation, setSelectedLocation] = useState('Carlatan Creek');
+  const [selectedCategory, setSelectedCategory] = useState('All');
   const [timeFilter, setTimeFilter] = useState('Today');
   const [heatmapType, setHeatmapType] = useState('Waste Density');
   const [dateRange, setDateRange] = useState({ from: '', to: '' });
-  const [locationData, setLocationData] = useState({});
+  const [heatmapData, setHeatmapData] = useState([]);
+  const [categories, setCategories] = useState({});
+  const [totalTrash, setTotalTrash] = useState(0);
+  const [allCategories, setAllCategories] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
-    
+
     const fetchHeatmapData = async () => {
       try {
-        const data = await api.getHeatmap();
+        const params = {
+          time_filter: timeFilter === 'Custom' ? undefined : timeFilter.toLowerCase(),
+          category: selectedCategory === 'All' ? undefined : selectedCategory,
+        };
+        const data = await api.getHeatmap(params);
         if (cancelled) return;
 
-        const locationCenters = {
-          'Carlatan Creek': [16.6325, 120.3200],
-          'Biday Creek': [16.6338, 120.3275],
-          'San Fernando Creek': [16.6300, 120.3220],
-        };
+        const points = [];
+        const cats = {};
+        let total = 0;
 
-        const grouped = {};
+        const uniqueCats = new Set();
 
-        Object.entries(locationCenters).forEach(([name, [clat, clng]]) => {
-          const points = [];
-          const categories = {};
-          let totalTrash = 0;
+        data.forEach((p) => {
+          if (!p.latitude || !p.longitude) return;
+          if (isNaN(p.latitude) || isNaN(p.longitude)) return;
+          if (p.latitude === 0 && p.longitude === 0) return;
 
-          data.forEach((p) => {
-            // Skip invalid coordinates
-            if (!p.latitude || !p.longitude) return;
-            if (isNaN(p.latitude) || isNaN(p.longitude)) return;
-            if (p.latitude === 0 && p.longitude === 0) return;
+          points.push([p.latitude, p.longitude, p.weight || 0.5]);
 
-            const dist = Math.sqrt(
-              (p.latitude - clat) ** 2 +
-              (p.longitude - clng) ** 2
-            );
-            if (dist <= 0.005) {
-              points.push([p.latitude, p.longitude, p.weight || 0.5]);
-              
-              if (p.trash_count) {
-                totalTrash += p.trash_count;
-              }
-              
-              if (p.categories) {
-                Object.entries(p.categories).forEach(([cat, count]) => {
-                  categories[cat] = (categories[cat] || 0) + count;
-                });
-              }
-            }
-          });
+          if (p.trash_count) {
+            total += p.trash_count;
+          }
 
-          const count = points.length;
-          const avgWeight =
-            count > 0
-              ? points.reduce((sum, [, , w]) => sum + w, 0) / count
-              : 0;
-
-          grouped[name] = {
-            name,
-            center: [clat, clng],
-            zoom: 15,
-            points,
-            categories,
-            totalTrash,
-            areaCovered: count > 0 ? `${Math.min(95, Math.round(count * 5 + avgWeight * 10))}%` : '0%',
-            distance: count > 0 ? `${(count * 0.4).toFixed(1)}km` : '0km',
-            elapsedTime: count > 0 ? `${count * 5} min` : '0 min',
-            startedAt: count > 0 ? '9:00 pm' : '-',
-            status: count > 0 ? 'Bot Online' : 'Offline',
-          };
+          if (p.categories) {
+            Object.entries(p.categories).forEach(([cat, count]) => {
+              cats[cat] = (cats[cat] || 0) + count;
+              uniqueCats.add(cat);
+            });
+          }
         });
 
-        setLocationData(grouped);
+        setHeatmapData(points);
+        setCategories(cats);
+        setTotalTrash(total);
+        setAllCategories(Array.from(uniqueCats).sort());
         setLoading(false);
       } catch (err) {
         console.error('Failed to fetch heatmap data:', err);
@@ -185,20 +161,20 @@ const Heatmap = () => {
       cancelled = true;
       clearInterval(interval);
     };
-  }, []);
+  }, [selectedCategory, timeFilter, dateRange]);
 
-  const selectedLoc = locationData[selectedLocation] || {
-    name: selectedLocation,
-    center: [16.6325, 120.3200],
+  const selectedLoc = {
+    name: selectedCategory === 'All' ? 'All Categories' : selectedCategory,
+    center: heatmapData.length > 0 ? [heatmapData[0][0], heatmapData[0][1]] : [14.5995, 120.9842],
     zoom: 15,
-    points: [],
-    categories: {},
-    totalTrash: 0,
-    areaCovered: '0%',
-    distance: '0km',
-    elapsedTime: '0 min',
-    startedAt: '-',
-    status: 'Offline',
+    points: heatmapData,
+    categories,
+    totalTrash,
+    areaCovered: heatmapData.length > 0 ? `${Math.min(95, Math.round(heatmapData.length * 5))}%` : '0%',
+    distance: heatmapData.length > 0 ? `${(heatmapData.length * 0.4).toFixed(1)}km` : '0km',
+    elapsedTime: heatmapData.length > 0 ? `${heatmapData.length * 5} min` : '0 min',
+    startedAt: heatmapData.length > 0 ? '9:00 pm' : '-',
+    status: heatmapData.length > 0 ? 'Bot Online' : 'Offline',
   };
 
   useEffect(() => {
@@ -276,24 +252,31 @@ const Heatmap = () => {
           {/* DASHBOARD GRID WORKSPACE */}
           <div className="flex gap-6 items-start flex-1 min-h-[550px]">
 
-            {/* Left vertical Location select buttons stack */}
+            {/* Left vertical Category filter */}
             <div className="flex flex-col gap-3 flex-shrink-0">
-              {Object.keys(locationData).map((locKey) => {
-                const isSelected = selectedLocation === locKey;
-                return (
-                  <button
-                    key={locKey}
-                    onClick={() => setSelectedLocation(locKey)}
-                    className={`w-32 py-3 px-4 rounded-xl border text-center text-xs font-semibold tracking-wide transition-all duration-200 cursor-pointer ${
-                      isSelected
-                        ? 'bg-slate-300 border-slate-300 text-slate-800 shadow-sm'
-                        : 'bg-white border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] text-slate-600 hover:text-slate-900 hover:border-slate-200'
-                    }`}
-                  >
-                    {locKey}
-                  </button>
-                );
-              })}
+              <button
+                onClick={() => setSelectedCategory('All')}
+                className={`w-32 py-3 px-4 rounded-xl border text-center text-xs font-semibold tracking-wide transition-all duration-200 cursor-pointer ${
+                  selectedCategory === 'All'
+                    ? 'bg-slate-300 border-slate-300 text-slate-800 shadow-sm'
+                    : 'bg-white border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] text-slate-600 hover:text-slate-900 hover:border-slate-200'
+                }`}
+              >
+                All
+              </button>
+              {allCategories.map((cat) => (
+                <button
+                  key={cat}
+                  onClick={() => setSelectedCategory(cat)}
+                  className={`w-32 py-3 px-4 rounded-xl border text-center text-xs font-semibold tracking-wide transition-all duration-200 cursor-pointer ${
+                    selectedCategory === cat
+                      ? 'bg-slate-300 border-slate-300 text-slate-800 shadow-sm'
+                      : 'bg-white border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] text-slate-600 hover:text-slate-900 hover:border-slate-200'
+                  }`}
+                >
+                  {cat}
+                </button>
+              ))}
             </div>
 
             {/* Center Live Heat Map Card */}
@@ -302,7 +285,18 @@ const Heatmap = () => {
               {/* Card Header Info */}
               <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 mb-5">
                 <h2 className="text-[17px] font-bold text-slate-900">Live Heat Map</h2>
-                <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 w-full sm:w-auto">
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 w-full sm:w-auto">
+                {/* Category Filter */}
+                <select
+                  value={selectedCategory}
+                  onChange={(e) => setSelectedCategory(e.target.value)}
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer border border-slate-200 bg-white text-slate-700 hover:border-slate-300 transition-all duration-200 outline-none"
+                >
+                  <option value="All">All Categories</option>
+                  {allCategories.map((cat) => (
+                    <option key={cat} value={cat}>{cat}</option>
+                  ))}
+                </select>
                   {/* Time Filter Tabs */}
                   <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl">
                     {['Today', 'Weekly', 'Monthly'].map((tab) => (
@@ -355,7 +349,9 @@ const Heatmap = () => {
                     <option value="Trash Collected">Trash Collected</option>
                   </select>
                 </div>
-                <span className="text-sm font-semibold text-slate-500">{selectedLoc.name}</span>
+                <span className="text-sm font-semibold text-slate-500">
+                  {selectedCategory === 'All' ? 'All Categories' : selectedCategory}
+                </span>
               </div>
 
               {/* Leaflet Map wrapper */}

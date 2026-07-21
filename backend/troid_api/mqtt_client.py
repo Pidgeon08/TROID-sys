@@ -1,6 +1,7 @@
 import json
 import threading
 import time
+import uuid
 import paho.mqtt.client as mqtt
 from django.utils import timezone
 from .models import Boat, DetectionEvent
@@ -10,7 +11,7 @@ MQTT_BROKER = "broker.emqx.io"
 MQTT_PORT = 1883
 MQTT_USERNAME = ""
 MQTT_PASSWORD = ""
-MQTT_CLIENT_ID = "troid_django_backend"
+MQTT_CLIENT_ID = f"troid_django_{uuid.uuid4().hex[:8]}"
 
 # Topics
 TOPIC_HEARTBEAT = "troid/bot/+/heartbeat"
@@ -70,7 +71,6 @@ def _handle_detection(bot_id, payload):
         confidence = payload.get('confidence', 0.0)
         is_verified = payload.get('is_verified', False)
 
-        # Only store verified detections to keep heatmap accurate
         if not is_verified:
             print(f"[MQTT] Skipping unverified detection for Boat {bot_id}")
             return
@@ -117,7 +117,8 @@ def _run_client():
         if _client is not None and _client.is_connected():
             return
 
-        client = mqtt.Client(client_id=MQTT_CLIENT_ID, clean_session=True)
+        client_id = f"{MQTT_CLIENT_ID}_{uuid.uuid4().hex[:6]}"
+        client = mqtt.Client(client_id=client_id, clean_session=True)
         client.on_connect = _on_connect
         client.on_message = _on_message
 
@@ -125,7 +126,7 @@ def _run_client():
             client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
 
         try:
-            print(f"[MQTT] Connecting to {MQTT_BROKER}:{MQTT_PORT}...")
+            print(f"[MQTT] Connecting to {MQTT_BROKER}:{MQTT_PORT} as {client_id}...")
             client.connect(MQTT_BROKER, MQTT_PORT, keepalive=60)
             client.loop_start()
             _client = client
@@ -136,14 +137,18 @@ def _run_client():
 
 def start_mqtt_client():
     def run():
+        retry_delay = 60
         while True:
             try:
                 _run_client()
-                time.sleep(5)
+                retry_delay = 60
+                time.sleep(30)
             except Exception as e:
                 print(f"[MQTT] Unexpected error: {e}")
                 _client = None
-                time.sleep(5)
+                print(f"[MQTT] Retrying in {retry_delay}s...")
+                time.sleep(retry_delay)
+                retry_delay = min(retry_delay * 2, 300)
 
     thread = threading.Thread(target=run, daemon=True)
     thread.start()

@@ -1,16 +1,32 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Eye, EyeOff } from 'lucide-react';
+import { logAudit } from '../services/auditLog';
+import ForceChangePasswordModal from '../components/ForceChangePasswordModal';
+import ForgotPasswordModal from '../components/ForgotPasswordModal';
+
+const ROLE_LABELS = {
+  admin: 'Admin',
+  mayorsoffice: 'Mayor',
+  barangay: 'Barangay',
+};
 
 const Login = ({ onLogin }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const [loading, setLoading] = useState(false);
+  const [pendingLogin, setPendingLogin] = useState(null);
+  const [showPassword, setShowPassword] = useState(false);
+  const [rememberMe, setRememberMe] = useState(false);
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
   const navigate = useNavigate();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
+    setNotice('');
     setLoading(true);
 
     try {
@@ -22,18 +38,34 @@ const Login = ({ onLogin }) => {
       const data = await res.json();
       if (!res.ok) {
         setError(data.error || 'Login failed. Please try again.');
+        logAudit({ user: email, role: '-', action: 'Login failed', module: 'Authentication', details: data.error || 'Invalid credentials', status: 'failed' });
         setLoading(false);
         return;
       }
       const role = data.role || 'admin';
-      await onLogin(role, data);
+      logAudit({ user: data.name || email, role: ROLE_LABELS[role] || role, action: 'Login successful', module: 'Authentication', details: `Signed in as ${data.email || email}`, status: 'success' });
+
+      if (data.must_change_password) {
+        setPendingLogin({ ...data, role });
+        setLoading(false);
+        return;
+      }
+
+      await onLogin(role, data, rememberMe);
       navigate(`/${role === 'mayorsoffice' ? 'mayorsoffice/dashboard' : role === 'barangay' ? 'barangay/dashboard' : 'admin/requests'}`);
     } catch (err) {
       console.error('Login error:', err);
       setError('Login failed. Please try again.');
+      logAudit({ user: email, role: '-', action: 'Login failed', module: 'Authentication', details: 'Login request error', status: 'failed' });
     } finally {
       setLoading(false);
     }
+  };
+
+  const handlePasswordChanged = () => {
+    setPendingLogin(null);
+    setPassword('');
+    setNotice('Password changed successfully. Please sign in again with your new password.');
   };
 
   return (
@@ -56,6 +88,11 @@ const Login = ({ onLogin }) => {
         </div>
         
         <form onSubmit={handleSubmit} className="text-left flex flex-col gap-5">
+          {notice && (
+            <div className="bg-emerald-500/10 text-emerald-700 p-3.5 rounded-xl text-xs font-semibold border border-emerald-500/20 text-center">
+              {notice}
+            </div>
+          )}
           {error && (
             <div className="bg-red-500/10 text-red-600 p-3.5 rounded-xl text-xs font-semibold border border-red-500/20 text-center">
               {error}
@@ -76,31 +113,67 @@ const Login = ({ onLogin }) => {
           
           <div className="flex flex-col gap-2">
             <label htmlFor="password" className="text-[13px] font-bold text-slate-700">Password</label>
-            <input 
-              type="password" 
-              id="password" 
-              className="py-3 px-4 border border-slate-300 rounded-xl text-[15px] font-medium transition-all duration-200 bg-white text-slate-900 placeholder-slate-400 focus:outline-none focus:border-[#0c165a] focus:ring-1 focus:ring-[#0c165a] shadow-sm"
-              value={password} 
-              onChange={(e) => setPassword(e.target.value)} 
-              required 
-            />
+            <div className="relative">
+              <input
+                type={showPassword ? 'text' : 'password'}
+                id="password"
+                className="w-full py-3 pl-4 pr-11 border border-slate-300 rounded-xl text-[15px] font-medium transition-all duration-200 bg-white text-slate-900 placeholder-slate-400 focus:outline-none focus:border-[#0c165a] focus:ring-1 focus:ring-[#0c165a] shadow-sm"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((v) => !v)}
+                className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
+              >
+                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+              </button>
+            </div>
           </div>
-          
-          <button 
-            type="submit" 
+
+          <div className="flex items-center justify-between -mt-1">
+            <label className="flex items-center gap-2 text-[13px] font-medium text-slate-600 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={rememberMe}
+                onChange={(e) => setRememberMe(e.target.checked)}
+                className="h-4 w-4 rounded border-slate-300 text-[#0c165a] focus:ring-[#0c165a] cursor-pointer"
+              />
+              Remember me
+            </label>
+            <button
+              type="button"
+              onClick={() => setShowForgotPassword(true)}
+              className="text-sm font-bold text-[#1b4de4] hover:underline transition-all"
+            >
+              Forgot password?
+            </button>
+          </div>
+
+          <button
+            type="submit"
             disabled={loading}
             className="w-full mt-2 bg-[#0c165a] hover:bg-[#070d38] text-white border-none py-3 px-6 rounded-xl font-bold text-[15px] cursor-pointer transition-all duration-200 shadow-md hover:shadow-[0_4px_12px_rgba(12,22,90,0.2)] hover:-translate-y-0.5 active:translate-y-0 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {loading ? 'Logging in...' : 'Login'}
           </button>
-          
-          <div className="mt-4 text-center">
-            <a href="#" className="text-sm font-bold text-[#1b4de4] hover:underline transition-all">
-              Forgot password?
-            </a>
-          </div>
         </form>
       </div>
+
+      {pendingLogin && (
+        <ForceChangePasswordModal
+          user={pendingLogin}
+          currentPassword={password}
+          onSuccess={handlePasswordChanged}
+          onCancel={() => setPendingLogin(null)}
+        />
+      )}
+
+      {showForgotPassword && (
+        <ForgotPasswordModal onClose={() => setShowForgotPassword(false)} />
+      )}
     </div>
   );
 };

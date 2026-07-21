@@ -8,13 +8,19 @@ import {
   FileText,
   Settings,
   Users,
+  UserCog,
+  Shield,
+  CalendarClock,
+  InboxIcon,
 } from "lucide-react";
 import api from '../../services/api';
 
 const MODULES = [
   "All modules",
+  "Authentication",
   "Bot Management",
   "User Management",
+  "Operator Management",
   "Settings",
   "Collection Schedule",
   "Report Generation",
@@ -23,14 +29,30 @@ const MODULES = [
 
 const ACTIONS = [
   "All actions",
-  "Bot deployed",
-  "Report generated",
+  "Login successful",
   "Login failed",
+  "Bot deployed",
+  "Bot archived",
+  "Maintenance scheduled",
+  "User added",
+  "User updated",
+  "User removed",
+  "User restored",
+  "Role changed",
+  "Password reset",
+  "Area reassigned",
+  "Operator added",
+  "Operator updated",
+  "Operator archived",
+  "Operator restored",
+  "Operator status changed",
+  "Bot assigned",
   "Settings updated",
   "Schedule edited",
   "Bot alert",
-  "User removed",
   "Request approved",
+  "Request declined",
+  "Report generated",
 ];
 
 const STATUS_STYLES = {
@@ -40,10 +62,14 @@ const STATUS_STYLES = {
 };
 
 const MODULE_ICONS = {
+  Authentication: Shield,
   "Bot Management": Bot,
   "User Management": Users,
+  "Operator Management": UserCog,
   Settings: Settings,
+  "Collection Schedule": CalendarClock,
   "Report Generation": FileText,
+  Requests: InboxIcon,
 };
 
 const PAGE_SIZE = 8;

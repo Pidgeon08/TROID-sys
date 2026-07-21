@@ -42,6 +42,7 @@ export function mapRequest(raw) {
       province: raw.province || '',
     },
     notes: raw.notes || '',
+    declineReason: raw.decline_reason || '',
     letter: raw.letter_file_name
       ? { fileName: raw.letter_file_name, size: raw.letter_size }
       : null,
@@ -59,6 +60,7 @@ export function mapRequest(raw) {
       actor: sh.actor || '',
       role: sh.role || '',
       state: sh.state || 'done',
+      details: sh.details || '',
     })),
     botId: raw.bot_id || null,
     operator: raw.operator || null,

@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import api from './services/api';
 import Login from './pages/Login';
 import Dashboard from './pages/Admin/Dashboard';
@@ -9,6 +9,7 @@ import SendReport from './pages/Admin/SendReport';
 import Settings from './pages/Admin/Settings';
 import ManageBots from './pages/Admin/Manage-bots';
 import UserManagement from './pages/Admin/UserManagement';
+import OperatorManagement from './pages/Admin/OperatorManagement';
 import Requests from './pages/Admin/Requests';
 import ViewRequest from './pages/Admin/ViewRequest';
 import SendRequest from './pages/Admin/request/SendRequest';
@@ -30,17 +31,41 @@ import Layout from './components/Layout';
 import { ProtectedRoute } from './components/ProtectedRoute';
 
 
-function App() {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [userType, setUserType] = useState('admin');
-  const [currentUser, setCurrentUser] = useState(null);
+const REMEMBER_ME_KEY = 'troid_remembered_session';
 
-  const handleLogin = async (type = 'admin', userData = null) => {
+// Rehydrates a remembered session (if the user checked "Remember me") for the
+// initial render. The single-active-session poll in App still validates it
+// against the server, so a session restored here gets signed out if it was
+// superseded elsewhere in the meantime.
+function getStoredSession() {
+  try {
+    const saved = localStorage.getItem(REMEMBER_ME_KEY);
+    if (!saved) return null;
+    const parsed = JSON.parse(saved);
+    if (parsed?.currentUser && parsed?.userType) return parsed;
+  } catch (err) {
+    console.error('Failed to restore remembered session:', err);
+    localStorage.removeItem(REMEMBER_ME_KEY);
+  }
+  return null;
+}
+
+function App() {
+  const [isAuthenticated, setIsAuthenticated] = useState(() => getStoredSession() !== null);
+  const [userType, setUserType] = useState(() => getStoredSession()?.userType || 'admin');
+  const [currentUser, setCurrentUser] = useState(() => getStoredSession()?.currentUser || null);
+
+  const handleLogin = async (type = 'admin', userData = null, rememberMe = false) => {
     try {
       const user = userData || await api.users().then(users => users.find(u => u.role === type) || users[0]);
       setCurrentUser(user);
       setUserType(type);
       setIsAuthenticated(true);
+      if (rememberMe) {
+        localStorage.setItem(REMEMBER_ME_KEY, JSON.stringify({ currentUser: user, userType: type }));
+      } else {
+        localStorage.removeItem(REMEMBER_ME_KEY);
+      }
     } catch (error) {
       console.error('Login error:', error);
       setUserType(type);
@@ -48,13 +73,41 @@ function App() {
     }
   };
 
+  const handleLogout = () => {
+    setIsAuthenticated(false);
+    setCurrentUser(null);
+    localStorage.removeItem(REMEMBER_ME_KEY);
+  };
+
+  // Only one active session per account: if this device's session token no
+  // longer matches the server's record (because the account signed in
+  // elsewhere), sign this device out.
+  useEffect(() => {
+    if (!isAuthenticated || !currentUser?.id || !currentUser?.session_token) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const res = await api.checkUserSession(currentUser.id, currentUser.session_token);
+        if (!res.valid) {
+          clearInterval(interval);
+          handleLogout();
+          alert('You have been signed out because your account was signed in from another location.');
+        }
+      } catch (err) {
+        console.error('Session check failed:', err);
+      }
+    }, 15000);
+
+    return () => clearInterval(interval);
+  }, [isAuthenticated, currentUser?.id, currentUser?.session_token]);
+
   return (
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={isAuthenticated ? <Navigate to="/" replace /> : <Login onLogin={handleLogin} />} />
 
         {/* Main Layout wrapper */}
-        <Route element={<Layout isAuthenticated={isAuthenticated} onLogout={() => setIsAuthenticated(false)} userType={userType} currentUser={currentUser} />}>
+        <Route element={<Layout isAuthenticated={isAuthenticated} onLogout={handleLogout} userType={userType} currentUser={currentUser} />}>
 
           {/* Root redirect: Send user to their specific dashboard on login */}
           <Route path="/" element={<Navigate to={`/${userType === 'mayorsoffice' ? 'mayorsoffice/dashboard' : userType === 'barangay' ? 'barangay/dashboard' : 'admin/requests'}`} replace />} />
@@ -64,6 +117,7 @@ function App() {
             <Route path="/admin/dashboard" element={<Dashboard />} />
             <Route path="/admin/manage-bots" element={<ManageBots />} />
             <Route path="/admin/users" element={<UserManagement currentUser={currentUser} />} />
+            <Route path="/admin/operators" element={<OperatorManagement />} />
             <Route path="/admin/reports/send-report" element={<SendReport />} />
             <Route path="/admin/requests" element={<Requests userRole="admin" />} />
             <Route path="/admin/requests/:id" element={<ViewRequest />} />
@@ -82,6 +136,7 @@ function App() {
             <Route path="/mayorsoffice/dashboard" element={<CityHallDashboard />} />
             <Route path="/mayorsoffice/requests" element={<CityHallRequests />} />
             <Route path="/mayorsoffice/requests/:id" element={<CityHallViewRequest />} />
+            <Route path="/mayorsoffice/settings" element={<Settings />} />
           </Route>
 
           {/* BARANGAY ROUTES */}
@@ -93,6 +148,7 @@ function App() {
             <Route path="/barangay/requests" element={<BarangayRequests currentUser={currentUser} />} />
             <Route path="/barangay/requests/:id" element={<BarangayViewRequest />} />
             <Route path="/barangay/areas" element={<BarangayAreas />} />
+            <Route path="/barangay/settings" element={<Settings />} />
           </Route>
 
         </Route>

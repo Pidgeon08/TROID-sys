@@ -169,7 +169,10 @@ export default function BarangayRequests({ currentUser }) {
                       {req.dateSubmitted}
                     </td>
                    <td className="px-5 py-3.5">
-                     <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${BCOL_STATUS_STYLES[req.status]}`}>
+                     <span
+                       className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${BCOL_STATUS_STYLES[req.status]}`}
+                       title={req.status === "Declined" ? (req.declineReason || "No reason provided") : undefined}
+                     >
                        <span className={`w-1.5 h-1.5 rounded-full ${BCOL_STATUS_DOT[req.status]}`} />
                        {req.status}
                      </span>

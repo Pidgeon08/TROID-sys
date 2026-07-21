@@ -1,6 +1,8 @@
 import { useEffect, useState, useMemo } from 'react';
+import { useOutletContext } from 'react-router-dom';
 import Modal from '../../components/Modal';
 import api from '../../services/api';
+import { logAudit } from '../../services/auditLog';
 import {
     Plus,
     Wrench,
@@ -15,6 +17,7 @@ import {
 } from 'lucide-react';
 
 export default function ManageBots() {
+    const { currentUser } = useOutletContext() || {};
     // --- States ---
     const [bots, setBots] = useState([]);
     const [operators, setOperators] = useState([]);
@@ -92,6 +95,9 @@ export default function ManageBots() {
     const [editOpName, setEditOpName] = useState('');
     const [editOpStatus, setEditOpStatus] = useState('available');
     const [editOpAssignedBot, setEditOpAssignedBot] = useState('');
+    const [assignOpId, setAssignOpId] = useState('');
+    const [maintenanceDetails, setMaintenanceDetails] = useState({ type: 'Routine Maintenance', date: '', notes: '' });
+    const [scheduleDetails, setScheduleDetails] = useState({ barangay: '', time: '', date: '' });
 
     // --- Filter/Search States for "View All" Modals ---
     const [botSearch, setBotSearch] = useState('');
@@ -198,6 +204,13 @@ export default function ManageBots() {
             if (bots.length === 0) {
                 setSelectedBotId(botToAdd.id);
             }
+
+            logAudit({
+                currentUser,
+                action: 'Bot deployed',
+                module: 'Bot Management',
+                details: `Bot ${botToAdd.id} added to fleet`,
+            });
         } catch (err) {
             console.error('Failed to add bot:', err);
             alert('Failed to add bot. Please try again.');
@@ -395,6 +408,13 @@ export default function ManageBots() {
 
         setIsMaintenanceOpen(false);
         setMaintenanceDetails({ type: 'Routine Maintenance', date: '', notes: '' });
+
+        logAudit({
+            currentUser,
+            action: 'Maintenance scheduled',
+            module: 'Bot Management',
+            details: `${selectedBot.id}: ${maintenanceDetails.type} scheduled for ${maintenanceDetails.date}`,
+        });
     };
 
     const handleManageSchedule = (e) => {
@@ -465,6 +485,13 @@ export default function ManageBots() {
         }
 
         setIsArchiveConfirmOpen(false);
+
+        logAudit({
+            currentUser,
+            action: 'Bot archived',
+            module: 'Bot Management',
+            details: `Bot ${selectedBot.id} archived and removed from active fleet`,
+        });
     };
 
     // --- Filtering Logic for View All Modals ---

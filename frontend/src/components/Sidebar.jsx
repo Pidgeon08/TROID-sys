@@ -1,18 +1,16 @@
 import { useState } from "react";
 import { createPortal } from "react-dom";
 import { NavLink } from 'react-router-dom';
-import { Home, Map, FileText, Settings as SettingsIcon, LogOut, Shield, ClipboardList, Users, Bot, InboxIcon, Send, CalendarClock, Recycle, MapPin } from 'lucide-react';
+import { Home, Map, FileText, Settings as SettingsIcon, LogOut, Shield, ClipboardList, Users, Bot, InboxIcon, Send, CalendarClock, Recycle, MapPin, UserCog } from 'lucide-react';
 
 const navItems = {
   admin: [
     { to: '/admin/dashboard', icon: Home, label: 'Dashboard' },
     { to: '/admin/manage-bots', icon: Bot, label: 'Bot Management' },
-    { to: '/admin/requests', icon: InboxIcon, label: 'Requests' },
     { to: '/admin/users', icon: Users, label: 'User Management' },
+    { to: '/admin/operators', icon: UserCog, label: 'Operator Management' },
+    { to: '/admin/requests', icon: InboxIcon, label: 'Requests' },
     { to: '/admin/deployment', icon: CalendarClock, label: 'Deployment Schedule' },
-    // { to: '/admin/collection-schedule', icon: CalendarClock, label: 'Collection Schedule' },
-    // { to: '/admin/landfill', icon: MapPin, label: 'Landfill Tracking' },
-    // { to: '/admin/recycling', icon: Recycle, label: 'Recycling Center' },
     { to: '/admin/heatmap', icon: Map, label: 'Heatmap' },
     { to: '/admin/reports', icon: FileText, label: 'Report Generation' },
     { to: '/admin/audit', icon: ClipboardList, label: 'Audit Logs' },
@@ -21,14 +19,15 @@ const navItems = {
   mayorsoffice: [
     { to: '/mayorsoffice/dashboard', icon: Home, label: 'Dashboard' },
     { to: '/mayorsoffice/requests', icon: InboxIcon, label: 'Requests' },
+    { to: '/mayorsoffice/settings', icon: SettingsIcon, label: 'Settings' },
   ],
   barangay: [
     { to: '/barangay/dashboard', icon: Home, label: 'Dashboard' },
     { to: '/barangay/areas', icon: MapPin, label: 'Collection Areas' },
     { to: '/barangay/requests', icon: InboxIcon, label: 'My Requests' },
     { to: '/barangay/request', icon: Send, label: 'Submit Request' },
-    // { to: '/barangay/segregation', icon: Recycle, label: 'Trash Segregation' },
     { to: '/barangay/heatmap', icon: Map, label: 'Bot Tracking' },
+    { to: '/barangay/settings', icon: SettingsIcon, label: 'Settings' },
   ],
 };
 

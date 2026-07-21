@@ -34,6 +34,8 @@ export default function CityHallViewRequest() {
   const [showPhotoViewer, setShowPhotoViewer] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [confirmAction, setConfirmAction] = useState(null);
+  const [declineReason, setDeclineReason] = useState("");
+  const [reasonStep, setReasonStep] = useState(null);
   const [schedule, setSchedule] = useState(null);
 
   useEffect(() => {
@@ -69,11 +71,11 @@ export default function CityHallViewRequest() {
     }
   };
 
-  const handleDecline = async () => {
+  const handleDecline = async (reason) => {
     setSubmitting(true);
     try {
-      await api.declineRequest(request.id);
-      setRequest(prev => ({ ...prev, status: 'Declined' }));
+      await api.declineRequest(request.id, { reason });
+      setRequest(prev => ({ ...prev, status: 'Declined', declineReason: reason }));
     } catch (err) {
       console.error('Failed to decline request:', err);
       alert('Failed to decline request. Please try again.');
@@ -327,6 +329,15 @@ export default function CityHallViewRequest() {
                               <div>
                                 <p className="text-sm font-semibold text-slate-800">{step.label}</p>
                                 <p className="text-xs text-slate-400 mt-0.5">{step.date}</p>
+                                {step.details && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setReasonStep(step)}
+                                    className="mt-1 text-xs font-semibold text-red-600 hover:text-red-700 underline underline-offset-2"
+                                  >
+                                    View reason
+                                  </button>
+                                )}
                               </div>
                               <div className="text-right shrink-0">
                                 <p className="text-xs font-medium text-slate-600">{step.actor}</p>
@@ -379,12 +390,26 @@ export default function CityHallViewRequest() {
               <p className="text-xs text-slate-500 mt-1">
                 {confirmAction === 'approve'
                   ? 'This request will be forwarded to CENRO for final approval.'
-                  : 'This request will be declined and the barangay will be notified.'}
+                  : 'This request will be declined and the barangay will be notified with your remarks.'}
               </p>
             </div>
+            {confirmAction === 'decline' && (
+              <div className="px-6 pt-4">
+                <label className="mb-1.5 block text-xs font-semibold text-slate-500">
+                  Reason for declining <span className="text-red-500">*</span>
+                </label>
+                <textarea
+                  value={declineReason}
+                  onChange={(e) => setDeclineReason(e.target.value)}
+                  rows={3}
+                  placeholder="Explain why this request is being declined..."
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-red-400 focus:ring-2 focus:ring-red-500/20"
+                />
+              </div>
+            )}
             <div className="p-6 flex gap-3">
               <button
-                onClick={() => setConfirmAction(null)}
+                onClick={() => { setConfirmAction(null); setDeclineReason(""); }}
                 disabled={submitting}
                 className="flex-1 rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors"
               >
@@ -393,14 +418,44 @@ export default function CityHallViewRequest() {
               <button
                 onClick={async () => {
                   const action = confirmAction;
+                  const reason = declineReason.trim();
                   setConfirmAction(null);
+                  setDeclineReason("");
                   if (action === 'approve') await handleApprove();
-                  else await handleDecline();
+                  else await handleDecline(reason);
                 }}
-                disabled={submitting}
-                className={`flex-1 rounded-lg px-4 py-2.5 text-sm font-medium text-white transition-colors disabled:opacity-50 ${confirmAction === 'approve' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-red-600 hover:bg-red-700'}`}
+                disabled={submitting || (confirmAction === 'decline' && !declineReason.trim())}
+                className={`flex-1 rounded-lg px-4 py-2.5 text-sm font-medium text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${confirmAction === 'approve' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-red-600 hover:bg-red-700'}`}
               >
                 {confirmAction === 'approve' ? 'Approve' : 'Decline'}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {reasonStep && createPortal(
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 p-4" onClick={() => setReasonStep(null)}>
+          <div className="w-full max-w-sm bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="p-6 border-b border-slate-100 flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-bold text-slate-900">{reasonStep.label}</h3>
+                <p className="text-xs text-slate-500 mt-1">{reasonStep.date}</p>
+              </div>
+              <button onClick={() => setReasonStep(null)} className="text-slate-400 hover:text-slate-600" aria-label="Close">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="p-6">
+              <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">{reasonStep.details}</p>
+            </div>
+            <div className="px-6 pb-6 flex justify-end">
+              <button
+                onClick={() => setReasonStep(null)}
+                className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors"
+              >
+                Close
               </button>
             </div>
           </div>
