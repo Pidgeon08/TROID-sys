@@ -11,7 +11,6 @@ import {
   Calendar,
   Truck,
   ChevronDown,
-  Eye,
   X,
   ChevronLeft,
   ChevronRight,
@@ -30,7 +29,6 @@ export default function SendRequest() {
     requestType: "Cleanup",
     notes: "",
   });
-  const [preview, setPreview] = useState(null);
   const [photoBase64List, setPhotoBase64List] = useState([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [barangays, setBarangays] = useState([]);
@@ -44,7 +42,7 @@ export default function SendRequest() {
     const fetchBarangays = async () => {
       try {
         const data = await api.users();
-        const barangayUsers = Array.isArray(data) ? data.filter((u) => u.role === "barangay") : [];
+        const barangayUsers = Array.isArray(data) ? data.filter((u) => u.role === "barangay" || u.role === "ngo") : [];
         setBarangays(barangayUsers);
       } catch (err) {
         console.error("Failed to fetch barangays:", err);
@@ -79,7 +77,6 @@ export default function SendRequest() {
         image_data: src,
       }));
       setPhotoBase64List(prev => [...prev, ...newPhotos]);
-      setPreview(newPhotos[0].src);
     });
   };
 

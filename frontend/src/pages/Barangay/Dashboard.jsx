@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { MapPin, Calendar, Trash2, Ship } from "lucide-react";
 import { MapContainer, TileLayer, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
@@ -70,7 +71,7 @@ function HeatmapLayer({ points, type }) {
       if (heat && map) {
         try {
           map.removeLayer(heat);
-        } catch (e) {
+        } catch {
           // ignore cleanup errors
         }
       }
@@ -84,6 +85,7 @@ function HeatmapLayer({ points, type }) {
 }
 
 const Dashboard = ({ currentUser }) => {
+  const navigate = useNavigate();
   const [barangayData, setBarangayData] = useState({});
   const [recentRequests, setRecentRequests] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -176,6 +178,7 @@ const Dashboard = ({ currentUser }) => {
           'Pending': 'amber',
           'Approved': 'emerald',
           'Declined': 'red',
+          'Parked': 'purple',
           'Processing': 'blue',
           'Completed': 'emerald',
           'Segregated': 'purple',
@@ -476,9 +479,12 @@ const Dashboard = ({ currentUser }) => {
       <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] overflow-hidden mt-6">
         <div className="p-5 border-b border-slate-100 flex justify-between items-center">
           <h2 className="text-[17px] font-bold text-slate-900">Recent Requests</h2>
-          <a href="/barangay/requests" className="text-xs font-semibold text-[#1b4de4] hover:text-[#153eb8]">
+          <button
+            onClick={() => navigate("/barangay/requests")}
+            className="text-xs font-semibold text-[#1b4de4] hover:text-[#153eb8]"
+          >
             View all
-          </a>
+          </button>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">

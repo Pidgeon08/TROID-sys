@@ -28,7 +28,7 @@ def _on_connect(client, userdata, flags, rc):
         client.subscribe(TOPIC_HEARTBEAT)
         client.subscribe(TOPIC_DETECTION)
         client.subscribe(TOPIC_STATUS)
-        print(f"[MQTT] Subscribed to topics")
+        print("[MQTT] Subscribed to topics")
     else:
         print(f"[MQTT] Connection failed with code {rc}")
 
@@ -137,6 +137,7 @@ def _run_client():
 
 def start_mqtt_client():
     def run():
+        global _client
         retry_delay = 60
         while True:
             try:

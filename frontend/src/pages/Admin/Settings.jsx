@@ -10,6 +10,7 @@ const ROLE_LABELS = {
   admin: "Admin",
   mayorsoffice: "Mayor",
   barangay: "Barangay",
+  ngo: "NGO",
   viewer: "Viewer",
 };
 

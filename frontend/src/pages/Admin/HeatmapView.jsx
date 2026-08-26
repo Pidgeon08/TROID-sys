@@ -3,7 +3,7 @@ import 'leaflet/dist/leaflet.css';
 import { useEffect, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet.heat';
-import { Calendar } from 'lucide-react';
+import { Calendar, Radar, ClipboardList, ArrowRightLeft, Map as MapIcon } from 'lucide-react';
 import { api } from '../../services/api';
 
 /**
@@ -110,6 +110,7 @@ function HeatmapLayer({ points, type }) {
  * Holds coordinates and metadata matching the revised screenshot labels.
  */
 const HeatmapView = () => {
+  const [activeView, setActiveView] = useState('live'); // 'live' | 'comparison'
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [timeFilter, setTimeFilter] = useState('Today');
   const [heatmapType, setHeatmapType] = useState('Waste Density');
@@ -119,6 +120,65 @@ const HeatmapView = () => {
   const [totalTrash, setTotalTrash] = useState(0);
   const [allCategories, setAllCategories] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  // Post-cleanup comparison: TROID-detected trash vs what CENRO actually entered per drive.
+  const [comparisonData, setComparisonData] = useState([]);
+  const [comparisonSource, setComparisonSource] = useState('troid'); // 'troid' | 'user'
+  const [comparisonLoading, setComparisonLoading] = useState(true);
+  const [selectedRequestId, setSelectedRequestId] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const fetchComparison = async () => {
+      try {
+        const data = await api.postCleanupComparison();
+        if (cancelled) return;
+        setComparisonData(Array.isArray(data) ? data : []);
+      } catch (err) {
+        console.error('Failed to fetch post-cleanup comparison data:', err);
+      } finally {
+        if (!cancelled) setComparisonLoading(false);
+      }
+    };
+
+    fetchComparison();
+    return () => { cancelled = true; };
+  }, []);
+
+  const selectedDrive = selectedRequestId
+    ? comparisonData.find((d) => d.request_id === selectedRequestId) || null
+    : null;
+
+  // Scope the map + category breakdown to the selected request, or fall back to all drives.
+  const comparisonScope = selectedDrive ? [selectedDrive] : comparisonData;
+
+  const comparisonPoints = comparisonScope
+    .filter((d) => typeof d.latitude === 'number' && typeof d.longitude === 'number')
+    .map((d) => {
+      const total = comparisonSource === 'troid' ? d.troid_total : d.user_total;
+      return [d.latitude, d.longitude, Math.min((total || 0) * 0.15, 1)];
+    });
+
+  const comparisonCategoryTotals = comparisonScope.reduce(
+    (acc, d) => {
+      Object.entries(d.troid_categories || {}).forEach(([cat, count]) => {
+        acc.troid[cat] = (acc.troid[cat] || 0) + count;
+      });
+      Object.entries(d.user_categories || {}).forEach(([cat, count]) => {
+        acc.user[cat] = (acc.user[cat] || 0) + count;
+      });
+      return acc;
+    },
+    { troid: {}, user: {} }
+  );
+
+  const comparisonCategories = Array.from(
+    new Set([...Object.keys(comparisonCategoryTotals.troid), ...Object.keys(comparisonCategoryTotals.user)])
+  ).sort();
+
+  const comparisonTroidGrandTotal = comparisonScope.reduce((sum, d) => sum + (d.troid_total || 0), 0);
+  const comparisonUserGrandTotal = comparisonScope.reduce((sum, d) => sum + (d.user_total || 0), 0);
 
   useEffect(() => {
     let cancelled = false;
@@ -253,22 +313,48 @@ const HeatmapView = () => {
           <p className="text-slate-500 text-xs mt-1.5 font-semibold uppercase tracking-wider">Live Gps Trail</p>
         </div>
         
-        {/* Started time & Status widget */}
-        <div className="bg-white border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] rounded-xl px-5 py-2.5 flex flex-col gap-0.5 min-w-[160px]">
-          <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Started: {selectedBot.startedAt}</span>
-          <div className="flex items-center gap-2">
-            <span className={`w-2 h-2 rounded-full ${
-               selectedBot.status === 'Bot Online' ? 'bg-emerald-500 shadow-[0_0_6px_#10b981]' : 'bg-rose-500'
-             }`}></span>
-<span className={`text-[11px] font-bold ${
-                       selectedBot.status === 'Bot Online' ? 'text-emerald-600' : 'text-rose-500'
-                     }`}>
-                       {selectedBot.status}
-                     </span>
+        <div className="flex items-center gap-4">
+          {/* View toggle: Live Heat Map <-> Post-Cleanup Comparison */}
+          <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl shrink-0">
+            <button
+              onClick={() => setActiveView('live')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer flex items-center gap-1.5 transition-all duration-200 ${
+                activeView === 'live' ? 'bg-[#1b4de4] text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <MapIcon className="w-3.5 h-3.5" />
+              Live Heat Map
+            </button>
+            <button
+              onClick={() => setActiveView('comparison')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer flex items-center gap-1.5 transition-all duration-200 ${
+                activeView === 'comparison' ? 'bg-[#1b4de4] text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <ArrowRightLeft className="w-3.5 h-3.5" />
+              Post-Cleanup Comparison
+            </button>
+          </div>
+
+          {/* Started time & Status widget */}
+          <div className="bg-white border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] rounded-xl px-5 py-2.5 flex flex-col gap-0.5 min-w-[160px]">
+            <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Started: {selectedBot.startedAt}</span>
+            <div className="flex items-center gap-2">
+              <span className={`w-2 h-2 rounded-full ${
+                 selectedBot.status === 'Bot Online' ? 'bg-emerald-500 shadow-[0_0_6px_#10b981]' : 'bg-rose-500'
+               }`}></span>
+              <span className={`text-[11px] font-bold ${
+                         selectedBot.status === 'Bot Online' ? 'text-emerald-600' : 'text-rose-500'
+                       }`}>
+                         {selectedBot.status}
+                       </span>
+            </div>
           </div>
         </div>
       </header>
 
+      {activeView === 'live' && (
+      <>
       {/*  DASHBOARD GRID WORKSPACE */}
       <div className="flex gap-6 items-start flex-1 min-h-[550px]">
         
@@ -473,6 +559,183 @@ const HeatmapView = () => {
           </div>
         </div>
       </div>
+      </>
+      )}
+
+      {/* POST-CLEANUP COMPARISON SECTION */}
+      {activeView === 'comparison' && (
+      <div className="bg-white border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] rounded-2xl p-6 flex flex-col gap-5">
+        <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3">
+          <div>
+            <h2 className="text-[17px] font-bold text-slate-900 flex items-center gap-2">
+              <ArrowRightLeft className="w-4 h-4 text-slate-400" />
+              Post-Cleanup Comparison
+            </h2>
+            <p className="text-xs text-slate-500 mt-1">
+              Garbage data collected after each cleanup drive — TROID's onboard detections vs what CENRO actually reported.
+            </p>
+          </div>
+          {/* Source toggle */}
+          <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl shrink-0">
+            <button
+              onClick={() => setComparisonSource('troid')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer flex items-center gap-1.5 transition-all duration-200 ${
+                comparisonSource === 'troid' ? 'bg-[#1b4de4] text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <Radar className="w-3.5 h-3.5" />
+              TROID Detected
+            </button>
+            <button
+              onClick={() => setComparisonSource('user')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer flex items-center gap-1.5 transition-all duration-200 ${
+                comparisonSource === 'user' ? 'bg-[#1b4de4] text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <ClipboardList className="w-3.5 h-3.5" />
+              User Reported
+            </button>
+          </div>
+        </div>
+
+        {selectedDrive && (
+          <div className="flex items-center justify-between gap-3 rounded-xl border border-blue-100 bg-blue-50/60 px-4 py-2.5">
+            <span className="text-xs font-semibold text-slate-700">
+              Showing TROID bot output for <span className="text-[#1b4de4]">{selectedDrive.request_id}</span>
+              {selectedDrive.barangay ? ` — ${selectedDrive.barangay}` : ''}
+            </span>
+            <button
+              onClick={() => setSelectedRequestId(null)}
+              className="shrink-0 rounded-lg px-2.5 py-1 text-xs font-semibold text-[#1b4de4] hover:bg-blue-100 transition-colors"
+            >
+              Show all requests
+            </button>
+          </div>
+        )}
+
+        {comparisonLoading ? (
+          <div className="flex items-center justify-center h-75">
+            <span className="text-sm font-medium text-slate-500">Loading post-cleanup data...</span>
+          </div>
+        ) : comparisonData.length === 0 ? (
+          <div className="flex items-center justify-center h-50">
+            <span className="text-sm font-medium text-slate-400">No completed cleanup drives with trash reports yet.</span>
+          </div>
+        ) : (
+          <>
+            <div className="grid grid-cols-1 lg:grid-cols-[1.3fr_1fr] gap-5">
+              {/* Comparison heat map */}
+              <div className="rounded-xl overflow-hidden border border-slate-100 relative min-h-80">
+                <MapContainer
+                  center={comparisonPoints.length > 0 ? [comparisonPoints[0][0], comparisonPoints[0][1]] : [14.5995, 120.9842]}
+                  zoom={14}
+                  zoomControl={false}
+                  style={{ height: '100%', width: '100%', position: 'absolute', top: 0, left: 0 }}
+                >
+                  <TileLayer
+                    url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                  />
+                  <HeatmapLayer points={comparisonPoints} type="Trash Collected" />
+                  {selectedDrive && typeof selectedDrive.latitude === 'number' && typeof selectedDrive.longitude === 'number' && (
+                    <ChangeView center={[selectedDrive.latitude, selectedDrive.longitude]} zoom={16} />
+                  )}
+                  <ZoomControl position="bottomright" />
+                </MapContainer>
+              </div>
+
+              {/* Category comparison bars */}
+              <div className="flex flex-col gap-3">
+                <div className="flex items-center justify-between text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                  <span>{selectedDrive ? `${selectedDrive.request_id} category breakdown` : 'Category'}</span>
+                  <span>TROID vs User</span>
+                </div>
+                <div className="flex flex-col gap-3 overflow-y-auto max-h-70 pr-1">
+                  {comparisonCategories.map((cat) => {
+                    const troidCount = comparisonCategoryTotals.troid[cat] || 0;
+                    const userCount = comparisonCategoryTotals.user[cat] || 0;
+                    const maxCount = Math.max(troidCount, userCount, 1);
+                    return (
+                      <div key={cat} className="flex flex-col gap-1">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="font-semibold text-slate-700 capitalize">{cat}</span>
+                          <span className="text-slate-400">
+                            <span className="text-[#1b4de4] font-bold">{troidCount}</span>
+                            {' / '}
+                            <span className="text-emerald-600 font-bold">{userCount}</span>
+                          </span>
+                        </div>
+                        <div className="flex flex-col gap-0.5">
+                          <div className="h-1.5 rounded-full bg-slate-100 overflow-hidden">
+                            <div className="h-full bg-[#1b4de4] rounded-full" style={{ width: `${(troidCount / maxCount) * 100}%` }} />
+                          </div>
+                          <div className="h-1.5 rounded-full bg-slate-100 overflow-hidden">
+                            <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${(userCount / maxCount) * 100}%` }} />
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="mt-1 pt-3 border-t border-slate-100 flex items-center justify-between text-xs">
+                  <span className="flex items-center gap-1.5 font-semibold text-slate-500">
+                    <span className="w-2 h-2 rounded-full bg-[#1b4de4]" />
+                    TROID total: <span className="text-slate-900 font-bold">{comparisonTroidGrandTotal}</span>
+                  </span>
+                  <span className="flex items-center gap-1.5 font-semibold text-slate-500">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                    User total: <span className="text-slate-900 font-bold">{comparisonUserGrandTotal}</span>
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Per-drive comparison table */}
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-left text-slate-400 uppercase tracking-wider border-b border-slate-100">
+                    <th className="py-2 pr-4 font-semibold">Request</th>
+                    <th className="py-2 pr-4 font-semibold">Barangay</th>
+                    <th className="py-2 pr-4 font-semibold">Date</th>
+                    <th className="py-2 pr-4 font-semibold text-right">TROID Detected</th>
+                    <th className="py-2 pr-4 font-semibold text-right">User Reported</th>
+                    <th className="py-2 font-semibold text-right">Difference</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                  {comparisonData.map((d) => {
+                    const diff = (d.troid_total || 0) - (d.user_total || 0);
+                    const isSelected = selectedRequestId === d.request_id;
+                    return (
+                      <tr
+                        key={d.request_id}
+                        onClick={() => setSelectedRequestId(isSelected ? null : d.request_id)}
+                        title="Select to view this request's TROID bot output"
+                        className={`cursor-pointer transition-colors ${
+                          isSelected ? 'bg-blue-50 text-slate-900' : 'text-slate-700 hover:bg-slate-50'
+                        }`}
+                      >
+                        <td className="py-2.5 pr-4 font-semibold">{d.request_id}</td>
+                        <td className="py-2.5 pr-4">{d.barangay || '—'}</td>
+                        <td className="py-2.5 pr-4 text-slate-500">
+                          {d.date_submitted ? new Date(d.date_submitted).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
+                        </td>
+                        <td className="py-2.5 pr-4 text-right font-semibold text-[#1b4de4]">{d.troid_total}</td>
+                        <td className="py-2.5 pr-4 text-right font-semibold text-emerald-600">{d.user_total}</td>
+                        <td className={`py-2.5 text-right font-bold ${diff === 0 ? 'text-slate-400' : diff > 0 ? 'text-amber-600' : 'text-rose-600'}`}>
+                          {diff > 0 ? `+${diff}` : diff}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+      </div>
+      )}
 
       </>
       )}

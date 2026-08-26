@@ -8,17 +8,25 @@ import {
   Send,
   FileText,
   Calendar,
+  Clock,
   Truck,
   X,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
+  Layers,
 } from "lucide-react";
 import api from "../../services/api";
+import { formatTime12h } from "../../constants/requests";
 
 const REQUEST_TYPE = "Cleanup";
 
 const DAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+const TIME_SLOTS = [
+  "06:00", "07:00", "08:00", "09:00", "10:00", "11:00", "12:00",
+  "13:00", "14:00", "15:00", "16:00", "17:00", "18:00",
+];
 
 function toDateInput(date) {
   const y = date.getFullYear();
@@ -38,12 +46,6 @@ function getWeekDays(center) {
     return d;
   });
 }
-function getMonthDays(center) {
-  const y = center.getFullYear();
-  const m = center.getMonth();
-  const last = new Date(y, m + 1, 0).getDate();
-  return Array.from({ length: last }, (_, i) => new Date(y, m, i + 1));
-}
 const STATUS_STYLES = {
   scheduled: "bg-emerald-50 text-emerald-700 border border-emerald-100",
   maintenance: "bg-amber-50 text-amber-700 border border-amber-100",
@@ -51,7 +53,7 @@ const STATUS_STYLES = {
   none: "bg-slate-50 text-slate-400 border border-slate-100",
 };
 
-function TimeTable({ days, bots, scheduleMap, selectedDate, onSelectDate }) {
+function TimeTable({ days, bots, scheduleMap, selectedDate, onSelectDate, minSelectableDate }) {
   const gridCols = `160px repeat(${days.length}, minmax(40px, 1fr))`;
   const minWidth = Math.max(640, 160 + days.length * 48);
   return (
@@ -67,17 +69,23 @@ function TimeTable({ days, bots, scheduleMap, selectedDate, onSelectDate }) {
             </div>
             {days.map((d) => {
               const isSelected = selectedDate === dateKey(d);
+              const isDisabled = d < minSelectableDate;
               return (
                 <button
                   key={d.toISOString()}
                   type="button"
+                  disabled={isDisabled}
                   onClick={() => onSelectDate(d)}
                   className={`flex flex-col items-center py-1 rounded-md transition-colors ${
-                    isSelected ? "bg-[#1b4de4] hover:bg-[#153eb8]" : "bg-slate-50 hover:bg-slate-100"
+                    isDisabled
+                      ? "bg-slate-50 opacity-40 cursor-not-allowed"
+                      : isSelected
+                        ? "bg-[#1b4de4] hover:bg-[#153eb8]"
+                        : "bg-slate-50 hover:bg-slate-100"
                   }`}
                 >
-                  <span className={`text-[11px] font-semibold ${isSelected ? "text-white" : "text-slate-500"}`}>{DAY_SHORT[d.getDay()]}</span>
-                  <span className={`text-sm font-bold ${isSelected ? "text-white" : "text-slate-800"}`}>{d.getDate()}</span>
+                  <span className={`text-[11px] font-semibold ${isSelected && !isDisabled ? "text-white" : "text-slate-500"}`}>{DAY_SHORT[d.getDay()]}</span>
+                  <span className={`text-sm font-bold ${isSelected && !isDisabled ? "text-white" : "text-slate-800"}`}>{d.getDate()}</span>
                 </button>
               );
             })}
@@ -100,15 +108,19 @@ function TimeTable({ days, bots, scheduleMap, selectedDate, onSelectDate }) {
                 {days.map((d) => {
                   const entry = scheduleMap[String(bot.id)]?.[dateKey(d)];
                   const isSelected = selectedDate === dateKey(d);
-                  const styles = STATUS_STYLES[entry?.status] || STATUS_STYLES.none;
+                  const isDisabled = d < minSelectableDate;
+                  const styles = isDisabled
+                    ? "bg-slate-50 text-slate-300 cursor-not-allowed"
+                    : `${STATUS_STYLES[entry?.status] || STATUS_STYLES.none}${isSelected ? " ring-2 ring-blue-500" : ""}`;
                   return (
                     <button
                       key={d.toISOString()}
                       type="button"
+                      disabled={isDisabled}
                       onClick={() => onSelectDate(d)}
                       className={`h-9 rounded-lg text-[11px] font-medium transition-colors ${styles}`}
                     >
-                      {entry?.status === "scheduled" ? entry.label : ""}
+                      {!isDisabled && entry?.status === "scheduled" ? entry.label : ""}
                     </button>
                   );
                 })}
@@ -127,7 +139,7 @@ function TimeTable({ days, bots, scheduleMap, selectedDate, onSelectDate }) {
   );
 }
 
-function MonthCalendar({ anchor, scheduleMap, bots, selectedDate, onSelectDate }) {
+function MonthCalendar({ anchor, scheduleMap, bots, selectedDate, onSelectDate, minSelectableDate }) {
   const year = anchor.getFullYear();
   const month = anchor.getMonth();
   const first = new Date(year, month, 1);
@@ -155,18 +167,24 @@ function MonthCalendar({ anchor, scheduleMap, bots, selectedDate, onSelectDate }
               const key = dateKey(d);
               const isToday = key === dateKey(new Date());
               const isSelected = selectedDate === key;
+              const isDisabled = d < minSelectableDate;
               const scheduled = bots.filter((b) => scheduleMap[String(b.id)]?.[key]?.status === "scheduled");
               return (
                 <button
                   key={idx}
                   type="button"
+                  disabled={isDisabled}
                   onClick={() => onSelectDate(d)}
                   className={`h-12 flex flex-col items-center justify-center p-1 transition-colors ${
-                    isSelected ? "bg-[#b8dbff] ring-1 ring-inset ring-[#d6ecff]" : "bg-white hover:bg-slate-50"
+                    isDisabled
+                      ? "bg-white opacity-40 cursor-not-allowed"
+                      : isSelected
+                        ? "bg-[#b8dbff] ring-1 ring-inset ring-[#d6ecff]"
+                        : "bg-white hover:bg-slate-50"
                   }`}
                 >
-                  <span className={`text-sm font-semibold ${isSelected ? "text-[#0369a1]" : isToday ? "text-[#1b4de4]" : "text-slate-700"}`}>{d.getDate()}</span>
-                  {scheduled.length > 0 && (
+                  <span className={`text-sm font-semibold ${isSelected && !isDisabled ? "text-[#0369a1]" : isToday && !isDisabled ? "text-[#1b4de4]" : "text-slate-700"}`}>{d.getDate()}</span>
+                  {!isDisabled && scheduled.length > 0 && (
                     <span className="mt-0.5 text-[10px] font-medium text-emerald-600">
                       {scheduled.length} bot{scheduled.length > 1 ? "s" : ""}
                     </span>
@@ -188,10 +206,13 @@ function RequestForm({ currentUser }) {
 
   const [formData, setFormData] = useState({
     location: "",
+    collectionAreaId: "",
     date: "",
+    time: "",
     notes: "",
   });
-  const [preview, setPreview] = useState(null);
+  const [collectionAreas, setCollectionAreas] = useState([]);
+  const [collectionAreasLoading, setCollectionAreasLoading] = useState(true);
   const [photoBase64List, setPhotoBase64List] = useState([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showOverview, setShowOverview] = useState(false);
@@ -211,6 +232,9 @@ function RequestForm({ currentUser }) {
   const totalBotPages = Math.max(1, Math.ceil(bots.length / BOTS_PER_PAGE));
   const pagedBots = bots.slice(ttBotPage * BOTS_PER_PAGE, (ttBotPage + 1) * BOTS_PER_PAGE);
   const LETTER_TRUNCATE_LENGTH = 200;
+  const minSelectableDate = new Date();
+  minSelectableDate.setHours(0, 0, 0, 0);
+  minSelectableDate.setDate(minSelectableDate.getDate() + 7);
 
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -238,9 +262,17 @@ function RequestForm({ currentUser }) {
         image_data: src,
       }));
       setPhotoBase64List((prev) => [...prev, ...newPhotos]);
-      setPreview(newPhotos[0].src);
     });
   };
+
+  useEffect(() => {
+    let cancelled = false;
+    api.collectionAreas({ barangay: barangayLocation, status: "approved" })
+      .then((data) => { if (!cancelled) setCollectionAreas(data || []); })
+      .catch((err) => console.error("Failed to load collection areas:", err))
+      .finally(() => { if (!cancelled) setCollectionAreasLoading(false); });
+    return () => { cancelled = true; };
+  }, [barangayLocation]);
 
   useEffect(() => {
     if (!showTimeTable || ttLoaded) return;
@@ -262,10 +294,12 @@ function RequestForm({ currentUser }) {
   }, [showTimeTable, ttLoaded]);
 
   const selectDay = (d) => {
+    if (d < minSelectableDate) return;
     setTtSelected(dateKey(d));
   };
 
   const jumpToWeek = (d) => {
+    if (d < minSelectableDate) return;
     setTtAnchor(d);
     setTtSelected(dateKey(d));
     setTtFilter("week");
@@ -293,9 +327,11 @@ function RequestForm({ currentUser }) {
       ? `${getWeekDays(ttAnchor)[0].toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${getWeekDays(ttAnchor)[6].toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`
       : `${MONTHS[ttAnchor.getMonth()]} ${ttAnchor.getFullYear()}`;
 
+  const selectedCollectionArea = collectionAreas.find((a) => String(a.id) === String(formData.collectionAreaId));
+
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (!formData.location || !formData.date) {
+    if (!formData.location || !formData.collectionAreaId || !formData.date || !formData.time) {
       alert("Please fill in all required fields.");
       return;
     }
@@ -317,13 +353,16 @@ function RequestForm({ currentUser }) {
         request_id: `REQ-${timestamp}`,
         request_type: REQUEST_TYPE,
         requested_by_name: barangayName,
-        requested_by_role: "barangay",
+        requested_by_role: currentUser?.role || "barangay",
         requested_by_barangay: barangayLocation,
-        email: `${barangayName.toLowerCase().replace(/\s+/g, '')}@barangay.gov.ph`,
+        email: currentUser?.email || `${barangayName.toLowerCase().replace(/\s+/g, '')}@barangay.gov.ph`,
         location_name: formData.location,
+        collection_area: formData.collectionAreaId,
         barangay: barangayLocation,
         municipality: "",
         province: "",
+        preferred_date: formData.date,
+        preferred_time: formData.time,
         notes: formData.notes,
         photos: photosPayload,
       };
@@ -360,6 +399,36 @@ function RequestForm({ currentUser }) {
         <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-6">
           <form onSubmit={handleSubmit} className="space-y-5">
             <div>
+              <label className="block text-xs font-semibold text-slate-500 mb-1.5">Collection Area</label>
+              <div className="relative">
+                <Layers size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                <select
+                  name="collectionAreaId"
+                  value={formData.collectionAreaId}
+                  onChange={handleChange}
+                  className="w-full appearance-none rounded-lg border border-slate-200 bg-white py-2.5 pl-9 pr-9 text-sm text-slate-700 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
+                  required
+                >
+                  <option value="">
+                    {collectionAreasLoading ? "Loading areas..." : collectionAreas.length === 0 ? "No approved areas yet" : "Select a collection area"}
+                  </option>
+                  {collectionAreas.map((a) => (
+                    <option key={a.id} value={a.id}>{a.name}</option>
+                  ))}
+                </select>
+                <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              </div>
+              {!collectionAreasLoading && collectionAreas.length === 0 && (
+                <p className="text-[11px] text-amber-600 mt-1.5">
+                  You don't have any approved collection areas yet.{" "}
+                  <button type="button" onClick={() => navigate("/barangay/areas")} className="underline font-medium">
+                    Draw one first
+                  </button>.
+                </p>
+              )}
+            </div>
+
+            <div>
               <label className="block text-xs font-semibold text-slate-500 mb-1.5">Location / Address</label>
               <div className="relative">
                 <MapPin size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -390,34 +459,59 @@ function RequestForm({ currentUser }) {
               </div>
             </div>
 
-            <div>
-              <label className="block text-xs font-semibold text-slate-500 mb-1.5">Preferred Date</label>
-              <div className="relative">
-                <Calendar size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (formData.date) {
-                      setTtAnchor(new Date(formData.date + "T00:00:00"));
-                      setTtSelected(formData.date);
-                    } else {
-                      setTtSelected(toDateInput(new Date()));
-                    }
-                    setShowTimeTable(true);
-                  }}
-                  className="w-full flex items-center rounded-lg border border-slate-200 bg-white py-2.5 pl-9 pr-9 text-sm text-left outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
-                >
-                  <span className={formData.date ? "text-slate-700 font-medium" : "text-slate-400"}>
-                    {formData.date
-                      ? new Date(formData.date + "T00:00:00").toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })
-                      : "Select a date from the bot timetable"}
-                  </span>
-                </button>
-                <ChevronRight size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 mb-1.5">Preferred Date</label>
+                <div className="relative">
+                  <Calendar size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (formData.date) {
+                        setTtAnchor(new Date(formData.date + "T00:00:00"));
+                        setTtSelected(formData.date);
+                      } else {
+                        setTtAnchor(minSelectableDate);
+                        setTtSelected(dateKey(minSelectableDate));
+                      }
+                      setShowTimeTable(true);
+                    }}
+                    className="w-full flex items-center rounded-lg border border-slate-200 bg-white py-2.5 pl-9 pr-9 text-sm text-left outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
+                  >
+                    <span className={formData.date ? "text-slate-700 font-medium" : "text-slate-400"}>
+                      {formData.date
+                        ? new Date(formData.date + "T00:00:00").toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })
+                        : "Select a date from the bot timetable"}
+                    </span>
+                  </button>
+                  <ChevronRight size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                </div>
+                <p className="text-[11px] text-slate-400 mt-1.5">
+                  Requests must be scheduled at least one week (7 days) in advance.
+                </p>
               </div>
-              <p className="text-[11px] text-slate-400 mt-1.5">
-                Open the timetable to view TROID bot availability and choose a preferred date.
-              </p>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 mb-1.5">Preferred Time</label>
+                <div className="relative">
+                  <Clock size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                  <select
+                    name="time"
+                    value={formData.time}
+                    onChange={handleChange}
+                    className="w-full appearance-none rounded-lg border border-slate-200 bg-white py-2.5 pl-9 pr-9 text-sm text-slate-700 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
+                  >
+                    <option value="">Select a preferred time</option>
+                    {TIME_SLOTS.map((slot) => (
+                      <option key={slot} value={slot}>{formatTime12h(slot)}</option>
+                    ))}
+                  </select>
+                  <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                </div>
+                <p className="text-[11px] text-slate-400 mt-1.5">
+                  Approximate time you'd like the TROID bot to arrive.
+                </p>
+              </div>
             </div>
 
             <div>
@@ -471,7 +565,7 @@ function RequestForm({ currentUser }) {
 
             <button
               type="submit"
-              disabled={isSubmitting}
+              disabled={isSubmitting || (!collectionAreasLoading && collectionAreas.length === 0)}
               className="w-full flex items-center justify-center gap-2 rounded-lg bg-[#1b4de4] py-3 px-4 text-sm font-medium text-white hover:bg-[#153eb8] transition-colors disabled:opacity-50"
             >
               <Send size={16} />
@@ -527,7 +621,7 @@ function RequestForm({ currentUser }) {
                 <span className="text-slate-400">Hotline:</span> (072) 123-4567
               </p>
               <p className="text-slate-600">
-                <span className="text-slate-400">Email:</span> {barangayName.toLowerCase().replace(/\s+/g, '')}@barangay.gov.ph
+                <span className="text-slate-400">Email:</span> {currentUser?.email || `${barangayName.toLowerCase().replace(/\s+/g, '')}@barangay.gov.ph`}
               </p>
             </div>
           </div>
@@ -548,6 +642,10 @@ function RequestForm({ currentUser }) {
             </div>
             <div className="p-6 space-y-3 max-h-[60vh] overflow-y-auto">
               <div className="flex items-center justify-between py-2 text-sm border-b border-slate-50">
+                <span className="text-slate-500">Collection Area</span>
+                <span className="font-medium text-slate-800 text-right">{selectedCollectionArea?.name || '—'}</span>
+              </div>
+              <div className="flex items-center justify-between py-2 text-sm border-b border-slate-50">
                 <span className="text-slate-500">Location</span>
                 <span className="font-medium text-slate-800 text-right">{formData.location}</span>
               </div>
@@ -558,6 +656,10 @@ function RequestForm({ currentUser }) {
               <div className="flex items-center justify-between py-2 text-sm border-b border-slate-50">
                 <span className="text-slate-500">Preferred Date</span>
                 <span className="font-medium text-slate-800 text-right">{formData.date || '—'}</span>
+              </div>
+              <div className="flex items-center justify-between py-2 text-sm border-b border-slate-50">
+                <span className="text-slate-500">Preferred Time</span>
+                <span className="font-medium text-slate-800 text-right">{formData.time ? formatTime12h(formData.time) : '—'}</span>
               </div>
               <div className="py-2 text-sm flex justify-between items-center">
                 <span className="text-slate-500 block">Photos</span>
@@ -719,7 +821,7 @@ function RequestForm({ currentUser }) {
             <div className="p-6 border-b border-slate-100 flex items-center justify-between">
               <div>
                 <h3 className="text-lg font-bold text-slate-900">Bot Availability Timetable</h3>
-                <p className="text-xs text-slate-500 mt-1">Pick a preferred date based on TROID bot deployment schedules.</p>
+                <p className="text-xs text-slate-500 mt-1">Pick a preferred date based on TROID bot deployment schedules. Dates within the next 7 days are unavailable.</p>
               </div>
               <button
                 onClick={() => setShowTimeTable(false)}
@@ -780,6 +882,7 @@ function RequestForm({ currentUser }) {
                   scheduleMap={scheduleMap}
                   selectedDate={ttSelected}
                   onSelectDate={selectDay}
+                  minSelectableDate={minSelectableDate}
                 />
               ) : (
                 <MonthCalendar
@@ -788,6 +891,7 @@ function RequestForm({ currentUser }) {
                   bots={bots}
                   selectedDate={ttSelected}
                   onSelectDate={jumpToWeek}
+                  minSelectableDate={minSelectableDate}
                 />
               )}
             </div>
@@ -849,7 +953,7 @@ function RequestForm({ currentUser }) {
                 <button
                   type="button"
                   onClick={confirmTtDate}
-                  disabled={!ttSelected}
+                  disabled={!ttSelected || new Date(ttSelected + "T00:00:00") < minSelectableDate}
                   className="rounded-lg bg-[#1b4de4] px-4 py-2 text-sm font-medium text-white hover:bg-[#153eb8] disabled:opacity-50"
                 >
                   Confirm Date

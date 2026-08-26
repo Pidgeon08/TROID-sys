@@ -15,6 +15,7 @@ import {
   Clock,
   UserCircle2,
 } from "lucide-react";
+import jsPDF from 'jspdf';
 import api from '../../services/api';
 import { logAudit } from '../../services/auditLog';
 
@@ -272,6 +273,90 @@ const Reports = () => {
     fetchReports();
   }, [dateFrom, dateTo, selectedBarangay]);
 
+  const filteredCollections = collections.filter((c) => c.zone.toLowerCase().includes(search.toLowerCase()));
+
+  const handlePrintReport = () => {
+    logAudit({
+      currentUser,
+      action: 'Report printed',
+      module: 'Report Generation',
+      details: `Collection Report printed for ${selectedBarangay || 'All Areas'}`,
+    });
+    window.print();
+  };
+
+  const handleExportExcel = () => {
+    const headers = ['Date', 'Location / Zone', 'Bags Collected', 'Robot / Unit', 'Operator', 'Status'];
+    const rows = filteredCollections.map((c) => [c.date, c.zone, c.bags, c.unit, c.operator, 'Completed']);
+    const escapeCell = (cell) => `"${String(cell).replace(/"/g, '""')}"`;
+    const csv = [headers, ...rows].map((row) => row.map(escapeCell).join(',')).join('\r\n');
+
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `collection-report-${new Date().toISOString().split('T')[0]}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    logAudit({
+      currentUser,
+      action: 'Report exported (Excel)',
+      module: 'Report Generation',
+      details: `Collection Report exported to CSV for ${selectedBarangay || 'All Areas'}`,
+    });
+  };
+
+  const handleExportPdf = () => {
+    const doc = new jsPDF();
+    let y = 18;
+
+    doc.setFontSize(16);
+    doc.text('Collection Report', 14, y);
+    y += 10;
+
+    doc.setFontSize(10);
+    overview.forEach(({ label, value }) => {
+      const displayValue = label === 'Coverage Area' ? selectedBarangay || 'All Areas' : value;
+      doc.text(`${label}: ${displayValue}`, 14, y);
+      y += 6;
+    });
+    y += 4;
+
+    doc.setFontSize(12);
+    doc.text('Collection Summary', 14, y);
+    y += 8;
+
+    doc.setFontSize(9);
+    const colX = [14, 46, 96, 128, 160];
+    ['Date', 'Zone', 'Bags', 'Unit', 'Operator'].forEach((h, i) => doc.text(h, colX[i], y));
+    y += 6;
+
+    filteredCollections.forEach((c) => {
+      if (y > 280) {
+        doc.addPage();
+        y = 18;
+      }
+      doc.text(String(c.date), colX[0], y);
+      doc.text(String(c.zone), colX[1], y);
+      doc.text(String(c.bags), colX[2], y);
+      doc.text(String(c.unit), colX[3], y);
+      doc.text(String(c.operator), colX[4], y);
+      y += 6;
+    });
+
+    doc.save(`collection-report-${new Date().toISOString().split('T')[0]}.pdf`);
+
+    logAudit({
+      currentUser,
+      action: 'Report exported (PDF)',
+      module: 'Report Generation',
+      details: `Collection Report exported to PDF for ${selectedBarangay || 'All Areas'}`,
+    });
+  };
+
   return (
     <div className="animate-fade-in pb-12">
       {loading && (
@@ -452,8 +537,7 @@ const Reports = () => {
               </thead>
               <tbody>
                 {/* Filter rows by matching the search term against the zone name */}
-                {collections
-                  .filter((c) => c.zone.toLowerCase().includes(search.toLowerCase()))
+                {filteredCollections
                   .map((c, i) => (
                     <tr key={i} className="border-b border-slate-50 last:border-0">
                       <td className="py-3 px-2 text-slate-500 whitespace-nowrap">{c.date}</td>
@@ -490,13 +574,22 @@ const Reports = () => {
            </ul>
           {/* Quick export buttons for the generated report */}
           <div className="grid grid-cols-3 gap-2.5 mt-5">
-            <button className="flex flex-col items-center gap-1.5 border border-slate-200 rounded-xl py-3 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition-colors">
+            <button
+              onClick={handleExportPdf}
+              className="flex flex-col items-center gap-1.5 border border-slate-200 rounded-xl py-3 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition-colors"
+            >
               <FileDown size={16} className="text-red-500" /> Export PDF
             </button>
-            <button className="flex flex-col items-center gap-1.5 border border-slate-200 rounded-xl py-3 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition-colors">
+            <button
+              onClick={handleExportExcel}
+              className="flex flex-col items-center gap-1.5 border border-slate-200 rounded-xl py-3 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition-colors"
+            >
               <Sheet size={16} className="text-emerald-600" /> Export Excel
             </button>
-            <button className="flex flex-col items-center gap-1.5 border border-slate-200 rounded-xl py-3 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition-colors">
+            <button
+              onClick={handlePrintReport}
+              className="flex flex-col items-center gap-1.5 border border-slate-200 rounded-xl py-3 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition-colors"
+            >
               <Printer size={16} className="text-slate-500" /> Print Report
             </button>
            </div>

@@ -4,6 +4,7 @@ const STATUS_STYLES = {
   Pending: 'bg-amber-50 text-amber-700',
   Approved: 'bg-emerald-50 text-emerald-700',
   Declined: 'bg-red-50 text-red-700',
+  Parked: 'bg-purple-50 text-purple-700',
   Active: 'bg-green-50 text-green-800',
   Paused: 'bg-amber-50 text-amber-800',
   Offline: 'bg-red-50 text-red-800',

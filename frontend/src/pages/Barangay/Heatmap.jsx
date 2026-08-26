@@ -95,7 +95,8 @@ function HeatmapLayer({ points, type }) {
   return null;
 }
 
-const Heatmap = () => {
+const Heatmap = ({ currentUser }) => {
+  const barangayName = currentUser?.location || '';
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [timeFilter, setTimeFilter] = useState('Today');
   const [heatmapType, setHeatmapType] = useState('Waste Density');
@@ -114,6 +115,7 @@ const Heatmap = () => {
         const params = {
           time_filter: timeFilter === 'Custom' ? undefined : timeFilter.toLowerCase(),
           category: selectedCategory === 'All' ? undefined : selectedCategory,
+          barangay: barangayName || undefined,
         };
         const data = await api.getHeatmap(params);
         if (cancelled) return;
@@ -161,7 +163,7 @@ const Heatmap = () => {
       cancelled = true;
       clearInterval(interval);
     };
-  }, [selectedCategory, timeFilter, dateRange]);
+  }, [selectedCategory, timeFilter, dateRange, barangayName]);
 
   const selectedLoc = {
     name: selectedCategory === 'All' ? 'All Categories' : selectedCategory,

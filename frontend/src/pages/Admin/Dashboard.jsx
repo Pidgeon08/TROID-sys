@@ -1,7 +1,8 @@
-import { Trash2, Ship, ArrowUpRight, MapPin, Calendar } from 'lucide-react';
+import { Trash2, Ship, MapPin, Calendar } from 'lucide-react';
 import { MapContainer, TileLayer, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import { useEffect, useState } from 'react';
+import { useNavigate, useOutletContext } from 'react-router-dom';
 import L from 'leaflet';
 import 'leaflet.heat';
 import api from '../../services/api';
@@ -70,7 +71,7 @@ function HeatmapLayer({ points, type }) {
       if (heat && map) {
         try {
           map.removeLayer(heat);
-        } catch (e) {
+        } catch {
           // ignore cleanup errors
         }
       }
@@ -84,6 +85,8 @@ function HeatmapLayer({ points, type }) {
 }
 
 const Dashboard = () => {
+  const navigate = useNavigate();
+  const { currentUser } = useOutletContext() || {};
   const [activeTab, setActiveTab] = useState('Monthly');
   const [dateRange, setDateRange] = useState({ from: '', to: '' });
   const [heatmapType, setHeatmapType] = useState('Waste Density');
@@ -154,7 +157,7 @@ const Dashboard = () => {
       {/* Page header */}
       <header className="mb-6 shrink-0">
         <h1 className="text-[28px] font-bold text-slate-900 tracking-tight leading-none">Dashboard</h1>
-        <p className="text-slate-500 text-sm mt-1.5 font-medium">Welcome back, John</p>
+        <p className="text-slate-500 text-sm mt-1.5 font-medium">Welcome back, {currentUser?.name || 'Admin'}</p>
       </header>
 
       {/* Two-column layout */}
@@ -177,10 +180,6 @@ const Dashboard = () => {
                   <div className="flex items-baseline gap-2.5 mt-2">
                     <span className="text-3xl font-bold text-slate-950 tracking-tight">{totalBags}</span>
                     <span className="text-sm font-semibold text-slate-500">Bags</span>
-                    <div className="flex items-center text-xs font-semibold text-red-500 ml-1">
-                      <ArrowUpRight className="w-4 h-4 mr-0.5" />
-                      <span>35.1% vs last week</span>
-                    </div>
                   </div>
                 </div>
               </div>
@@ -209,10 +208,6 @@ const Dashboard = () => {
                   <div className="flex items-baseline gap-2.5 mt-2">
                     <span className="text-3xl font-bold text-slate-950 tracking-tight">{activeBots}</span>
                     <span className="text-sm font-semibold text-slate-500">Bots</span>
-                    <div className="flex items-center text-xs font-semibold text-[#10b981] ml-1">
-                      <ArrowUpRight className="w-4 h-4 mr-0.5" />
-                      <span>24.3% vs last week</span>
-                    </div>
                   </div>
                 </div>
               </div>
@@ -325,10 +320,16 @@ const Dashboard = () => {
           <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-5 shrink-0">
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-[15px] font-bold text-slate-900">Most Trash Collected</h2>
-              <button className="text-xs font-semibold text-slate-500 hover:text-[#1b4de4] border border-slate-200 rounded-lg px-2.5 py-1 transition-all cursor-pointer">
+              <button
+                onClick={() => navigate('/admin/reports')}
+                className="text-xs font-semibold text-slate-500 hover:text-[#1b4de4] border border-slate-200 rounded-lg px-2.5 py-1 transition-all cursor-pointer"
+              >
                 View all
               </button>
             </div>
+            {topCreeks.length === 0 ? (
+              <p className="text-xs text-slate-400 py-2">No collection data yet.</p>
+            ) : (
             <div className="flex flex-col gap-4">
               {topCreeks.map((item, idx) => (
                 <div key={idx} className="flex items-center gap-3.5">
@@ -350,16 +351,23 @@ const Dashboard = () => {
                 </div>
               ))}
             </div>
+            )}
           </div>
 
           {/* Panel 2: Recent Activities */}
           <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-5 shrink-0">
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-[15px] font-bold text-slate-900">Recent Activities</h2>
-              <button className="text-xs font-semibold text-slate-500 hover:text-[#1b4de4] border border-slate-200 rounded-lg px-2.5 py-1 transition-all cursor-pointer">
+              <button
+                onClick={() => navigate('/admin/requests')}
+                className="text-xs font-semibold text-slate-500 hover:text-[#1b4de4] border border-slate-200 rounded-lg px-2.5 py-1 transition-all cursor-pointer"
+              >
                 View all
               </button>
             </div>
+            {recentActivities.length === 0 ? (
+              <p className="text-xs text-slate-400 py-2">No recent activity yet.</p>
+            ) : (
             <div className="flex flex-col gap-4">
               {recentActivities.map((act, idx) => (
                 <div key={idx} className="flex items-start gap-3">
@@ -373,6 +381,7 @@ const Dashboard = () => {
                 </div>
               ))}
             </div>
+            )}
           </div>
 
 

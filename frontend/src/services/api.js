@@ -83,7 +83,19 @@ export const api = {
   deleteRequest: (id) => api.delete(`/requests/${id}/`),
   mayorApproveRequest: (id) => api.post(`/requests/${id}/mayor_approve/`),
   adminApproveRequest: (id) => api.post(`/requests/${id}/admin_approve/`),
-  declineRequest: (id, data) => api.post(`/requests/${id}/decline/`, data),
+  parkRequest: (id, data) => api.post(`/requests/${id}/park/`, data),
+  unparkRequest: (id) => api.post(`/requests/${id}/unpark/`),
+  rescheduleRequest: (id, data) => api.post(`/requests/${id}/reschedule/`, data),
+  markSessionCompleted: (id) => api.post(`/requests/${id}/mark_session_completed/`),
+  submitTrashReport: (id, data) => api.post(`/requests/${id}/submit_trash_report/`, data),
+  botDetections: (id) => api.get(`/requests/${id}/bot_detections/`),
+  submitVerification: (id, data) => api.post(`/requests/${id}/submit_verification/`, data),
+  postCleanupComparison: () => api.get('/requests/post-cleanup-comparison/'),
+
+  notifications: (userId) => api.get(`/notifications/?user_id=${userId}`),
+  unreadNotificationCount: (userId) => api.get(`/notifications/unread-count/?user_id=${userId}`),
+  markNotificationRead: (id) => api.post(`/notifications/${id}/mark_read/`),
+  markAllNotificationsRead: (userId) => api.post('/notifications/mark-all-read/', { user_id: userId }),
 
   deploymentSchedules: () => api.get('/deployment-schedules/'),
   deploymentScheduleDetail: (id) => api.get(`/deployment-schedules/${id}/`),
@@ -92,22 +104,30 @@ export const api = {
   deleteDeploymentSchedule: (id) => api.delete(`/deployment-schedules/${id}/`),
 
   landfillRecords: () => api.get('/landfill-records/'),
-  landfillRecordDetail: (id) => api.get(`/landfill-records/${id}/`),
-  createLandfillRecord: (data) => api.post('/landfill-records/', data),
-  updateLandfillRecord: (id, data) => api.put(`/landfill-records/${id}/`, data),
-  deleteLandfillRecord: (id) => api.delete(`/landfill-records/${id}/`),
 
   recyclingRecords: () => api.get('/recycling-records/'),
-  recyclingRecordDetail: (id) => api.get(`/recycling-records/${id}/`),
-  createRecyclingRecord: (data) => api.post('/recycling-records/', data),
-  updateRecyclingRecord: (id, data) => api.put(`/recycling-records/${id}/`, data),
-  deleteRecyclingRecord: (id) => api.delete(`/recycling-records/${id}/`),
 
   segregationRecords: () => api.get('/segregation-records/'),
   createSegregationRecord: (data) => api.post('/segregation-records/', data),
 
   auditLogs: () => api.get('/audit-logs/'),
   createAuditLog: (data) => api.post('/audit-logs/', data),
+
+  collectionAreas: (params = {}) => {
+    const qs = new URLSearchParams();
+    if (params.barangay) qs.set('barangay', params.barangay);
+    if (params.status) qs.set('status', params.status);
+    if (params.archived) qs.set('archived', 'true');
+    const q = qs.toString();
+    return api.get(`/collection-areas/${q ? `?${q}` : ''}`);
+  },
+  collectionAreaDetail: (id) => api.get(`/collection-areas/${id}/`),
+  createCollectionArea: (data) => api.post('/collection-areas/', data),
+  updateCollectionArea: (id, data) => api.put(`/collection-areas/${id}/`, data),
+  patchCollectionArea: (id, data) => api.patch(`/collection-areas/${id}/`, data),
+  deleteCollectionArea: (id) => api.delete(`/collection-areas/${id}/`),
+  approveCollectionArea: (id, data) => api.post(`/collection-areas/${id}/approve/`, data),
+  declineCollectionArea: (id, data) => api.post(`/collection-areas/${id}/decline/`, data),
 
   heatmapData: () => api.get('/heatmap-data/'),
   createHeatmapData: (data) => api.post('/heatmap-data/', data),
@@ -117,6 +137,7 @@ export const api = {
     const qs = new URLSearchParams();
     if (params.category) qs.set('category', params.category);
     if (params.time_filter) qs.set('time_filter', params.time_filter);
+    if (params.barangay) qs.set('barangay', params.barangay);
     const q = qs.toString();
     return api.get(`/heatmap/${q ? `?${q}` : ''}`);
   },

@@ -21,6 +21,7 @@ export function useUsers() {
             .replace('mayorsoffice', 'Mayor')
             .replace('spearhead', 'Spearhead')
             .replace('barangay', 'Barangay')
+            .replace('ngo', 'NGO')
             .replace('admin', 'Admin'),
           status: u.status === 'active' ? 'Active' : u.status === 'pending' ? 'Pending' : u.status === 'offline' ? 'Offline' : u.status === 'archived' ? 'Archived' : u.status,
           location: u.location || '—',

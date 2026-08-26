@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Boat, DetectionEvent, User, Operator, Request, StatusHistory, Photo, DeploymentSchedule, LandfillRecord, RecyclingRecord, SegregationRecord, AuditLog, HeatmapData
+from .models import Boat, DetectionEvent, User, Operator, Request, StatusHistory, Photo, DeploymentSchedule, LandfillRecord, RecyclingRecord, SegregationRecord, AuditLog, HeatmapData, CollectionArea, Notification
 
 class DetectionEventSerializer(serializers.ModelSerializer):
     class Meta:
@@ -42,10 +42,23 @@ class PhotoSerializer(serializers.ModelSerializer):
 class RequestSerializer(serializers.ModelSerializer):
     status_history = StatusHistorySerializer(many=True, read_only=True)
     photos = PhotoSerializer(many=True, read_only=True)
+    collection_area = serializers.PrimaryKeyRelatedField(
+        queryset=CollectionArea.objects.all(), required=False, allow_null=True
+    )
+    collection_area_detail = serializers.SerializerMethodField()
+
+    def get_collection_area_detail(self, obj):
+        if not obj.collection_area:
+            return None
+        return {
+            'id': obj.collection_area.id,
+            'area_id': obj.collection_area.area_id,
+            'name': obj.collection_area.name,
+        }
 
     class Meta:
         model = Request
-        fields = ['id', 'request_id', 'request_type', 'status', 'date_submitted', 'requested_by_name', 'requested_by_role', 'requested_by_barangay', 'contact', 'email', 'location_name', 'barangay', 'municipality', 'province', 'notes', 'decline_reason', 'letter_file_name', 'letter_size', 'bot_id', 'operator', 'bags', 'weight_kg', 'non_usable_kg', 'recyclable_kg', 'archived', 'status_history', 'photos']
+        fields = ['id', 'request_id', 'request_type', 'status', 'date_submitted', 'requested_by_name', 'requested_by_role', 'requested_by_barangay', 'contact', 'email', 'location_name', 'barangay', 'municipality', 'province', 'preferred_date', 'preferred_time', 'notes', 'decline_reason', 'parked_from_status', 'letter_file_name', 'letter_size', 'bot_id', 'operator', 'collection_area', 'collection_area_detail', 'bags', 'weight_kg', 'non_usable_kg', 'recyclable_kg', 'session_completed_at', 'trash_categories', 'verified_categories', 'verification_notes', 'verified_at', 'archived', 'status_history', 'photos']
         extra_kwargs = {
             'request_id': {'required': False, 'allow_blank': True},
             'decline_reason': {'required': False, 'allow_blank': True},
@@ -58,12 +71,14 @@ class RequestSerializer(serializers.ModelSerializer):
             'barangay': {'required': False, 'allow_blank': True},
             'municipality': {'required': False, 'allow_blank': True},
             'province': {'required': False, 'allow_blank': True},
+            'preferred_date': {'required': False, 'allow_blank': True},
+            'preferred_time': {'required': False, 'allow_blank': True},
         }
 
 class DeploymentScheduleSerializer(serializers.ModelSerializer):
     class Meta:
         model = DeploymentSchedule
-        fields = ['id', 'bot', 'day', 'status', 'label', 'zone', 'request_id']
+        fields = ['id', 'bot', 'day', 'status', 'label', 'zone', 'request_id', 'cleanup_type']
 
 class LandfillRecordSerializer(serializers.ModelSerializer):
     class Meta:
@@ -90,7 +105,29 @@ class AuditLogSerializer(serializers.ModelSerializer):
         }
 
 
+class CollectionAreaSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CollectionArea
+        fields = ['id', 'area_id', 'name', 'barangay', 'submitted_by', 'points', 'closed', 'color', 'status', 'decline_reason', 'reviewed_by', 'date_submitted', 'date_reviewed', 'archived']
+        extra_kwargs = {
+            'area_id': {'required': False, 'allow_blank': True},
+            'decline_reason': {'required': False, 'allow_blank': True},
+            'reviewed_by': {'required': False, 'allow_blank': True},
+            'barangay': {'required': False, 'allow_blank': True},
+            'submitted_by': {'required': False, 'allow_blank': True},
+            'color': {'required': False, 'allow_blank': True},
+        }
+
+
 class HeatmapDataSerializer(serializers.ModelSerializer):
     class Meta:
         model = HeatmapData
         fields = ['id', 'latitude', 'longitude', 'weight', 'source_type', 'timestamp']
+
+
+class NotificationSerializer(serializers.ModelSerializer):
+    request_id = serializers.CharField(source='request.request_id', read_only=True, default=None)
+
+    class Meta:
+        model = Notification
+        fields = ['id', 'recipient', 'request', 'request_id', 'notif_type', 'title', 'message', 'is_read', 'created_at']

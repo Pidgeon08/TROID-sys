@@ -1,14 +1,15 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { FileText, Clock, CheckCircle2, Eye, MapPin, Trash2, Recycle, ArrowLeft, Download, User } from "lucide-react";
+import { FileText, Clock, CheckCircle2, Eye, MapPin, Recycle } from "lucide-react";
 import api from "../../services/api";
-import { mapRequest } from "../../constants/requests";
-import { Card } from "../../components/ui/Card";
+import { mapRequest, matchesRequestQuery } from "../../constants/requests";
+import { SummaryCard } from "../../components/ui/SummaryCard";
 
 const BCOL_STATUS_STYLES = {
   Pending: "bg-amber-50 text-amber-700",
   Approved: "bg-emerald-50 text-emerald-700",
   Declined: "bg-red-50 text-red-700",
+  Parked: "bg-purple-50 text-purple-700",
   Processing: "bg-blue-50 text-blue-700",
   Completed: "bg-emerald-50 text-emerald-700",
   Segregated: "bg-purple-50 text-purple-700",
@@ -20,34 +21,13 @@ const BCOL_STATUS_DOT = {
   Pending: "bg-amber-500",
   Approved: "bg-emerald-500",
   Declined: "bg-red-500",
+  Parked: "bg-purple-500",
   Processing: "bg-blue-500",
   Completed: "bg-emerald-500",
   Segregated: "bg-purple-500",
   "Pending Mayor Approval": "bg-amber-500",
   "Pending Admin Approval": "bg-blue-500",
 };
-
-function SummaryCard({ icon: Icon, label, value, sub }) {
-  return (
-    <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-6 flex items-center gap-4">
-      <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 shrink-0">
-        <Icon className="w-6 h-6" strokeWidth={2} />
-      </div>
-      <div className="min-w-0">
-        <p className="text-sm font-medium text-slate-600">{label}</p>
-        <p className="text-2xl font-bold text-slate-900 mt-1">{value}</p>
-        <p className="text-xs text-slate-400 mt-1">{sub}</p>
-      </div>
-    </div>
-  );
-}
-
-const Field = ({ label, value }) => (
-  <div className="flex items-center justify-between py-2 text-sm">
-    <span className="text-slate-500">{label}</span>
-    <span className="font-medium text-slate-800 text-right">{value}</span>
-  </div>
-);
 
 export default function BarangayRequests({ currentUser }) {
   const [activeTab, setActiveTab] = useState("All");
@@ -87,11 +67,7 @@ export default function BarangayRequests({ currentUser }) {
     if (activeTab === "Pending") return r.status === "Pending Mayor Approval" || r.status === "Pending";
     if (activeTab === "Approved") return r.status === "Approved" || r.status === "Pending Admin Approval";
     return r.status === activeTab;
-  }).filter((r) => {
-    if (!searchQuery) return true;
-    const q = searchQuery.toLowerCase();
-    return r.id.toLowerCase().includes(q) || r.type.toLowerCase().includes(q) || r.notes.toLowerCase().includes(q);
-  });
+  }).filter((r) => matchesRequestQuery(r, searchQuery) || (r.notes || '').toLowerCase().includes(searchQuery.toLowerCase()));
 
   const navigate = useNavigate();
 
@@ -171,7 +147,7 @@ export default function BarangayRequests({ currentUser }) {
                    <td className="px-5 py-3.5">
                      <span
                        className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${BCOL_STATUS_STYLES[req.status]}`}
-                       title={req.status === "Declined" ? (req.declineReason || "No reason provided") : undefined}
+                       title={req.status === "Declined" || req.status === "Parked" ? (req.declineReason || "No reason provided") : undefined}
                      >
                        <span className={`w-1.5 h-1.5 rounded-full ${BCOL_STATUS_DOT[req.status]}`} />
                        {req.status}

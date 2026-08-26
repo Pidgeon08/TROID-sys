@@ -1,11 +1,11 @@
 import re
 import secrets
 import string
+from zoneinfo import ZoneInfo
 
 from rest_framework import status, viewsets
 from rest_framework.decorators import action, api_view
 from rest_framework.response import Response
-from django.shortcuts import get_object_or_404
 from django.contrib.auth.hashers import check_password
 from django.core.mail import send_mail
 from django.conf import settings
@@ -19,15 +19,20 @@ except ImportError:
 from .models import (
     Boat, DetectionEvent, User, Operator, Request, DeploymentSchedule,
     LandfillRecord, RecyclingRecord, SegregationRecord,
-    AuditLog, HeatmapData, Photo, StatusHistory
+    AuditLog, HeatmapData, Photo, StatusHistory, CollectionArea, Notification
 )
 from .serializers import (
     BoatSerializer, UserSerializer, OperatorSerializer, RequestSerializer,
     DeploymentScheduleSerializer, LandfillRecordSerializer, RecyclingRecordSerializer,
-    SegregationRecordSerializer, AuditLogSerializer, HeatmapDataSerializer, LoginSerializer
+    SegregationRecordSerializer, AuditLogSerializer, HeatmapDataSerializer, LoginSerializer,
+    CollectionAreaSerializer, NotificationSerializer
 )
 
 SPECIAL_CHARS = '!@#$%^&*()-_=+?'
+
+# DeploymentSchedule.day is a local calendar date chosen in the browser (San Fernando, La Union,
+# Philippines); TIME_ZONE is UTC, so comparisons against it must be converted to local time first.
+APP_TIMEZONE = ZoneInfo('Asia/Manila')
 
 
 def generate_temp_password(length=12):
@@ -80,6 +85,31 @@ def send_temp_password_email(user, temp_password):
     except Exception as exc:
         print(f'[email] Failed to send temp password email to {user.email}: {exc}')
         return False
+
+
+def notify_request_update(req, notif_type, title, message):
+    """Creates an in-app Notification for the requester (matched by email) and
+    emails them, mirroring send_temp_password_email's best-effort error handling."""
+    recipient = User.objects.filter(email=req.email).first() if req.email else None
+    if recipient:
+        Notification.objects.create(
+            recipient=recipient,
+            request=req,
+            notif_type=notif_type,
+            title=title,
+            message=message,
+        )
+    if req.email:
+        try:
+            send_mail(
+                title,
+                message,
+                getattr(settings, 'DEFAULT_FROM_EMAIL', None),
+                [req.email],
+                fail_silently=False,
+            )
+        except Exception as exc:
+            print(f'[email] Failed to send {notif_type} notification to {req.email}: {exc}')
 
 
 @api_view(['POST'])
@@ -153,8 +183,15 @@ def log_detection(request):
         boat.last_longitude = lng
         boat.save()
 
+        linked_request = None
+        today = timezone.now().astimezone(APP_TIMEZONE).strftime('%Y-%m-%d')
+        active_schedule = DeploymentSchedule.objects.filter(bot=boat, day=today).order_by('-id').first()
+        if active_schedule and active_schedule.request_id:
+            linked_request = Request.objects.filter(request_id=active_schedule.request_id).first()
+
         DetectionEvent.objects.create(
             boat=boat,
+            request=linked_request,
             latitude=lat,
             longitude=lng,
             trash_count=count,
@@ -171,8 +208,12 @@ def log_detection(request):
 def get_heatmap_data(request):
     category = request.query_params.get('category')
     time_filter = request.query_params.get('time_filter', 'today')
+    barangay = request.query_params.get('barangay')
 
     detections = DetectionEvent.objects.filter(is_verified=True)
+
+    if barangay:
+        detections = detections.filter(request__barangay__iexact=barangay)
 
     if category:
         detections = detections.filter(categories__has_key=category)
@@ -219,6 +260,13 @@ def pending_user_count(request):
 def pending_request_count(request):
     count = Request.objects.filter(status='pending').count()
     return Response({"pending_count": count})
+
+
+@api_view(['GET'])
+def unread_notification_count(request):
+    user_id = request.query_params.get('user_id')
+    count = Notification.objects.filter(recipient_id=user_id, is_read=False).count()
+    return Response({"unread_count": count})
 
 
 class BoatViewSet(viewsets.ModelViewSet):
@@ -285,7 +333,7 @@ class RequestViewSet(viewsets.ModelViewSet):
     lookup_field = 'request_id'
 
     def get_queryset(self):
-        queryset = Request.objects.all()
+        queryset = Request.objects.all().order_by('-date_submitted')
         if self.request.query_params.get('archived') == 'true':
             return queryset.filter(archived=True)
         return queryset.filter(archived=False)
@@ -338,18 +386,56 @@ class RequestViewSet(viewsets.ModelViewSet):
             role='Admin',
             state='current'
         )
+        notify_request_update(
+            req,
+            'approved',
+            'Your cleanup request has been approved',
+            f'Your request {req.request_id} has been approved by CENRO.',
+        )
         return Response({'status': req.status})
 
     @action(detail=True, methods=['post'])
-    def decline(self, request, request_id=None):
+    def reschedule(self, request, request_id=None):
+        req = self.get_object()
+        if req.status not in ('pending_admin_approval', 'approved'):
+            return Response({'error': 'Request is not in a state that can be rescheduled'}, status=status.HTTP_400_BAD_REQUEST)
+        new_date = (request.data.get('preferred_date') or '').strip()
+        new_time = (request.data.get('preferred_time') or '').strip()
+        reason = (request.data.get('reason') or '').strip()
+        if not new_date:
+            return Response({'error': 'A new preferred date is required'}, status=status.HTTP_400_BAD_REQUEST)
+        req.preferred_date = new_date
+        req.preferred_time = new_time
+        req.save()
+        StatusHistory.objects.create(
+            request=req,
+            label='Rescheduled by CENRO',
+            date=timezone.now(),
+            actor=request.user.name if hasattr(request, 'user') and hasattr(request.user, 'name') else 'Admin',
+            role='Admin',
+            state='current',
+            details=reason,
+        )
+        notify_request_update(
+            req,
+            'rescheduled',
+            'Your cleanup request has been rescheduled',
+            f'CENRO rescheduled request {req.request_id} to {new_date}{f" at {new_time}" if new_time else ""}.'
+            + (f' Reason: {reason}' if reason else ''),
+        )
+        return Response({'status': req.status, 'preferred_date': req.preferred_date, 'preferred_time': req.preferred_time})
+
+    @action(detail=True, methods=['post'])
+    def park(self, request, request_id=None):
         req = self.get_object()
         reason = (request.data.get('reason') or '').strip()
-        req.status = 'declined'
+        req.parked_from_status = req.status
+        req.status = 'parked'
         req.decline_reason = reason
         req.save()
         StatusHistory.objects.create(
             request=req,
-            label='Declined',
+            label='Parked',
             date=timezone.now(),
             actor=request.user.name if hasattr(request, 'user') and hasattr(request.user, 'name') else 'User',
             role=request.user.role if hasattr(request, 'user') and hasattr(request.user, 'role') else 'Unknown',
@@ -357,6 +443,165 @@ class RequestViewSet(viewsets.ModelViewSet):
             details=reason,
         )
         return Response({'status': req.status, 'decline_reason': req.decline_reason})
+
+    @action(detail=True, methods=['post'])
+    def unpark(self, request, request_id=None):
+        req = self.get_object()
+        if req.status != 'parked':
+            return Response({'error': 'Request is not parked'}, status=status.HTTP_400_BAD_REQUEST)
+        req.status = req.parked_from_status or 'pending_mayor_approval'
+        req.parked_from_status = ''
+        req.decline_reason = ''
+        req.save()
+        StatusHistory.objects.create(
+            request=req,
+            label='Unparked',
+            date=timezone.now(),
+            actor=request.user.name if hasattr(request, 'user') and hasattr(request.user, 'name') else 'User',
+            role=request.user.role if hasattr(request, 'user') and hasattr(request.user, 'role') else 'Unknown',
+            state='current',
+            details='Returned to review',
+        )
+        return Response({'status': req.status})
+
+    @action(detail=True, methods=['post'])
+    def mark_session_completed(self, request, request_id=None):
+        req = self.get_object()
+        if req.status != 'approved':
+            return Response({'error': 'Request is not approved'}, status=status.HTTP_400_BAD_REQUEST)
+        req.status = 'processing'
+        req.session_completed_at = timezone.now()
+        req.save()
+        StatusHistory.objects.create(
+            request=req,
+            label='Session Completed by CENRO',
+            date=timezone.now(),
+            actor=request.user.name if hasattr(request, 'user') and hasattr(request.user, 'name') else 'Admin',
+            role='Admin',
+            state='current',
+        )
+        return Response({'status': req.status, 'session_completed_at': req.session_completed_at})
+
+    @action(detail=True, methods=['post'])
+    def submit_trash_report(self, request, request_id=None):
+        req = self.get_object()
+        if req.status != 'processing':
+            return Response({'error': 'Request is not awaiting a trash report'}, status=status.HTTP_400_BAD_REQUEST)
+        req.bags = request.data.get('bags')
+        req.weight_kg = request.data.get('weight_kg')
+        req.non_usable_kg = request.data.get('non_usable_kg')
+        req.recyclable_kg = request.data.get('recyclable_kg')
+        req.trash_categories = request.data.get('trash_categories') or {}
+        notes = (request.data.get('notes') or '').strip()
+
+        schedule = DeploymentSchedule.objects.filter(request_id=req.request_id).order_by('-id').first()
+        cleanup_type = schedule.cleanup_type if schedule else 'unsupported'
+
+        req.status = 'pending_verification' if cleanup_type == 'troid_supported' else 'completed'
+        req.save()
+        StatusHistory.objects.create(
+            request=req,
+            label='Trash Report Filed by CENRO',
+            date=timezone.now(),
+            actor=request.user.name if hasattr(request, 'user') and hasattr(request.user, 'name') else 'Admin',
+            role='Admin',
+            state='current',
+            details=notes,
+        )
+        if req.status == 'completed':
+            notify_request_update(
+                req,
+                'report_filed',
+                'Your cleanup request has been completed',
+                f'CENRO has filed the trash collection report for request {req.request_id}.',
+            )
+        return Response({'status': req.status})
+
+    @action(detail=True, methods=['get'])
+    def bot_detections(self, request, request_id=None):
+        req = self.get_object()
+        if req.status != 'pending_verification':
+            return Response({'error': 'Request is not pending verification'}, status=status.HTTP_400_BAD_REQUEST)
+        # No live bot-detection feed is wired up yet, so for TROID-supported cleanups the
+        # trash collection report CENRO files in is treated as the bot's detected output —
+        # CENRO then reviews/corrects it in the verification step below.
+        return Response({'categories': req.trash_categories or {}})
+
+    @action(detail=False, methods=['get'], url_path='post-cleanup-comparison')
+    def post_cleanup_comparison(self, request):
+        """For each finished cleanup drive, compare TROID's detected trash against what
+        CENRO actually confirmed. Until a live bot-detection feed exists, TROID-supported
+        cleanups treat the manually filed trash collection report as the bot's detected
+        output, and the CENRO-verified categories (once verified) as the confirmed count.
+        Unsupported cleanups have no bot involved, so the report is just the user's count."""
+        reqs = Request.objects.filter(
+            archived=False, status__in=['completed', 'segregated', 'pending_verification', 'verified']
+        ).exclude(trash_categories={})
+
+        schedules_by_request = {
+            s.request_id: s.cleanup_type
+            for s in DeploymentSchedule.objects.filter(request_id__in=[r.request_id for r in reqs])
+        }
+
+        results = []
+        for req in reqs:
+            cleanup_type = schedules_by_request.get(req.request_id, 'unsupported')
+
+            if cleanup_type == 'troid_supported':
+                troid_categories = req.trash_categories or {}
+                user_categories = req.verified_categories or {}
+            else:
+                troid_categories = {}
+                user_categories = req.trash_categories or {}
+
+            latitude = longitude = None
+            if req.bot_id and req.bot_id.last_latitude and req.bot_id.last_longitude:
+                latitude = req.bot_id.last_latitude
+                longitude = req.bot_id.last_longitude
+
+            results.append({
+                'request_id': req.request_id,
+                'barangay': req.barangay or req.location_name,
+                'status': req.status,
+                'date_submitted': req.date_submitted,
+                'latitude': latitude,
+                'longitude': longitude,
+                'troid_categories': troid_categories,
+                'troid_total': sum(troid_categories.values()),
+                'user_categories': user_categories,
+                'user_total': sum(user_categories.values()),
+                'bags': req.bags,
+                'weight_kg': req.weight_kg,
+            })
+        return Response(results)
+
+    @action(detail=True, methods=['post'])
+    def submit_verification(self, request, request_id=None):
+        req = self.get_object()
+        if req.status != 'pending_verification':
+            return Response({'error': 'Request is not pending verification'}, status=status.HTTP_400_BAD_REQUEST)
+        req.verified_categories = request.data.get('verified_categories') or {}
+        req.verification_notes = (request.data.get('verification_notes') or '').strip()
+        req.verified_at = timezone.now()
+        req.status = 'verified'
+        req.save()
+        req.detection_events.update(is_verified=True)
+        StatusHistory.objects.create(
+            request=req,
+            label='Detection Verified by CENRO',
+            date=timezone.now(),
+            actor=request.user.name if hasattr(request, 'user') and hasattr(request.user, 'name') else 'Admin',
+            role='Admin',
+            state='current',
+            details=req.verification_notes,
+        )
+        notify_request_update(
+            req,
+            'verified',
+            'Your cleanup request record is finalized',
+            f'CENRO has verified the bot detection accuracy for request {req.request_id}. The cleanup record is now complete.',
+        )
+        return Response({'status': req.status})
 
     def destroy(self, request, *args, **kwargs):
         req = self.get_object()
@@ -373,17 +618,95 @@ class RequestViewSet(viewsets.ModelViewSet):
         return Response({'status': req.status, 'archived': req.archived})
 
 
+class NotificationViewSet(viewsets.ModelViewSet):
+    queryset = Notification.objects.all()
+    serializer_class = NotificationSerializer
+
+    def get_queryset(self):
+        queryset = Notification.objects.all()
+        user_id = self.request.query_params.get('user_id')
+        if user_id:
+            queryset = queryset.filter(recipient_id=user_id)
+        return queryset
+
+    @action(detail=True, methods=['post'])
+    def mark_read(self, request, pk=None):
+        notif = self.get_object()
+        notif.is_read = True
+        notif.save()
+        return Response({'is_read': True})
+
+    @action(detail=False, methods=['post'], url_path='mark-all-read')
+    def mark_all_read(self, request):
+        user_id = request.data.get('user_id')
+        Notification.objects.filter(recipient_id=user_id, is_read=False).update(is_read=True)
+        return Response({'status': 'ok'})
+
+
+class CollectionAreaViewSet(viewsets.ModelViewSet):
+    queryset = CollectionArea.objects.all()
+    serializer_class = CollectionAreaSerializer
+    lookup_field = 'area_id'
+
+    def get_queryset(self):
+        queryset = CollectionArea.objects.all().order_by('-date_submitted')
+        if self.request.query_params.get('archived') == 'true':
+            queryset = queryset.filter(archived=True)
+        else:
+            queryset = queryset.filter(archived=False)
+        barangay = self.request.query_params.get('barangay')
+        if barangay:
+            queryset = queryset.filter(barangay=barangay)
+        status_param = self.request.query_params.get('status')
+        if status_param:
+            queryset = queryset.filter(status=status_param)
+        return queryset
+
+    def _actor_name(self, request):
+        return request.data.get('reviewed_by') or (request.user.name if hasattr(request, 'user') and hasattr(request.user, 'name') else 'Admin')
+
+    @action(detail=True, methods=['post'])
+    def approve(self, request, area_id=None):
+        area = self.get_object()
+        if area.status != 'pending':
+            return Response({'error': 'Area is not pending approval'}, status=status.HTTP_400_BAD_REQUEST)
+        area.status = 'approved'
+        area.reviewed_by = self._actor_name(request)
+        area.date_reviewed = timezone.now()
+        area.save()
+        return Response(CollectionAreaSerializer(area).data)
+
+    @action(detail=True, methods=['post'])
+    def decline(self, request, area_id=None):
+        area = self.get_object()
+        if area.status != 'pending':
+            return Response({'error': 'Area is not pending approval'}, status=status.HTTP_400_BAD_REQUEST)
+        reason = (request.data.get('reason') or '').strip()
+        area.status = 'declined'
+        area.decline_reason = reason
+        area.reviewed_by = self._actor_name(request)
+        area.date_reviewed = timezone.now()
+        area.save()
+        return Response(CollectionAreaSerializer(area).data)
+
+    def destroy(self, request, *args, **kwargs):
+        area = self.get_object()
+        area.archived = True
+        area.save()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
 class DeploymentScheduleViewSet(viewsets.ModelViewSet):
     queryset = DeploymentSchedule.objects.all()
     serializer_class = DeploymentScheduleSerializer
 
 
-class LandfillRecordViewSet(viewsets.ModelViewSet):
+class LandfillRecordViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = LandfillRecord.objects.all()
     serializer_class = LandfillRecordSerializer
 
 
-class RecyclingRecordViewSet(viewsets.ModelViewSet):
+class RecyclingRecordViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = RecyclingRecord.objects.all()
     serializer_class = RecyclingRecordSerializer
 
@@ -422,3 +745,5 @@ router.register(r'recycling-records', RecyclingRecordViewSet)
 router.register(r'segregation-records', SegregationRecordViewSet)
 router.register(r'audit-logs', AuditLogViewSet)
 router.register(r'heatmap-data', HeatmapDataViewSet)
+router.register(r'collection-areas', CollectionAreaViewSet)
+router.register(r'notifications', NotificationViewSet)

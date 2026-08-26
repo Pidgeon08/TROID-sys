@@ -4,6 +4,7 @@ const ROLE_LABELS = {
   admin: 'Admin',
   mayorsoffice: 'Mayor',
   barangay: 'Barangay',
+  ngo: 'NGO',
 };
 
 export function logAudit({ currentUser, user, role, action, module, details = '', status = 'success' }) {

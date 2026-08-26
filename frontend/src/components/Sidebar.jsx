@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { createPortal } from "react-dom";
 import { NavLink } from 'react-router-dom';
-import { Home, Map, FileText, Settings as SettingsIcon, LogOut, Shield, ClipboardList, Users, Bot, InboxIcon, Send, CalendarClock, Recycle, MapPin, UserCog } from 'lucide-react';
+import { Home, Map, FileText, LogOut, Shield, Users, Bot, InboxIcon, Send, CalendarClock, MapPin, UserCog, Wrench } from 'lucide-react';
 
 const navItems = {
   admin: [
@@ -10,16 +10,16 @@ const navItems = {
     { to: '/admin/users', icon: Users, label: 'User Management' },
     { to: '/admin/operators', icon: UserCog, label: 'Operator Management' },
     { to: '/admin/requests', icon: InboxIcon, label: 'Requests' },
+    { to: '/admin/collection-areas', icon: MapPin, label: 'Collection Areas' },
     { to: '/admin/deployment', icon: CalendarClock, label: 'Deployment Schedule' },
     { to: '/admin/heatmap', icon: Map, label: 'Heatmap' },
     { to: '/admin/reports', icon: FileText, label: 'Report Generation' },
-    { to: '/admin/audit', icon: ClipboardList, label: 'Audit Logs' },
-    { to: '/admin/settings', icon: SettingsIcon, label: 'Settings' },
+    { to: '/admin/utilities', icon: Wrench, label: 'Utilities' },
   ],
   mayorsoffice: [
     { to: '/mayorsoffice/dashboard', icon: Home, label: 'Dashboard' },
     { to: '/mayorsoffice/requests', icon: InboxIcon, label: 'Requests' },
-    { to: '/mayorsoffice/settings', icon: SettingsIcon, label: 'Settings' },
+    { to: '/mayorsoffice/utilities', icon: Wrench, label: 'Utilities' },
   ],
   barangay: [
     { to: '/barangay/dashboard', icon: Home, label: 'Dashboard' },
@@ -27,7 +27,15 @@ const navItems = {
     { to: '/barangay/requests', icon: InboxIcon, label: 'My Requests' },
     { to: '/barangay/request', icon: Send, label: 'Submit Request' },
     { to: '/barangay/heatmap', icon: Map, label: 'Bot Tracking' },
-    { to: '/barangay/settings', icon: SettingsIcon, label: 'Settings' },
+    { to: '/barangay/utilities', icon: Wrench, label: 'Utilities' },
+  ],
+  ngo: [
+    { to: '/barangay/dashboard', icon: Home, label: 'Dashboard' },
+    { to: '/barangay/areas', icon: MapPin, label: 'Collection Areas' },
+    { to: '/barangay/requests', icon: InboxIcon, label: 'My Requests' },
+    { to: '/barangay/request', icon: Send, label: 'Submit Request' },
+    { to: '/barangay/heatmap', icon: Map, label: 'Bot Tracking' },
+    { to: '/barangay/utilities', icon: Wrench, label: 'Utilities' },
   ],
 };
 
@@ -35,11 +43,13 @@ const navItems = {
     admin: 'CENRO',
     mayorsoffice: 'Mayor\'s Office',
     barangay: 'Barangay',
+    ngo: 'NGO',
   };
   const roleInitial = {
     admin: 'CE',
     mayorsoffice: 'MO',
     barangay: 'BG',
+    ngo: 'NG',
   };
 
   const Sidebar = ({ onLogout, userType = 'admin', currentUser = null }) => {

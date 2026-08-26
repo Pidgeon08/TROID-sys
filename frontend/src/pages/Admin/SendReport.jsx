@@ -1,4 +1,5 @@
-import React, { useState } from "react";
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   ArrowLeft,
   ChevronDown,
@@ -208,6 +209,7 @@ function UploadDropzone({ label, required, hint, files, onFiles, multiple }) {
 }
 
 export default function EnvironmentalInspectionNotice() {
+  const navigate = useNavigate();
   const [barangay, setBarangay] = useState("Barangay San Isidro");
   const [concern, setConcern] = useState("Waste Severity Assessment");
   const [subject, setSubject] = useState("Notice of Possible Environmental Inspection");
@@ -232,6 +234,7 @@ export default function EnvironmentalInspectionNotice() {
         {/* Back link */}
         <button
           type="button"
+          onClick={() => navigate("/admin/requests")}
           className="mb-4 flex items-center gap-1.5 text-sm font-medium text-blue-600 transition hover:text-blue-700"
         >
           <ArrowLeft className="h-4 w-4" />

@@ -4,11 +4,13 @@ import { Eye, EyeOff } from 'lucide-react';
 import { logAudit } from '../services/auditLog';
 import ForceChangePasswordModal from '../components/ForceChangePasswordModal';
 import ForgotPasswordModal from '../components/ForgotPasswordModal';
+import LoadingModal from '../components/LoadingModal';
 
 const ROLE_LABELS = {
   admin: 'Admin',
   mayorsoffice: 'Mayor',
   barangay: 'Barangay',
+  ngo: 'NGO',
 };
 
 const Login = ({ onLogin }) => {
@@ -52,7 +54,7 @@ const Login = ({ onLogin }) => {
       }
 
       await onLogin(role, data, rememberMe);
-      navigate(`/${role === 'mayorsoffice' ? 'mayorsoffice/dashboard' : role === 'barangay' ? 'barangay/dashboard' : 'admin/requests'}`);
+      navigate(`/${role === 'mayorsoffice' ? 'mayorsoffice/dashboard' : (role === 'barangay' || role === 'ngo') ? 'barangay/dashboard' : 'admin/requests'}`);
     } catch (err) {
       console.error('Login error:', err);
       setError('Login failed. Please try again.');
@@ -174,6 +176,8 @@ const Login = ({ onLogin }) => {
       {showForgotPassword && (
         <ForgotPasswordModal onClose={() => setShowForgotPassword(false)} />
       )}
+
+      {loading && <LoadingModal message="Signing you in..." />}
     </div>
   );
 };

@@ -1,34 +1,45 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, lazy, Suspense } from 'react';
 import api from './services/api';
-import Login from './pages/Login';
-import Dashboard from './pages/Admin/Dashboard';
-import HeatmapView from './pages/Admin/HeatmapView';
-import Reports from './pages/Admin/Reports';
-import SendReport from './pages/Admin/SendReport';
-import Settings from './pages/Admin/Settings';
-import ManageBots from './pages/Admin/Manage-bots';
-import UserManagement from './pages/Admin/UserManagement';
-import OperatorManagement from './pages/Admin/OperatorManagement';
-import Requests from './pages/Admin/Requests';
-import ViewRequest from './pages/Admin/ViewRequest';
-import SendRequest from './pages/Admin/request/SendRequest';
-import CityHallDashboard from './pages/CityHall/Dashboard';
-import CityHallRequests from './pages/CityHall/Requests';
-import CityHallViewRequest from './pages/CityHall/ViewRequest';
-import DeploymentSchedule from './pages/Admin/DeploymentSchedule';
-import SegregationForm from './pages/Barangay/SegregationForm';
-import LandfillTracking from './pages/Admin/LandfillTracking';
-import RecyclingCenter from './pages/Admin/RecyclingCenter';
-import AuditLogs from './pages/Admin/AuditLogs';
-import BarangayDashboard from './pages/Barangay/Dashboard';
-import BarangayRequestForm from './pages/Barangay/RequestForm';
-import BarangayHeatmap from './pages/Barangay/Heatmap';
-import BarangayRequests from './pages/Barangay/Requests';
-import BarangayViewRequest from './pages/Barangay/ViewRequest';
-import BarangayAreas from './pages/Barangay/Areas';
 import Layout from './components/Layout';
 import { ProtectedRoute } from './components/ProtectedRoute';
+
+const Login = lazy(() => import('./pages/Login'));
+const Dashboard = lazy(() => import('./pages/Admin/Dashboard'));
+const HeatmapView = lazy(() => import('./pages/Admin/HeatmapView'));
+const Reports = lazy(() => import('./pages/Admin/Reports'));
+const SendReport = lazy(() => import('./pages/Admin/SendReport'));
+const Settings = lazy(() => import('./pages/Admin/Settings'));
+const ManageBots = lazy(() => import('./pages/Admin/Manage-bots'));
+const UserManagement = lazy(() => import('./pages/Admin/UserManagement'));
+const OperatorManagement = lazy(() => import('./pages/Admin/OperatorManagement'));
+const Requests = lazy(() => import('./pages/Admin/Requests'));
+const ViewRequest = lazy(() => import('./pages/Admin/ViewRequest'));
+const SendRequest = lazy(() => import('./pages/Admin/request/SendRequest'));
+const CityHallDashboard = lazy(() => import('./pages/CityHall/Dashboard'));
+const CityHallRequests = lazy(() => import('./pages/CityHall/Requests'));
+const CityHallViewRequest = lazy(() => import('./pages/CityHall/ViewRequest'));
+const DeploymentSchedule = lazy(() => import('./pages/Admin/DeploymentSchedule'));
+const CollectionAreas = lazy(() => import('./pages/Admin/CollectionAreas'));
+const SegregationForm = lazy(() => import('./pages/Barangay/SegregationForm'));
+const LandfillTracking = lazy(() => import('./pages/Admin/LandfillTracking'));
+const RecyclingCenter = lazy(() => import('./pages/Admin/RecyclingCenter'));
+const AuditLogs = lazy(() => import('./pages/Admin/AuditLogs'));
+const Utilities = lazy(() => import('./pages/Admin/Utilities'));
+const BarangayDashboard = lazy(() => import('./pages/Barangay/Dashboard'));
+const BarangayRequestForm = lazy(() => import('./pages/Barangay/RequestForm'));
+const BarangayHeatmap = lazy(() => import('./pages/Barangay/Heatmap'));
+const BarangayRequests = lazy(() => import('./pages/Barangay/Requests'));
+const BarangayViewRequest = lazy(() => import('./pages/Barangay/ViewRequest'));
+const BarangayAreas = lazy(() => import('./pages/Barangay/Areas'));
+
+function RouteLoading() {
+  return (
+    <div className="w-full h-full min-h-[400px] flex items-center justify-center">
+      <span className="text-sm font-medium text-slate-500">Loading...</span>
+    </div>
+  );
+}
 
 
 const REMEMBER_ME_KEY = 'troid_remembered_session';
@@ -103,6 +114,7 @@ function App() {
 
   return (
     <BrowserRouter>
+      <Suspense fallback={<RouteLoading />}>
       <Routes>
         <Route path="/login" element={isAuthenticated ? <Navigate to="/" replace /> : <Login onLogin={handleLogin} />} />
 
@@ -110,7 +122,7 @@ function App() {
         <Route element={<Layout isAuthenticated={isAuthenticated} onLogout={handleLogout} userType={userType} currentUser={currentUser} />}>
 
           {/* Root redirect: Send user to their specific dashboard on login */}
-          <Route path="/" element={<Navigate to={`/${userType === 'mayorsoffice' ? 'mayorsoffice/dashboard' : userType === 'barangay' ? 'barangay/dashboard' : 'admin/requests'}`} replace />} />
+          <Route path="/" element={<Navigate to={`/${userType === 'mayorsoffice' ? 'mayorsoffice/dashboard' : (userType === 'barangay' || userType === 'ngo') ? 'barangay/dashboard' : 'admin/requests'}`} replace />} />
 
           {/* ADMIN (CENRO) ROUTES */}
           <Route element={<ProtectedRoute isAuthenticated={isAuthenticated} userRole={userType} allowedRoles={['admin']} />}>
@@ -123,10 +135,12 @@ function App() {
             <Route path="/admin/requests/:id" element={<ViewRequest />} />
             <Route path="/admin/request/send-request" element={<SendRequest />} />
             <Route path="/admin/deployment" element={<DeploymentSchedule />} />
+            <Route path="/admin/collection-areas" element={<CollectionAreas />} />
             <Route path="/admin/heatmap" element={<HeatmapView />} />
             <Route path="/admin/reports" element={<Reports />} />
             <Route path="/admin/audit" element={<AuditLogs />} />
             <Route path="/admin/settings" element={<Settings />} />
+            <Route path="/admin/utilities" element={<Utilities />} />
             <Route path="/admin/landfill" element={<LandfillTracking />} />
             <Route path="/admin/recycling" element={<RecyclingCenter />} />
           </Route>
@@ -137,22 +151,25 @@ function App() {
             <Route path="/mayorsoffice/requests" element={<CityHallRequests />} />
             <Route path="/mayorsoffice/requests/:id" element={<CityHallViewRequest />} />
             <Route path="/mayorsoffice/settings" element={<Settings />} />
+            <Route path="/mayorsoffice/utilities" element={<Settings />} />
           </Route>
 
-          {/* BARANGAY ROUTES */}
-          <Route element={<ProtectedRoute isAuthenticated={isAuthenticated} userRole={userType} allowedRoles={['barangay']} />}>
+          {/* BARANGAY ROUTES (also used by NGO — same feature set) */}
+          <Route element={<ProtectedRoute isAuthenticated={isAuthenticated} userRole={userType} allowedRoles={['barangay', 'ngo']} />}>
             <Route path="/barangay/dashboard" element={<BarangayDashboard currentUser={currentUser} />} />
             <Route path="/barangay/request" element={<BarangayRequestForm currentUser={currentUser} />} />
-            <Route path="/barangay/heatmap" element={<BarangayHeatmap />} />
+            <Route path="/barangay/heatmap" element={<BarangayHeatmap currentUser={currentUser} />} />
             <Route path="/barangay/segregation" element={<SegregationForm />} />
             <Route path="/barangay/requests" element={<BarangayRequests currentUser={currentUser} />} />
             <Route path="/barangay/requests/:id" element={<BarangayViewRequest />} />
             <Route path="/barangay/areas" element={<BarangayAreas />} />
             <Route path="/barangay/settings" element={<Settings />} />
+            <Route path="/barangay/utilities" element={<Settings />} />
           </Route>
 
         </Route>
       </Routes>
+      </Suspense>
     </BrowserRouter>
   );
 }

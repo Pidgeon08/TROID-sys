@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useOutletContext } from "react-router-dom";
 import { createPortal } from "react-dom";
 import {
   ChevronLeft,
@@ -12,10 +12,12 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
   XCircle,
+  Ban,
 } from "lucide-react";
 import api from "../../services/api";
 import { Card } from "../../components/ui/Card";
-import { REQUEST_STATUS_STYLES, mapRequest, getDeploymentStatus } from "../../constants/requests";
+import NotificationBell from "../../components/NotificationBell";
+import { REQUEST_STATUS_STYLES, mapRequest, getDeploymentStatus, formatTime12h } from "../../constants/requests";
 
 const Field = ({ label, value }) => (
   <div className="flex items-center justify-between py-2 text-sm">
@@ -27,6 +29,7 @@ const Field = ({ label, value }) => (
 export default function BarangayViewRequest() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { currentUser } = useOutletContext() || {};
   const [request, setRequest] = useState(null);
   const [loading, setLoading] = useState(true);
   const [selectedPhotoIndex, setSelectedPhotoIndex] = useState(0);
@@ -72,7 +75,7 @@ export default function BarangayViewRequest() {
 
   return (
     <div className="max-w-[1400px] mx-auto animate-fade-in pb-12">
-      <div className="mb-6 flex items-center justify-between">
+      <div className="mb-4 flex items-center justify-between">
         <button
           onClick={() => navigate("/barangay/requests")}
           className="flex items-center gap-1.5 text-sm font-medium text-blue-600 hover:text-blue-700"
@@ -81,6 +84,7 @@ export default function BarangayViewRequest() {
           Back to Requests
         </button>
         <div className="flex items-center gap-2.5">
+          <NotificationBell currentUser={currentUser} userType="barangay" />
           <button className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
             <FileText size={15} />
             Download All
@@ -88,7 +92,7 @@ export default function BarangayViewRequest() {
         </div>
       </div>
 
-      <div className="mb-6">
+      <div className="mb-4">
         <div className="flex items-center gap-3">
           <h1 className="text-[28px] font-bold text-slate-900 tracking-tight leading-none">Request Details</h1>
           <span className={`inline-block rounded-full px-2.5 py-1 text-xs font-medium ${REQUEST_STATUS_STYLES[request.status] || 'bg-slate-100 text-slate-600'}`}>
@@ -112,6 +116,18 @@ export default function BarangayViewRequest() {
         </div>
       )}
 
+      {request.status === "Parked" && (
+        <div className="mb-6 flex items-start gap-3 rounded-xl border border-purple-100 bg-purple-50 px-4 py-3.5">
+          <Ban size={18} className="text-purple-600 mt-0.5 shrink-0" />
+          <div>
+            <p className="text-sm font-semibold text-purple-800">This request is parked</p>
+            <p className="text-sm text-purple-700 mt-0.5">
+              It's not yet accepted, but it may still be approved later. See the reason under Status History below.
+            </p>
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr_360px] gap-5 items-start">
         <div className="flex flex-col gap-5">
           <Card title="Request Information">
@@ -120,6 +136,12 @@ export default function BarangayViewRequest() {
               <Field label="Type of Request" value={request.type} />
               <Field label="Status" value={request.status} />
               <Field label="Date Submitted" value={request.dateSubmitted} />
+              {request.preferredDate && (
+                <Field
+                  label="Preferred Date/Time"
+                  value={`${new Date(request.preferredDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}${request.preferredTime ? ` · ${formatTime12h(request.preferredTime)}` : ""}`}
+                />
+              )}
             </div>
           </Card>
 
@@ -150,6 +172,12 @@ export default function BarangayViewRequest() {
                 <p className="text-slate-500">{request.location?.province}</p>
               </div>
             </div>
+            {request.collectionArea && (
+              <div className="mt-3 pt-3 border-t border-slate-100 text-sm">
+                <p className="text-xs text-slate-400 mb-0.5">Collection Area</p>
+                <p className="font-medium text-slate-800">{request.collectionArea.name}</p>
+              </div>
+            )}
           </Card>
         </div>
 
@@ -228,7 +256,9 @@ export default function BarangayViewRequest() {
                 <p className="text-xs text-emerald-800 leading-relaxed">
                   Clean-up and waste collection were already conducted.
                   <br />
-                  <span className="text-emerald-600">Date Completed: {request.dateSubmitted}</span>
+                  <span className="text-emerald-600">
+                    Date Completed: {new Date(schedule.day + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} · {formatTime12h(schedule.label)}
+                  </span>
                 </p>
               </div>
             )}

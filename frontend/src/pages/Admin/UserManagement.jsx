@@ -1,17 +1,17 @@
 import { useMemo, useState, useEffect } from "react";
-import { Search, Plus, User, Pencil, Archive, X, Users, UserCheck, Clock, Ban } from "lucide-react";
+import { Plus, User, Pencil, Archive, X, Users, UserCheck, Clock, Ban } from "lucide-react";
 import api from "../../services/api";
 import { logAudit } from "../../services/auditLog";
 import { useUsers } from "../../hooks/useUsers";
 import { Card } from "../../components/ui/Card";
 import { SearchBar } from "../../components/ui/SearchBar";
-import { Badge } from "../../components/ui/Badge";
 import { EmptyState } from "../../components/ui/EmptyState";
 
 const ROLE_STYLES = {
   Admin: "bg-blue-50 text-blue-700",
   Mayor: "bg-amber-50 text-amber-800",
   Barangay: "bg-emerald-50 text-emerald-700",
+  NGO: "bg-purple-50 text-purple-700",
 };
 
 const STATUS_STYLES = {
@@ -94,7 +94,7 @@ export default function UserManagement({ currentUser }) {
       const payload = {
         name: updated.name,
         email: updated.email,
-        role: updated.role === 'Admin' ? 'admin' : updated.role === 'Mayor' ? 'mayorsoffice' : updated.role === 'Barangay' ? 'barangay' : updated.role,
+        role: updated.role === 'Admin' ? 'admin' : updated.role === 'Mayor' ? 'mayorsoffice' : updated.role === 'Barangay' ? 'barangay' : updated.role === 'NGO' ? 'ngo' : updated.role,
         status: updated.status === 'Active' ? 'active' : updated.status === 'Pending' ? 'pending' : updated.status === 'Offline' ? 'offline' : updated.status === 'Archived' ? 'archived' : updated.status,
         location: updated.location,
       };
@@ -118,7 +118,7 @@ export default function UserManagement({ currentUser }) {
       const payload = {
         name: form.name,
         email: form.email,
-        role: form.role === 'Admin' ? 'admin' : form.role === 'Mayor' ? 'mayorsoffice' : form.role === 'Barangay' ? 'barangay' : form.role,
+        role: form.role === 'Admin' ? 'admin' : form.role === 'Mayor' ? 'mayorsoffice' : form.role === 'Barangay' ? 'barangay' : form.role === 'NGO' ? 'ngo' : form.role,
         status: form.status === 'Active' ? 'active' : form.status === 'Pending' ? 'pending' : form.status === 'Offline' ? 'offline' : 'active',
         location: form.location || '',
       };
@@ -127,7 +127,7 @@ export default function UserManagement({ currentUser }) {
         id: created.id,
         name: created.name,
         email: created.email,
-        role: created.role.replace('mayorsoffice', "Mayor").replace('barangay', 'Barangay').replace('admin', 'Admin'),
+        role: created.role.replace('mayorsoffice', "Mayor").replace('barangay', 'Barangay').replace('ngo', 'NGO').replace('admin', 'Admin'),
         status: created.status === 'active' ? 'Active' : created.status === 'pending' ? 'Pending' : created.status === 'offline' ? 'Offline' : created.status === 'archived' ? 'Archived' : created.status,
         location: created.location || '—',
         date: new Date().toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' }),
@@ -183,7 +183,7 @@ export default function UserManagement({ currentUser }) {
   const handleRoleChange = async (newRole) => {
     if (!selected) return;
     try {
-      const roleValue = newRole === 'Admin' ? 'admin' : newRole === 'Mayor' ? 'mayorsoffice' : 'barangay';
+      const roleValue = newRole === 'Admin' ? 'admin' : newRole === 'Mayor' ? 'mayorsoffice' : newRole === 'NGO' ? 'ngo' : 'barangay';
       await api.updateUser(selected.id, { role: roleValue });
       updateUser(selected.id, { role: newRole });
       closeModal();
@@ -320,6 +320,7 @@ export default function UserManagement({ currentUser }) {
                 <option>Admin</option>
                 <option>Mayor</option>
                 <option>Barangay</option>
+                <option>NGO</option>
               </select>
               <select
                 value={statusFilter}
@@ -593,13 +594,14 @@ function EditUserModal({ user, onCancel, onSave }) {
               value={form.role}
               onChange={(e) => {
                 const role = e.target.value;
-                setForm({ ...form, role, location: role === 'Barangay' ? form.location : '' });
+                setForm({ ...form, role, location: (role === 'Barangay' || role === 'NGO') ? form.location : '' });
               }}
               className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
             >
               <option>Admin</option>
               <option>Mayor</option>
               <option>Barangay</option>
+              <option>NGO</option>
             </select>
           </div>
           <div>
@@ -608,7 +610,7 @@ function EditUserModal({ user, onCancel, onSave }) {
               value={form.location}
               onChange={(e) => setForm({ ...form, location: e.target.value })}
               placeholder="e.g. Carlatan"
-              disabled={form.role !== 'Barangay'}
+              disabled={form.role !== 'Barangay' && form.role !== 'NGO'}
               className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30 disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed"
             />
           </div>
@@ -686,13 +688,14 @@ function AddUserModal({ onCancel, onSave }) {
               value={form.role}
               onChange={(e) => {
                 const role = e.target.value;
-                setForm({ ...form, role, location: role === 'Barangay' ? form.location : '' });
+                setForm({ ...form, role, location: (role === 'Barangay' || role === 'NGO') ? form.location : '' });
               }}
               className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
             >
               <option>Admin</option>
               <option>Mayor</option>
               <option>Barangay</option>
+              <option>NGO</option>
             </select>
           </div>
           <div>
@@ -701,7 +704,7 @@ function AddUserModal({ onCancel, onSave }) {
               value={form.location}
               onChange={(e) => setForm({ ...form, location: e.target.value })}
               placeholder="e.g. Carlatan"
-              disabled={form.role !== 'Barangay'}
+              disabled={form.role !== 'Barangay' && form.role !== 'NGO'}
               className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30 disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed"
             />
           </div>
@@ -779,6 +782,7 @@ function ChangeRoleModal({ user, onCancel, onSave }) {
             <option>Admin</option>
             <option>Mayor</option>
             <option>Barangay</option>
+            <option>NGO</option>
           </select>
         </div>
         <div className="flex justify-end gap-2">
@@ -858,7 +862,7 @@ function SuspendAccountModal({ user, onCancel, onConfirm }) {
 }
 
 function EditUserConfirmModal({ form, onCancel, onConfirm }) {
-  const roleLabel = form.role === 'admin' ? 'Admin' : form.role === 'mayorsoffice' ? 'Mayor' : form.role === 'barangay' ? 'Barangay' : form.role;
+  const roleLabel = form.role === 'admin' ? 'Admin' : form.role === 'mayorsoffice' ? 'Mayor' : form.role === 'barangay' ? 'Barangay' : form.role === 'ngo' ? 'NGO' : form.role;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
       <div className="w-full max-w-sm rounded-xl bg-white p-6 border border-slate-200">

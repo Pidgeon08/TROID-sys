@@ -1,7 +1,7 @@
 import { useMemo, useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Eye, Trash2, ChevronLeft, ChevronRight, Plus, Search, Filter, FileText, Clock, CheckCircle2, XCircle, Signature, Archive } from "lucide-react";
-import { TABS } from "../../constants/requests";
+import { Eye, Trash2, Plus, FileText, Clock, CheckCircle2, XCircle, Signature, Archive } from "lucide-react";
+import { TABS, mapRequest, matchesRequestQuery } from "../../constants/requests";
 import { useRequests } from "../../hooks/useRequests";
 import { Badge } from "../../components/ui/Badge";
 import { Card } from "../../components/ui/Card";
@@ -15,7 +15,7 @@ const PAGE_SIZE = 5;
 
 export default function Requests({ userRole = "admin" }) {
   const navigate = useNavigate();
-  const { loading, activeTab, setActiveTab, searchQuery, setSearchQuery, filteredByTab, counts, requests, setRequests } = useRequests(userRole);
+  const { loading, activeTab, setActiveTab, searchQuery, setSearchQuery, filteredByTab, counts, setRequests, scheduledRequestIds } = useRequests(userRole);
   const [currentPage, setCurrentPage] = useState(1);
   const [archivingId, setArchivingId] = useState(null);
   const [showArchived, setShowArchived] = useState(false);
@@ -57,7 +57,11 @@ export default function Requests({ userRole = "admin" }) {
     }
   };
 
-  const source = showArchived ? archivedRequests : filteredByTab;
+  const filteredArchived = useMemo(
+    () => archivedRequests.filter((req) => matchesRequestQuery(req, searchQuery)),
+    [archivedRequests, searchQuery]
+  );
+  const source = showArchived ? filteredArchived : filteredByTab;
   const paginated = useMemo(
     () => source.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE),
     [source, currentPage]
@@ -103,12 +107,6 @@ export default function Requests({ userRole = "admin" }) {
             placeholder="Search requests..."
             className="w-56"
           />
-          {userRole === "admin" && (
-            <button className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
-              <Filter size={15} />
-              Filter
-            </button>
-          )}
         </div>
       </header>
 
@@ -158,9 +156,21 @@ export default function Requests({ userRole = "admin" }) {
                   <td className="px-5 py-3.5 text-slate-600">{req.requestedBy?.name}</td>
                   <td className="px-5 py-3.5 text-slate-600">{req.location?.barangay}</td>
                   <td className="px-5 py-3.5 text-slate-500">{req.dateSubmitted}</td>
-                  <td className="px-5 py-3.5">
-                    <Badge status={req.status} dot />
-                  </td>
+                   <td className="px-5 py-3.5">
+                     <div className="flex items-center gap-1.5">
+                       <Badge status={req.status} dot />
+                       {req.status === 'Approved' && !scheduledRequestIds.has(req.id) && (
+                         <span className="inline-flex items-center rounded-md bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 border border-amber-100">
+                           Unscheduled
+                         </span>
+                       )}
+                       {req.status === 'Approved' && scheduledRequestIds.has(req.id) && (
+                         <span className="inline-flex items-center rounded-md bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 border border-emerald-100">
+                           Scheduled
+                         </span>
+                       )}
+                     </div>
+                   </td>
                    <td className="px-5 py-3.5">
                      <div className="flex items-center justify-end gap-2">
                        {showArchived ? (
@@ -204,7 +214,12 @@ export default function Requests({ userRole = "admin" }) {
                    </td>
                 </tr>
               ))}
-              {paginated.length === 0 && (
+              {showArchived && loadingArchived && (
+                <tr>
+                  <td colSpan={7} className="px-5 py-6 text-center text-sm text-slate-400">Loading archived requests...</td>
+                </tr>
+              )}
+              {!(showArchived && loadingArchived) && paginated.length === 0 && (
                 <tr>
                   <td colSpan={7}>
                     <EmptyState title="No requests found." subtitle="Try adjusting your filters or send a new request." />

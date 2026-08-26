@@ -1,8 +1,9 @@
 import { useEffect, useState, useMemo } from 'react';
-import { useOutletContext } from 'react-router-dom';
+import { useOutletContext, useNavigate } from 'react-router-dom';
 import Modal from '../../components/Modal';
 import api from '../../services/api';
 import { logAudit } from '../../services/auditLog';
+import { formatTime12h } from '../../constants/requests';
 import {
     Plus,
     Wrench,
@@ -18,6 +19,7 @@ import {
 
 export default function ManageBots() {
     const { currentUser } = useOutletContext() || {};
+    const navigate = useNavigate();
     // --- States ---
     const [bots, setBots] = useState([]);
     const [operators, setOperators] = useState([]);
@@ -27,28 +29,44 @@ export default function ManageBots() {
     useEffect(() => {
         const fetchData = async () => {
             try {
-                const [boatsRes, operatorsRes] = await Promise.all([
+                const [boatsRes, operatorsRes, schedulesRes, requestsRes] = await Promise.all([
                     api.boats(),
                     api.operators(),
+                    api.deploymentSchedules(),
+                    api.requests(),
                 ]);
+
+                const schedules = Array.isArray(schedulesRes) ? schedulesRes : [];
+                const requests = Array.isArray(requestsRes) ? requestsRes : [];
 
                 const mappedBots = Array.isArray(boatsRes) ? boatsRes.map((b) => {
                     const op = operatorsRes.find(o => o.assigned_bot === b.id);
+
+                    // Most recently created schedule entry for this bot stands in as its current assignment.
+                    const latestSchedule = schedules
+                        .filter(s => s.bot === b.id)
+                        .sort((a, z) => z.id - a.id)[0] || null;
+
+                    const totalTrashBags = requests
+                        .filter(r => r.bot_id === b.id)
+                        .reduce((sum, r) => sum + (Number(r.bags) || 0), 0);
+
                     return {
                         backendId: b.id,
                         id: `TRD-${String(b.id).padStart(3, '0')}`,
                         status: b.is_active ? 'Active' : 'Offline',
                         online: b.is_online ? 'Online' : 'Offline',
                         battery: b.battery_level,
-                        assignedLocation: 'Not Assigned',
+                        assignedLocation: latestSchedule?.zone || 'Not Assigned',
                         assignedOperator: op ? op.name : 'Not Assigned',
                         lastActive: b.last_seen
                             ? new Date(b.last_seen).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                             : '—',
-                        barangay: 'Not Assigned',
-                        scheduledCleanup: 'None',
-                        runtimeToday: '0h 0m',
-                        totalTrash: '0 bags',
+                        barangay: latestSchedule?.zone || 'Not Assigned',
+                        scheduledCleanup: latestSchedule
+                            ? `${latestSchedule.day} @ ${formatTime12h(latestSchedule.label)}`
+                            : 'None',
+                        totalTrash: `${totalTrashBags} bags`,
                         archived: b.archived,
                     };
                 }) : [];
@@ -58,6 +76,7 @@ export default function ManageBots() {
                     id: o.operator_id,
                     name: o.name,
                     status: o.status,
+                    archived: o.archived,
                     assignedBot: o.assigned_bot ? `TRD-${String(o.assigned_bot).padStart(3, '0')}` : null,
                     availability: (o.availability || 'available').charAt(0).toUpperCase() + (o.availability || 'available').slice(1),
                 })) : [];
@@ -83,28 +102,14 @@ export default function ManageBots() {
 
     // --- Modals State ---
     const [isAddBotOpen, setIsAddBotOpen] = useState(false);
-    const [isAddOpOpen, setIsAddOpOpen] = useState(false);
-    const [isAssignOpOpen, setIsAssignOpOpen] = useState(false);
     const [isMaintenanceOpen, setIsMaintenanceOpen] = useState(false);
-    const [isManageScheduleOpen, setIsManageScheduleOpen] = useState(false);
     const [isArchiveConfirmOpen, setIsArchiveConfirmOpen] = useState(false);
     const [isViewAllBotsOpen, setIsViewAllBotsOpen] = useState(false);
-    const [isViewAllOpsOpen, setIsViewAllOpsOpen] = useState(false);
-    const [isEditOpOpen, setIsEditOpOpen] = useState(false);
-    const [editingOp, setEditingOp] = useState(null);
-    const [editOpName, setEditOpName] = useState('');
-    const [editOpStatus, setEditOpStatus] = useState('available');
-    const [editOpAssignedBot, setEditOpAssignedBot] = useState('');
-    const [assignOpId, setAssignOpId] = useState('');
     const [maintenanceDetails, setMaintenanceDetails] = useState({ type: 'Routine Maintenance', date: '', notes: '' });
-    const [scheduleDetails, setScheduleDetails] = useState({ barangay: '', time: '', date: '' });
 
     // --- Filter/Search States for "View All" Modals ---
     const [botSearch, setBotSearch] = useState('');
     const [botFilterStatus, setBotFilterStatus] = useState('All');
-    const [opSearch, setOpSearch] = useState('');
-    const [opFilterAvail, setOpFilterAvail] = useState('All');
-    const [opFilterArchived, setOpFilterArchived] = useState('Not Archived');
 
     // --- Form States ---
     const [newBot, setNewBot] = useState({
@@ -114,14 +119,7 @@ export default function ManageBots() {
         barangay: 'Not Assigned',
         assignedOperator: 'Not Assigned',
         scheduledCleanup: 'None',
-        runtimeToday: '0h 0m',
         totalTrash: '0 bags'
-    });
-
-    const [newOp, setNewOp] = useState({
-        name: '',
-        status: 'available',
-        assignedBot: '',
     });
 
     const selectedBot = useMemo(() => {
@@ -160,7 +158,6 @@ export default function ManageBots() {
                     : '—',
                 barangay: newBot.barangay !== 'Not Assigned' ? newBot.barangay : 'Not Assigned',
                 scheduledCleanup: 'None',
-                runtimeToday: '0h 0m',
                 totalTrash: '0 bags',
                 archived: false,
             };
@@ -196,7 +193,6 @@ export default function ManageBots() {
                 barangay: 'Not Assigned',
                 assignedOperator: 'Not Assigned',
                 scheduledCleanup: 'None',
-                runtimeToday: '0h 0m',
                 totalTrash: '0 bags'
             });
             setIsAddBotOpen(false);
@@ -217,172 +213,6 @@ export default function ManageBots() {
         }
     };
 
-    const handleAddOp = async (e) => {
-        e.preventDefault();
-        if (!newOp.name.trim()) return;
-
-        try {
-            const created = await api.createOperator({
-                name: newOp.name,
-                status: newOp.status,
-                availability: newOp.assignedBot ? 'assigned' : (newOp.status === 'unavailable' ? 'unavailable' : 'available'),
-                assigned_bot: newOp.assignedBot ? parseInt(newOp.assignedBot.replace('TRD-', ''), 10) : null,
-            });
-
-            const opToAdd = {
-                backendId: created.id,
-                id: created.operator_id,
-                name: created.name,
-                status: created.status,
-                assignedBot: created.assigned_bot ? `TRD-${String(created.assigned_bot).padStart(3, '0')}` : null,
-                availability: (created.availability || 'available').charAt(0).toUpperCase() + (created.availability || 'available').slice(1),
-            };
-
-            setOperators([...operators, opToAdd]);
-
-            if (newOp.assignedBot) {
-                setBots(prev => prev.map(bot => {
-                    if (bot.id === newOp.assignedBot) {
-                        return {
-                            ...bot,
-                            assignedOperator: created.name
-                        };
-                    }
-                    return bot;
-                }));
-            }
-        } catch (err) {
-            console.error('Failed to add operator:', err);
-            alert('Failed to add operator. Please try again.');
-        }
-
-        setNewOp({
-            name: '',
-            status: 'available',
-            assignedBot: ''
-        });
-        setIsAddOpOpen(false);
-    };
-
-    const handleEditOp = async (e) => {
-        e.preventDefault();
-        if (!editingOp || !editOpName.trim()) return;
-
-        try {
-            const prevAssignedBot = editingOp.assignedBot;
-            const newAssignedBot = editOpAssignedBot ? parseInt(editOpAssignedBot.replace('TRD-', ''), 10) : null;
-
-            await api.updateOperator(editingOp.backendId, {
-                name: editOpName,
-                status: editOpStatus,
-                assigned_bot: newAssignedBot,
-                availability: newAssignedBot ? 'assigned' : (editOpStatus === 'unavailable' ? 'unavailable' : 'available'),
-            });
-
-            setOperators(prev => prev.map(op => {
-                if (op.id === editingOp.id) {
-                    return {
-                        ...op,
-                        name: editOpName,
-                        status: editOpStatus,
-                        assignedBot: newAssignedBot ? `TRD-${String(newAssignedBot).padStart(3, '0')}` : null,
-                        availability: newAssignedBot ? 'assigned' : (editOpStatus === 'unavailable' ? 'unavailable' : 'available'),
-                    };
-                }
-                return op;
-            }));
-
-            // If bot assignment changed, update affected bots
-            if (prevAssignedBot !== editOpAssignedBot) {
-                if (prevAssignedBot) {
-                    setBots(prev => prev.map(b => {
-                        if (b.id === prevAssignedBot) {
-                            return { ...b, assignedOperator: 'Not Assigned' };
-                        }
-                        return b;
-                    }));
-                }
-                if (editOpAssignedBot) {
-                    setBots(prev => prev.map(b => {
-                        if (b.id === editOpAssignedBot) {
-                            return { ...b, assignedOperator: editOpName };
-                        }
-                        return b;
-                    }));
-                }
-            }
-        } catch (err) {
-            console.error('Failed to edit operator:', err);
-            alert('Failed to edit operator. Please try again.');
-        }
-
-        setIsEditOpOpen(false);
-        setEditingOp(null);
-        setEditOpName('');
-        setEditOpStatus('available');
-        setEditOpAssignedBot('');
-    };
-
-    const handleAssignOperator = async (e) => {
-        e.preventDefault();
-        if (!selectedBot) return;
-
-        const chosenOp = operators.find(o => o.id === assignOpId);
-
-        // 1. Remove previous operator assignment if there was one
-        let prevOpName = selectedBot.assignedOperator;
-
-        if (prevOpName !== 'Not Assigned') {
-            const prevOp = operators.find(o => o.name === prevOpName);
-            if (prevOp) {
-                try {
-                    await api.updateOperator(prevOp.backendId, {
-                        assigned_bot: null,
-                        availability: 'available',
-                    });
-                } catch (err) {
-                    console.error('Failed to unassign previous operator:', err);
-                }
-            }
-        }
-
-        // 2. Assign the new operator
-        if (chosenOp) {
-            try {
-                await api.updateOperator(chosenOp.backendId, {
-                    assigned_bot: selectedBot.backendId,
-                    availability: 'assigned',
-                });
-            } catch (err) {
-                console.error('Failed to assign operator:', err);
-            }
-        }
-
-        setOperators(prev => prev.map(op => {
-            if (prevOpName !== 'Not Assigned' && op.name === prevOpName) {
-                return { ...op, assignedBot: null, availability: 'Available' };
-            }
-            if (chosenOp && op.id === chosenOp.id) {
-                return { ...op, assignedBot: selectedBot.id, availability: 'Assigned' };
-            }
-            return op;
-        }));
-
-        // 3. Update Bot Details
-        setBots(prev => prev.map(b => {
-            if (b.id === selectedBot.id) {
-                return {
-                    ...b,
-                    assignedOperator: chosenOp ? chosenOp.name : 'Not Assigned',
-                };
-            }
-            return b;
-        }));
-
-        setIsAssignOpOpen(false);
-        setAssignOpId('');
-    };
-
     const handleScheduleMaintenance = async (e) => {
         e.preventDefault();
         if (!selectedBot) return;
@@ -391,53 +221,26 @@ export default function ManageBots() {
             await api.updateBoat(selectedBot.backendId, {
                 is_active: false,
             });
+
+            setBots(prev => prev.map(b => (
+                b.id === selectedBot.id ? { ...b, status: 'Offline' } : b
+            )));
+
+            setIsMaintenanceOpen(false);
+            setMaintenanceDetails({ type: 'Routine Maintenance', date: '', notes: '' });
+
+            logAudit({
+                currentUser,
+                action: 'Maintenance scheduled',
+                module: 'Bot Management',
+                details: `${selectedBot.id}: ${maintenanceDetails.type} scheduled for ${maintenanceDetails.date}`,
+            });
         } catch (err) {
             console.error('Failed to update bot status:', err);
+            alert('Failed to schedule maintenance. Please try again.');
         }
-
-        setBots(prev => prev.map(b => {
-            if (b.id === selectedBot.id) {
-                return {
-                    ...b,
-                    status: 'Offline',
-                    scheduledCleanup: `Maintenance: ${maintenanceDetails.type} (${maintenanceDetails.date})`
-                };
-            }
-            return b;
-        }));
-
-        setIsMaintenanceOpen(false);
-        setMaintenanceDetails({ type: 'Routine Maintenance', date: '', notes: '' });
-
-        logAudit({
-            currentUser,
-            action: 'Maintenance scheduled',
-            module: 'Bot Management',
-            details: `${selectedBot.id}: ${maintenanceDetails.type} scheduled for ${maintenanceDetails.date}`,
-        });
     };
 
-    const handleManageSchedule = (e) => {
-        e.preventDefault();
-        if (!selectedBot) return;
-
-        const formattedSchedule = `${scheduleDetails.date} @ ${scheduleDetails.time}`;
-
-        setBots(prev => prev.map(b => {
-            if (b.id === selectedBot.id) {
-                return {
-                    ...b,
-                    barangay: scheduleDetails.barangay || b.barangay,
-                    assignedLocation: scheduleDetails.barangay || b.assignedLocation,
-                    scheduledCleanup: formattedSchedule
-                };
-            }
-            return b;
-        }));
-
-        setIsManageScheduleOpen(false);
-        setScheduleDetails({ barangay: '', time: '', date: '' });
-    };
 
     const handleArchiveBot = async () => {
         if (!selectedBot) return;
@@ -506,17 +309,6 @@ export default function ManageBots() {
         });
     }, [bots, botSearch, botFilterStatus]);
 
-    const filteredOperators = useMemo(() => {
-        return operators.filter(op => {
-            const matchesSearch = op.name.toLowerCase().includes(opSearch.toLowerCase()) ||
-                op.id.toLowerCase().includes(opSearch.toLowerCase()) ||
-                (op.assignedBot && op.assignedBot.toLowerCase().includes(opSearch.toLowerCase()));
-            const matchesAvail = opFilterAvail === 'All' || op.availability === opFilterAvail;
-            const matchesArchived = opFilterArchived === 'All' || (opFilterArchived === 'Not Archived' ? !op.archived : op.archived);
-            return matchesSearch && matchesAvail && matchesArchived;
-        });
-    }, [operators, opSearch, opFilterAvail, opFilterArchived]);
-
     // --- CSS Badge Helpers ---
     const getBotStatusBadgeClass = (status) => {
         switch (status) {
@@ -539,29 +331,18 @@ export default function ManageBots() {
             : 'bg-red-100 text-red-800 border border-red-200';
     };
 
-    const getOpStatusBadgeClass = (availability) => {
-        const avail = typeof availability === 'string' ? availability.charAt(0).toUpperCase() + availability.slice(1) : availability;
-        switch (avail) {
+    const getAvailabilityBadgeClass = (availability) => {
+        switch (availability) {
             case 'Assigned':
-                return 'border-emerald-500 text-emerald-600 bg-emerald-50';
+                return 'bg-emerald-100 text-emerald-800 border border-emerald-200';
             case 'Available':
-                return 'border-blue-500 text-blue-600 bg-blue-50';
-            case 'Unavailable':
+                return 'bg-blue-100 text-blue-800 border border-blue-200';
             default:
-                return 'border-slate-300 text-slate-500 bg-slate-50';
+                return 'bg-slate-100 text-slate-600 border border-slate-200';
         }
     };
 
-    const getOpDotClass = (status) => {
-        switch (status) {
-            case 'available':
-                return 'bg-emerald-500 shadow-[0_0_6px_#10b981]';
-            case 'unavailable':
-                return 'bg-amber-500 shadow-[0_0_6px_#f59e0b]';
-            default:
-                return 'bg-slate-400';
-        }
-    };
+    const activeOperators = operators.filter(o => !o.archived);
 
     if (loading) {
         return (
@@ -571,25 +352,25 @@ export default function ManageBots() {
         );
     }
 
-      return (
-          <div className="w-full h-full animate-fade-in flex flex-col">
-  
-               {/* ── HEADER ── */}
-               <header className="mb-3 sm:mb-4 flex justify-between items-center flex-shrink-0">
-                  <div>
-                      <h1 className="text-xl sm:text-[22px] lg:text-2xl font-bold text-slate-900 tracking-tight leading-none">Bot Management</h1>
-                      <p className="text-slate-500 text-[11px] sm:text-xs mt-1 font-medium">Monitor and manage CENRO's robotic cleanup fleet</p>
-                  </div>
-              </header>
+    return (
+        <div className="w-full lg:h-full animate-fade-in flex flex-col">
+
+            {/* ── HEADER ── */}
+            <header className="mb-3 sm:mb-4 flex justify-between items-center flex-shrink-0">
+                <div>
+                    <h1 className="text-xl sm:text-[22px] lg:text-2xl font-bold text-slate-900 tracking-tight leading-none">Bot Management</h1>
+                    <p className="text-slate-500 text-[11px] sm:text-xs mt-1 font-medium">Monitor and manage CENRO's robotic cleanup fleet</p>
+                </div>
+            </header>
 
             {/* ── MAIN WORKSPACE GRID ── */}
-            <div className="grid grid-cols-1 lg:grid-cols-[1fr_340px] xl:grid-cols-[1fr_380px] gap-4 lg:gap-6 flex-1 min-h-0">
+            <div className="grid grid-cols-1 lg:grid-cols-[1fr_340px] xl:grid-cols-[1fr_380px] gap-4 lg:gap-6 lg:flex-1 lg:min-h-0">
 
                 {/* ── LEFT COLUMN: BOTS & DETAIL ── */}
-                <div className="flex flex-col gap-4 lg:gap-6 min-h-0">
+                <div className="flex flex-col gap-4 lg:gap-6 lg:min-h-0">
 
                     {/* AVAILABLE BOTS CARD */}
-                    <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] overflow-hidden flex flex-col min-h-0 max-h-[50vh]">
+                    <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] overflow-hidden flex flex-col lg:min-h-0 max-h-[50vh]">
                         <div>
                             {/* Card Header */}
                             <div className="p-5 pb-3 flex justify-between items-center border-b border-slate-50">
@@ -663,6 +444,13 @@ export default function ManageBots() {
                                                 <td className="px-3 sm:px-5 py-2.5 sm:py-3.5 font-medium text-slate-400">{bot.lastActive}</td>
                                             </tr>
                                         ))}
+                                        {bots.filter(b => !b.archived).length === 0 && (
+                                            <tr>
+                                                <td colSpan={6} className="px-5 py-10 text-center text-sm text-slate-400">
+                                                    No bots registered yet. Click "Add Bot" to get started.
+                                                </td>
+                                            </tr>
+                                        )}
                                     </tbody>
                                 </table>
                             </div>
@@ -681,11 +469,11 @@ export default function ManageBots() {
 
                     {/* SELECTED BOT INFORMATION CARD */}
                     {selectedBot ? (
-                        <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-4 lg:p-6 flex flex-col flex-1 min-h-0">
-                            <div className="grid grid-cols-1 md:grid-cols-[1fr_260px] gap-4 lg:gap-6 flex-1 min-h-0" max-h-50>
+                        <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-4 lg:p-6 flex flex-col lg:flex-1 lg:min-h-0">
+                            <div className="grid grid-cols-1 md:grid-cols-[1fr_260px] gap-4 lg:gap-6 lg:flex-1 lg:min-h-0">
 
                                 {/* Bot Details Grid */}
-                                <div className="flex flex-col min-h-0 overflow-y-auto">
+                                <div className="flex flex-col lg:min-h-0 lg:overflow-y-auto">
                                     <span className="text-[11px] sm:text-xs font-bold text-slate-400 uppercase tracking-wider">Selected Bot Information</span>
                                     <h2 className="text-xl sm:text-2xl lg:text-3xl font-extrabold text-slate-950 mt-1 leading-none tracking-tight">{selectedBot.id}</h2>
 
@@ -726,10 +514,6 @@ export default function ManageBots() {
                                             </span>
                                         </div>
                                         <div className="flex justify-between items-center py-1.5 border-b border-slate-50">
-                                            <span className="text-[11px] sm:text-xs font-semibold text-slate-400">Runtime Today</span>
-                                            <span className="text-xs sm:text-sm font-bold text-slate-800">{selectedBot.runtimeToday}</span>
-                                        </div>
-                                        <div className="flex justify-between items-center py-1.5 border-b border-slate-50">
                                             <span className="text-[11px] sm:text-xs font-semibold text-slate-400">Total Trash Collected</span>
                                             <span className="text-xs sm:text-sm font-bold text-[#1b4de4]">{selectedBot.totalTrash}</span>
                                         </div>
@@ -753,7 +537,7 @@ export default function ManageBots() {
                                         </button>
 
                                         <button
-                                            onClick={() => setIsManageScheduleOpen(true)}
+                                            onClick={() => navigate('/admin/deployment')}
                                             className="w-full bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 py-2.5 px-4 rounded-xl text-[11px] sm:text-sm font-bold transition-all flex items-center justify-center gap-2 cursor-pointer"
                                         >
                                             <Calendar className="w-4 h-4 text-slate-400" />
@@ -779,6 +563,46 @@ export default function ManageBots() {
                         </div>
                     )}
 
+                </div>
+
+                {/* ── RIGHT COLUMN: OPERATORS ── */}
+                <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] overflow-hidden flex flex-col lg:min-h-0 max-h-[50vh] lg:max-h-none">
+                    <div className="p-5 pb-3 flex justify-between items-center border-b border-slate-50 shrink-0">
+                        <h2 className="text-sm sm:text-base font-bold text-slate-950">Operators</h2>
+                        <span className="text-[11px] font-semibold text-slate-400">{activeOperators.length} total</span>
+                    </div>
+
+                    {activeOperators.length === 0 ? (
+                        <div className="flex-1 flex flex-col items-center justify-center text-center p-6">
+                            <Info className="w-7 h-7 text-slate-300 mb-2" />
+                            <p className="text-xs font-semibold text-slate-400">No operators registered yet.</p>
+                        </div>
+                    ) : (
+                        <div className="lg:flex-1 overflow-y-auto divide-y divide-slate-50">
+                            {activeOperators.map((op) => (
+                                <div key={op.id} className="p-4 flex items-center justify-between gap-3">
+                                    <div className="min-w-0">
+                                        <p className="text-sm font-bold text-slate-900 truncate">{op.name}</p>
+                                        <p className="text-[11px] text-slate-400 mt-0.5 truncate">
+                                            {op.assignedBot ? `Assigned to ${op.assignedBot}` : 'No bot assigned'}
+                                        </p>
+                                    </div>
+                                    <span className={`shrink-0 px-2.5 py-0.5 rounded-full text-[11px] font-bold ${getAvailabilityBadgeClass(op.availability)}`}>
+                                        {op.availability}
+                                    </span>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+
+                    <div className="p-4 border-t border-slate-50 flex justify-center shrink-0">
+                        <button
+                            onClick={() => navigate('/admin/operators')}
+                            className="text-[#1b4de4] hover:text-[#153eb8] text-xs sm:text-sm font-semibold transition-colors cursor-pointer"
+                        >
+                            View all Operators
+                        </button>
+                    </div>
                 </div>
 
             </div>
@@ -911,76 +735,6 @@ export default function ManageBots() {
                 </Modal>
             )}
 
-            {/* 5. MANAGE SCHEDULE MODAL */}
-            {isManageScheduleOpen && selectedBot && (
-                <Modal className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-                    <div className="bg-white rounded-2xl shadow-xl w-full max-w-md border border-slate-100 overflow-hidden animate-fade-in">
-                        <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-                            <div>
-                                <h3 className="text-base font-bold text-slate-900">Manage Cleanup Schedule</h3>
-                                <p className="text-xs text-slate-400 mt-0.5">Schedule cleanup missions for <strong className="text-slate-600">{selectedBot.id}</strong></p>
-                            </div>
-                            <button onClick={() => setIsManageScheduleOpen(false)} className="text-slate-400 hover:text-slate-600 transition-colors">
-                                <X className="w-5 h-5" />
-                            </button>
-                        </div>
-
-                        <form onSubmit={handleManageSchedule} className="p-5 flex flex-col gap-4">
-                            <div>
-                                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Destination Barangay</label>
-                                <input
-                                    type="text"
-                                    required
-                                    placeholder="e.g. Biday, Carlatan, Poro"
-                                    value={scheduleDetails.barangay}
-                                    onChange={(e) => setScheduleDetails({ ...scheduleDetails, barangay: e.target.value })}
-                                    className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-[#1b4de4]"
-                                />
-                            </div>
-
-                            <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Date</label>
-                                    <input
-                                        type="date"
-                                        required
-                                        value={scheduleDetails.date}
-                                        onChange={(e) => setScheduleDetails({ ...scheduleDetails, date: e.target.value })}
-                                        className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-[#1b4de4]"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Time</label>
-                                    <input
-                                        type="time"
-                                        required
-                                        value={scheduleDetails.time}
-                                        onChange={(e) => setScheduleDetails({ ...scheduleDetails, time: e.target.value })}
-                                        className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-[#1b4de4]"
-                                    />
-                                </div>
-                            </div>
-
-                            <div className="flex gap-3 justify-end mt-4 pt-4 border-t border-slate-100">
-                                <button
-                                    type="button"
-                                    onClick={() => setIsManageScheduleOpen(false)}
-                                    className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50 rounded-xl border border-slate-200 cursor-pointer"
-                                >
-                                    Cancel
-                                </button>
-                                <button
-                                    type="submit"
-                                    className="px-4 py-2 text-xs font-bold text-white bg-[#1b4de4] hover:bg-[#153eb8] rounded-xl shadow-sm cursor-pointer"
-                                >
-                                    Save Schedule
-                                </button>
-                            </div>
-                        </form>
-                    </div>
-                </Modal>
-            )}
-
             {/* 6. ARCHIVE CONFIRMATION MODAL */}
             {isArchiveConfirmOpen && selectedBot && (
                 <Modal className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -1070,7 +824,6 @@ export default function ManageBots() {
                                         <th className="px-5 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider bg-slate-50">Battery</th>
                                         <th className="px-5 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider bg-slate-50">Barangay</th>
                                         <th className="px-5 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider bg-slate-50">Scheduled cleanup</th>
-                                        <th className="px-5 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider bg-slate-50 font-medium">Runtime today</th>
                                         <th className="px-5 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider bg-slate-50 font-sans text-center">Trash</th>
                                         <th className="px-5 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider bg-slate-50 text-center">Select</th>
                                     </tr>
@@ -1104,7 +857,6 @@ export default function ManageBots() {
                                             </td>
                                             <td className="px-5 py-3 font-semibold text-slate-500">{bot.barangay}</td>
                                             <td className="px-5 py-3 font-semibold text-slate-400">{bot.scheduledCleanup}</td>
-                                            <td className="px-5 py-3 font-medium text-slate-400">{bot.runtimeToday}</td>
                                             <td className="px-5 py-3 font-bold text-blue-600 text-center">{bot.totalTrash}</td>
                                             <td className="px-5 py-3 text-center">
                                                 <button
@@ -1121,7 +873,7 @@ export default function ManageBots() {
                                     ))}
                                     {filteredBots.length === 0 && (
                                         <tr>
-                                            <td colSpan="8" className="text-center py-8 text-slate-400 font-semibold">
+                                            <td colSpan="7" className="text-center py-8 text-slate-400 font-semibold">
                                                 No bots found matching your search.
                                             </td>
                                         </tr>

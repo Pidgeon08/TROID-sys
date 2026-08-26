@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
-import { ShieldCheck, Clock, CheckCircle2, XCircle, TrendingUp, FileText } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { ShieldCheck, Clock, CheckCircle2, Ban, TrendingUp, FileText } from "lucide-react";
 import api from "../../services/api";
 
 const STAT_COLORS = {
   total: "bg-blue-100 text-blue-700",
   pending: "bg-amber-100 text-amber-700",
   approved: "bg-emerald-100 text-emerald-700",
-  declined: "bg-red-100 text-red-700",
+  parked: "bg-purple-100 text-purple-700",
 };
 
 function SummaryCard({ icon: Icon, label, value, sub, color }) {
@@ -25,6 +26,7 @@ function SummaryCard({ icon: Icon, label, value, sub, color }) {
 }
 
 export default function Dashboard() {
+  const navigate = useNavigate();
   const [pendingRequests, setPendingRequests] = useState([]);
   const [stats, setStats] = useState({});
   const [recentDecisions, setRecentDecisions] = useState([]);
@@ -47,14 +49,14 @@ export default function Dashboard() {
           notes: r.notes || "",
         }));
         const approved = all.filter((r) => r.status === "Approved").length;
-        const declined = all.filter((r) => r.status === "Declined").length;
+        const parked = all.filter((r) => r.status === "Parked").length;
         const recent = all
-          .filter((r) => r.status === "Approved" || r.status === "Declined")
+          .filter((r) => r.status === "Approved" || r.status === "Parked")
           .sort((a, b) => new Date(b.date_submitted) - new Date(a.date_submitted))
           .slice(0, 3)
           .map((r) => ({
             id: r.request_id,
-            action: r.status === "Approved" ? "Approved" : "Declined",
+            action: r.status === "Approved" ? "Approved" : "Parked",
             barangay: r.barangay,
             time: r.date_submitted
               ? new Date(r.date_submitted).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
@@ -67,7 +69,7 @@ export default function Dashboard() {
             total: all.length,
             pending: pending.length,
             approved,
-            declined,
+            parked,
           });
           setRecentDecisions(recent);
         }
@@ -107,7 +109,7 @@ export default function Dashboard() {
         <SummaryCard icon={FileText} label="Total Requests" value={stats.total ?? 0} sub="All time" color={STAT_COLORS.total} />
         <SummaryCard icon={Clock} label="Pending Review" value={stats.pending ?? 0} sub="Requires your action" color={STAT_COLORS.pending} />
         <SummaryCard icon={CheckCircle2} label="Approved" value={stats.approved ?? 0} sub="Sent to CENRO" color={STAT_COLORS.approved} />
-        <SummaryCard icon={XCircle} label="Declined" value={stats.declined ?? 0} sub="All time" color={STAT_COLORS.declined} />
+        <SummaryCard icon={Ban} label="Parked" value={stats.parked ?? 0} sub="Not yet accepted" color={STAT_COLORS.parked} />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -119,9 +121,12 @@ export default function Dashboard() {
                 {pendingRequests.length}
               </span>
             </div>
-            <a href="/mayorsoffice/requests" className="text-xs font-semibold text-[#1b4de4] hover:text-[#153eb8]">
+            <button
+              onClick={() => navigate("/mayorsoffice/requests")}
+              className="text-xs font-semibold text-[#1b4de4] hover:text-[#153eb8]"
+            >
               View all requests
-            </a>
+            </button>
           </div>
           <div className="divide-y divide-slate-50">
             {pendingRequests.map((req) => (
@@ -152,7 +157,10 @@ export default function Dashboard() {
         <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-5">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-[15px] font-bold text-slate-900">Recent Decisions</h2>
-            <button className="text-xs font-semibold text-slate-500 hover:text-[#1b4de4] border border-slate-200 rounded-lg px-2.5 py-1 transition-colors">
+            <button
+              onClick={() => navigate("/mayorsoffice/requests")}
+              className="text-xs font-semibold text-slate-500 hover:text-[#1b4de4] border border-slate-200 rounded-lg px-2.5 py-1 transition-colors"
+            >
               View all
             </button>
           </div>
@@ -160,10 +168,10 @@ export default function Dashboard() {
             {recentDecisions.map((item) => (
               <div key={item.id} className="flex items-start gap-3">
                 <div className={`mt-0.5 w-2.5 h-2.5 rounded-full shrink-0 ${
-                  item.action === "Approved" ? "bg-emerald-500 shadow-[0_0_6px_#10b981]" : "bg-red-500 shadow-[0_0_6px_#ef4444]"
+                  item.action === "Approved" ? "bg-emerald-500 shadow-[0_0_6px_#10b981]" : "bg-purple-500 shadow-[0_0_6px_#a855f7]"
                 }`}></div>
                 <div>
-                  <p className="text-xs font-medium text-slate-700">{item.id} — <span className={item.action === "Approved" ? "text-emerald-600" : "text-red-600"}>{item.action}</span></p>
+                  <p className="text-xs font-medium text-slate-700">{item.id} — <span className={item.action === "Approved" ? "text-emerald-600" : "text-purple-600"}>{item.action}</span></p>
                   <p className="text-[11px] text-slate-400 mt-0.5">{item.barangay} · {item.time}</p>
                 </div>
               </div>
@@ -183,8 +191,8 @@ export default function Dashboard() {
             <p className="text-xs text-blue-600/80">Barangays submit TROID bot deployment requests through the system.</p>
           </div>
           <div className="rounded-xl border border-emerald-100 bg-emerald-50/50 p-4">
-            <p className="text-xs font-semibold text-emerald-700 mb-1">2. Approve or Decline</p>
-            <p className="text-xs text-emerald-600/80">You are the only one authorized to approve or decline requests from barangays.</p>
+            <p className="text-xs font-semibold text-emerald-700 mb-1">2. Approve or Park</p>
+            <p className="text-xs text-emerald-600/80">You are the only one authorized to approve or park requests from barangays.</p>
           </div>
           <div className="rounded-xl border border-amber-100 bg-amber-50/50 p-4">
             <p className="text-xs font-semibold text-amber-700 mb-1">3. CENRO Takes Over</p>
