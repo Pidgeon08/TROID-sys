@@ -8,8 +8,10 @@ export const REQUEST_STATUS_STYLES = {
   "Pending Mayor Approval": "bg-amber-50 text-amber-700",
   "Pending Admin Approval": "bg-blue-50 text-blue-700",
   Processing: "bg-sky-50 text-sky-700",
+  Completed: "bg-emerald-50 text-emerald-700",
+  Segregated: "bg-purple-50 text-purple-700",
   "Pending Verification": "bg-orange-50 text-orange-700",
-  Verified: "bg-emerald-50 text-emerald-700",
+  Verified: "bg-slate-100 text-slate-600",
 };
 
 export const TRASH_CATEGORIES = ["Plastic", "Metal", "Glass", "Paper/Cardboard", "Organic/Biodegradable", "Other"];

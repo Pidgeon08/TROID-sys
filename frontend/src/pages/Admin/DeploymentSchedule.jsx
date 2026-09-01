@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useOutletContext } from "react-router-dom";
 import { createPortal } from "react-dom";
 import {
@@ -16,6 +16,7 @@ import {
   Eye,
   X,
   Search,
+  AlertTriangle,
 } from "lucide-react";
 import { api } from '../../services/api';
 import { logAudit } from '../../services/auditLog';
@@ -106,8 +107,32 @@ function Cell({ entry, onClick, dateObj }) {
   );
 }
 
-function ScheduleModal({ bots, operators, approvedRequests, scheduledRequestIds = new Set(), onClose, onSave, onReschedule, onViewRequest, prefillBot, prefillZone, schedule, editingSchedule }) {
+function ScheduleModal({ bots, operators, approvedRequests, priorityBarangays = new Set(), scheduledRequestIds = new Set(), onClose, onSave, onReschedule, onViewRequest, prefillBot, prefillZone, schedule, editingSchedule }) {
   const isEditing = !!editingSchedule;
+  const [isRequestListOpen, setIsRequestListOpen] = useState(false);
+  const requestDropdownRef = useRef(null);
+
+  useEffect(() => {
+    if (!isRequestListOpen) return;
+    const handleClickOutside = (e) => {
+      if (requestDropdownRef.current && !requestDropdownRef.current.contains(e.target)) {
+        setIsRequestListOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isRequestListOpen]);
+
+  const requestBarangay = (r) => r.location?.barangay || r.requestedBy?.barangay || '';
+  const isPriorityRequest = (r) => priorityBarangays.has(requestBarangay(r));
+
+  // Priority-area requests surface first, so the barangays TROID flagged as needing a
+  // follow-up are the easiest to pick when scheduling a TROID-assisted cleanup.
+  const orderedRequests = [...approvedRequests].sort((a, b) => {
+    const aPriority = isPriorityRequest(a) ? 0 : 1;
+    const bPriority = isPriorityRequest(b) ? 0 : 1;
+    return aPriority - bPriority;
+  });
 
   const [selectedBots, setSelectedBots] = useState(
     isEditing ? [editingSchedule.botId] : (prefillBot ? [prefillBot] : [])
@@ -129,11 +154,11 @@ function ScheduleModal({ bots, operators, approvedRequests, scheduledRequestIds 
 
   const isSelfSlot = (botId, date) => isEditing && String(botId) === String(editingSchedule.botId) && date === editingSchedule.day;
 
-  const handleRequestChange = (e) => {
-    const id = e.target.value;
+  const selectRequest = (id) => {
     setSelectedRequestId(id);
+    setIsRequestListOpen(false);
     const req = approvedRequests.find((r) => r.id === id);
-    setZone(req ? req.location?.barangay || req.requestedBy?.barangay || '' : '');
+    setZone(req ? requestBarangay(req) : '');
     if (req?.preferredDate) {
       handleDateChange({ target: { value: req.preferredDate } });
     }
@@ -271,28 +296,61 @@ function ScheduleModal({ bots, operators, approvedRequests, scheduledRequestIds 
               </div>
             ) : (
               <div className="flex items-center gap-2">
-                <div className="relative flex-1">
-                  <select
-                    value={selectedRequestId}
-                    onChange={handleRequestChange}
-                    className="w-full rounded-lg border border-slate-200 bg-white py-2.5 px-3 text-sm text-slate-700 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30 appearance-none"
+                <div className="relative flex-1" ref={requestDropdownRef}>
+                  <button
+                    type="button"
+                    onClick={() => setIsRequestListOpen((v) => !v)}
+                    className="w-full flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white py-2.5 px-3 text-sm text-left outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
                   >
-                    <option value="">-- Select Approved Request --</option>
-                    {approvedRequests.map((r) => {
-                      const isScheduled = scheduledRequestIds.has(r.id);
-                      return (
-                        <option
-                          key={r.id}
-                          value={r.id}
-                          disabled={isScheduled}
-                          className={isScheduled ? "text-slate-400" : ""}
-                        >
-                          {r.id} - {r.location?.barangay || r.requestedBy?.barangay || 'Unknown zone'}{isScheduled ? " (Scheduled)" : ""}
-                        </option>
-                      );
-                    })}
-                  </select>
-                  <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                    {selectedRequestId ? (
+                      (() => {
+                        const selected = approvedRequests.find((r) => r.id === selectedRequestId);
+                        const selectedIsPriority = selected && isPriorityRequest(selected);
+                        return (
+                          <span className={`flex items-center gap-1.5 truncate ${selectedIsPriority ? 'text-amber-700 font-semibold' : 'text-slate-700'}`}>
+                            {selectedIsPriority && <AlertTriangle size={14} className="shrink-0 text-amber-500" />}
+                            <span className="truncate">{selectedRequestId} - {selected ? requestBarangay(selected) || 'Unknown zone' : ''}</span>
+                          </span>
+                        );
+                      })()
+                    ) : (
+                      <span className="text-slate-400">-- Select Approved Request --</span>
+                    )}
+                    <ChevronDown className="shrink-0 w-4 h-4 text-slate-400" />
+                  </button>
+
+                  {isRequestListOpen && (
+                    <div className="absolute z-10 mt-1 w-full max-h-64 overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg py-1">
+                      {orderedRequests.length === 0 && (
+                        <p className="px-3 py-2 text-sm text-slate-400">No approved requests available.</p>
+                      )}
+                      {orderedRequests.map((r) => {
+                        const isScheduled = scheduledRequestIds.has(r.id);
+                        const priority = isPriorityRequest(r);
+                        return (
+                          <button
+                            type="button"
+                            key={r.id}
+                            disabled={isScheduled}
+                            onClick={() => selectRequest(r.id)}
+                            className={`w-full flex items-center gap-1.5 px-3 py-2 text-sm text-left transition-colors ${
+                              isScheduled
+                                ? 'text-slate-400 cursor-not-allowed'
+                                : priority
+                                ? 'text-amber-700 font-semibold hover:bg-amber-50'
+                                : 'text-slate-700 hover:bg-slate-50'
+                            }`}
+                            title={priority ? 'Priority area — flagged for a TROID follow-up cleanup' : undefined}
+                          >
+                            {priority && <AlertTriangle size={14} className={`shrink-0 ${isScheduled ? 'text-slate-400' : 'text-amber-500'}`} />}
+                            <span className="truncate">
+                              {r.id} - {requestBarangay(r) || 'Unknown zone'}{isScheduled ? ' (Scheduled)' : ''}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
                 <button
                   type="button"
@@ -618,6 +676,7 @@ export default function DeploymentSchedule() {
   const [schedule, setSchedule] = useState({});
   const [loading, setLoading] = useState(true);
   const [approvedRequests, setApprovedRequests] = useState([]);
+  const [priorityBarangays, setPriorityBarangays] = useState(new Set());
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [overviewId, setOverviewId] = useState(null);
   const [reschedulingEntry, setReschedulingEntry] = useState(null);
@@ -625,7 +684,7 @@ export default function DeploymentSchedule() {
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([api.boats(), api.operators(), api.deploymentSchedules(), api.requests()]).then(([boatsData, operatorsData, schedulesData, requestsData]) => {
+    Promise.all([api.boats(), api.operators(), api.deploymentSchedules(), api.requests(), api.priorityAreas()]).then(([boatsData, operatorsData, schedulesData, requestsData, priorityData]) => {
       if (cancelled) return;
 
       const mappedBots = boatsData.map((b) => ({
@@ -665,6 +724,7 @@ export default function DeploymentSchedule() {
       setOperators(operatorsData);
       setSchedule(scheduleMap);
       setApprovedRequests(approved);
+      setPriorityBarangays(new Set((priorityData || []).map((p) => p.barangay)));
       setLoading(false);
     }).catch(() => setLoading(false));
 
@@ -1171,6 +1231,7 @@ export default function DeploymentSchedule() {
           bots={bots}
           operators={operators}
           approvedRequests={approvedRequests}
+          priorityBarangays={priorityBarangays}
           scheduledRequestIds={scheduledRequestIds}
           onClose={() => { setShowModal(false); setPrefillBot(""); setPrefillZone(""); setReschedulingEntry(null); }}
           onSave={handleSaveSchedule}

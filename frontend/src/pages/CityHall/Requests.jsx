@@ -23,16 +23,28 @@ const STATUS_STYLES = {
   Pending: "bg-amber-50 text-amber-700",
   Approved: "bg-emerald-50 text-emerald-700",
   Declined: "bg-red-50 text-red-700",
+  Parked: "bg-purple-50 text-purple-700",
   "Pending Mayor Approval": "bg-amber-50 text-amber-700",
   "Pending Admin Approval": "bg-blue-50 text-blue-700",
+  Processing: "bg-sky-50 text-sky-700",
+  Completed: "bg-emerald-50 text-emerald-700",
+  Segregated: "bg-purple-50 text-purple-700",
+  "Pending Verification": "bg-orange-50 text-orange-700",
+  Verified: "bg-slate-100 text-slate-600",
 };
 
 const STATUS_DOT = {
   Pending: "bg-amber-500",
   Approved: "bg-emerald-500",
   Declined: "bg-red-500",
+  Parked: "bg-purple-500",
   "Pending Mayor Approval": "bg-amber-500",
   "Pending Admin Approval": "bg-blue-500",
+  Processing: "bg-sky-500",
+  Completed: "bg-emerald-500",
+  Segregated: "bg-purple-500",
+  "Pending Verification": "bg-orange-500",
+  Verified: "bg-slate-400",
 };
 
 export default function Requests() {

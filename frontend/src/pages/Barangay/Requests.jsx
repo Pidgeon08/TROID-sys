@@ -15,6 +15,8 @@ const BCOL_STATUS_STYLES = {
   Segregated: "bg-purple-50 text-purple-700",
   "Pending Mayor Approval": "bg-amber-50 text-amber-700",
   "Pending Admin Approval": "bg-blue-50 text-blue-700",
+  "Pending Verification": "bg-orange-50 text-orange-700",
+  Verified: "bg-slate-100 text-slate-600",
 };
 
 const BCOL_STATUS_DOT = {
@@ -27,6 +29,8 @@ const BCOL_STATUS_DOT = {
   Segregated: "bg-purple-500",
   "Pending Mayor Approval": "bg-amber-500",
   "Pending Admin Approval": "bg-blue-500",
+  "Pending Verification": "bg-orange-500",
+  Verified: "bg-slate-400",
 };
 
 export default function BarangayRequests({ currentUser }) {

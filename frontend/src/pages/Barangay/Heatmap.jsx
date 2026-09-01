@@ -95,6 +95,9 @@ function HeatmapLayer({ points, type }) {
   return null;
 }
 
+// Default map center when no heatmap data is available yet: San Fernando, La Union.
+const SAN_FERNANDO_CENTER = [16.6195, 120.314];
+
 const Heatmap = ({ currentUser }) => {
   const barangayName = currentUser?.location || '';
   const [selectedCategory, setSelectedCategory] = useState('All');
@@ -167,7 +170,7 @@ const Heatmap = ({ currentUser }) => {
 
   const selectedLoc = {
     name: selectedCategory === 'All' ? 'All Categories' : selectedCategory,
-    center: heatmapData.length > 0 ? [heatmapData[0][0], heatmapData[0][1]] : [14.5995, 120.9842],
+    center: heatmapData.length > 0 ? [heatmapData[0][0], heatmapData[0][1]] : SAN_FERNANDO_CENTER,
     zoom: 15,
     points: heatmapData,
     categories,

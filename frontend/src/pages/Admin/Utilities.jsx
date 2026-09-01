@@ -1,14 +1,20 @@
 import { useState } from "react";
-import { ClipboardList, Settings as SettingsIcon } from "lucide-react";
+import { useOutletContext } from "react-router-dom";
+import { ClipboardList, Settings as SettingsIcon, BookOpen } from "lucide-react";
 import AuditLogs from "./AuditLogs";
 import Settings from "./Settings";
-
-const TABS = [
-  { key: "settings", label: "Settings", icon: SettingsIcon },
-  { key: "audit", label: "Audit Logs", icon: ClipboardList },
-];
+import UserManual from "../../components/UserManual";
 
 export default function Utilities() {
+  const { currentUser } = useOutletContext() || {};
+  const isAdmin = currentUser?.role === "admin";
+
+  const TABS = [
+    { key: "settings", label: "Settings", icon: SettingsIcon },
+    { key: "manual", label: "User Manual", icon: BookOpen },
+    ...(isAdmin ? [{ key: "audit", label: "Audit Logs", icon: ClipboardList }] : []),
+  ];
+
   const [activeTab, setActiveTab] = useState("settings");
 
   return (
@@ -28,7 +34,13 @@ export default function Utilities() {
         ))}
       </div>
 
-      {activeTab === "settings" ? <Settings /> : <AuditLogs />}
+      {activeTab === "settings" && <Settings />}
+      {activeTab === "manual" && (
+        <div className="max-w-350 mx-auto bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-6">
+          <UserManual />
+        </div>
+      )}
+      {activeTab === "audit" && isAdmin && <AuditLogs />}
     </div>
   );
 }

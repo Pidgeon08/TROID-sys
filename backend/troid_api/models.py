@@ -34,6 +34,7 @@ class User(models.Model):
         ('mayorsoffice', "Mayor's Office"),
         ('barangay', 'Barangay'),
         ('ngo', 'NGO'),
+        ('operator', 'Operator'),
     ]
     STATUS_CHOICES = [
         ('pending', 'Pending'),
@@ -57,6 +58,7 @@ class User(models.Model):
         'mayorsoffice': '04',
         'barangay': '05',
         'ngo': '06',
+        'operator': '07',
     }
 
     def save(self, *args, **kwargs):
@@ -90,6 +92,9 @@ class Operator(models.Model):
     assigned_bot = models.ForeignKey(Boat, on_delete=models.SET_NULL, null=True, blank=True, related_name='operators')
     availability = models.CharField(max_length=20, choices=AVAILABILITY_CHOICES, default='available')
     archived = models.BooleanField(default=False)
+    # The operator's mobile-app login. Nullable so existing roster-only operators (created
+    # before accounts existed) keep working without one.
+    user = models.OneToOneField(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='operator_profile')
 
     def save(self, *args, **kwargs):
         if not self.operator_id:
@@ -225,6 +230,23 @@ class DeploymentSchedule(models.Model):
 
     def __str__(self):
         return f"{self.bot.name} - {self.day}"
+
+class PriorityArea(models.Model):
+    """Auto-identified when a barangay's recent trash reports cross a volume threshold —
+    see check_and_schedule_priority_followup(). Records the follow-up DeploymentSchedule
+    entry created for it (if a bot was available) so it can be audited/tested."""
+    barangay = models.CharField(max_length=100)
+    total_bags = models.IntegerField()
+    window_days = models.IntegerField(default=30)
+    identified_at = models.DateTimeField(auto_now_add=True)
+    deployment_schedule = models.ForeignKey(
+        DeploymentSchedule, on_delete=models.SET_NULL, null=True, blank=True, related_name='priority_areas'
+    )
+    bot = models.ForeignKey(Boat, on_delete=models.SET_NULL, null=True, blank=True)
+    scheduled_day = models.CharField(max_length=20, blank=True)
+
+    def __str__(self):
+        return f"{self.barangay} - {self.total_bags} bags"
 
 class LandfillRecord(models.Model):
     record_id = models.CharField(max_length=20, unique=True)

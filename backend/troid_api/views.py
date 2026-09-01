@@ -1,6 +1,7 @@
 import re
 import secrets
 import string
+from datetime import timedelta
 from zoneinfo import ZoneInfo
 
 from rest_framework import status, viewsets
@@ -17,7 +18,7 @@ except ImportError:
     from rest_framework.routers import DefaultRouter
 
 from .models import (
-    Boat, DetectionEvent, User, Operator, Request, DeploymentSchedule,
+    Boat, DetectionEvent, User, Operator, Request, DeploymentSchedule, PriorityArea,
     LandfillRecord, RecyclingRecord, SegregationRecord,
     AuditLog, HeatmapData, Photo, StatusHistory, CollectionArea, Notification
 )
@@ -25,8 +26,9 @@ from .serializers import (
     BoatSerializer, UserSerializer, OperatorSerializer, RequestSerializer,
     DeploymentScheduleSerializer, LandfillRecordSerializer, RecyclingRecordSerializer,
     SegregationRecordSerializer, AuditLogSerializer, HeatmapDataSerializer, LoginSerializer,
-    CollectionAreaSerializer, NotificationSerializer
+    CollectionAreaSerializer, NotificationSerializer, PriorityAreaSerializer
 )
+from .priority import check_and_schedule_priority_followup
 
 SPECIAL_CHARS = '!@#$%^&*()-_=+?'
 
@@ -326,6 +328,49 @@ class OperatorViewSet(viewsets.ModelViewSet):
     queryset = Operator.objects.all()
     serializer_class = OperatorSerializer
 
+    def create(self, request, *args, **kwargs):
+        email = (request.data.get('email') or '').strip()
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        operator = serializer.save()
+
+        email_sent = None
+        if email:
+            if User.objects.filter(email=email).exists():
+                operator.delete()
+                return Response({'error': f'An account with email {email} already exists.'}, status=status.HTTP_400_BAD_REQUEST)
+            temp_password = generate_temp_password()
+            account = User.objects.create(
+                name=operator.name,
+                email=email,
+                role='operator',
+                status='active',
+                password=temp_password,
+                must_change_password=True,
+            )
+            email_sent = send_temp_password_email(account, temp_password)
+            operator.user = account
+            operator.save(update_fields=['user'])
+
+        headers = self.get_success_headers(serializer.data)
+        data = self.get_serializer(operator).data
+        if email:
+            data = dict(data)
+            data['email_sent'] = email_sent
+        return Response(data, status=status.HTTP_201_CREATED, headers=headers)
+
+    def update(self, request, *args, **kwargs):
+        response = super().update(request, *args, **kwargs)
+        operator = self.get_object()
+        if operator.user:
+            # An archived operator shouldn't keep mobile-app access; reactivating restores it.
+            target_status = 'archived' if operator.archived else 'active'
+            if operator.user.status != target_status:
+                operator.user.status = target_status
+                operator.user.save(update_fields=['status'])
+            response.data = self.get_serializer(operator).data
+        return response
+
 
 class RequestViewSet(viewsets.ModelViewSet):
     queryset = Request.objects.all()
@@ -508,6 +553,7 @@ class RequestViewSet(viewsets.ModelViewSet):
             state='current',
             details=notes,
         )
+        check_and_schedule_priority_followup(req.barangay)
         if req.status == 'completed':
             notify_request_update(
                 req,
@@ -536,7 +582,7 @@ class RequestViewSet(viewsets.ModelViewSet):
         Unsupported cleanups have no bot involved, so the report is just the user's count."""
         reqs = Request.objects.filter(
             archived=False, status__in=['completed', 'segregated', 'pending_verification', 'verified']
-        ).exclude(trash_categories={})
+        ).exclude(trash_categories={}).select_related('collection_area')
 
         schedules_by_request = {
             s.request_id: s.cleanup_type
@@ -559,6 +605,17 @@ class RequestViewSet(viewsets.ModelViewSet):
                 latitude = req.bot_id.last_latitude
                 longitude = req.bot_id.last_longitude
 
+            collection_area = None
+            if req.collection_area:
+                collection_area = {
+                    'id': req.collection_area.id,
+                    'area_id': req.collection_area.area_id,
+                    'name': req.collection_area.name,
+                    'points': req.collection_area.points,
+                    'closed': req.collection_area.closed,
+                    'color': req.collection_area.color,
+                }
+
             results.append({
                 'request_id': req.request_id,
                 'barangay': req.barangay or req.location_name,
@@ -572,6 +629,7 @@ class RequestViewSet(viewsets.ModelViewSet):
                 'user_total': sum(user_categories.values()),
                 'bags': req.bags,
                 'weight_kg': req.weight_kg,
+                'collection_area': collection_area,
             })
         return Response(results)
 
@@ -701,6 +759,11 @@ class DeploymentScheduleViewSet(viewsets.ModelViewSet):
     serializer_class = DeploymentScheduleSerializer
 
 
+class PriorityAreaViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = PriorityArea.objects.order_by('-identified_at')
+    serializer_class = PriorityAreaSerializer
+
+
 class LandfillRecordViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = LandfillRecord.objects.all()
     serializer_class = LandfillRecordSerializer
@@ -740,6 +803,7 @@ router.register(r'users', UserViewSet)
 router.register(r'operators', OperatorViewSet)
 router.register(r'requests', RequestViewSet)
 router.register(r'deployment-schedules', DeploymentScheduleViewSet)
+router.register(r'priority-areas', PriorityAreaViewSet)
 router.register(r'landfill-records', LandfillRecordViewSet)
 router.register(r'recycling-records', RecyclingRecordViewSet)
 router.register(r'segregation-records', SegregationRecordViewSet)

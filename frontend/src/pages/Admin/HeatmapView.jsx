@@ -1,10 +1,11 @@
-import { MapContainer, TileLayer, useMap, Marker, ZoomControl } from 'react-leaflet';
+import { MapContainer, TileLayer, useMap, Marker, Polygon, ZoomControl } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet.heat';
-import { Calendar, Radar, ClipboardList, ArrowRightLeft, Map as MapIcon } from 'lucide-react';
+import { Calendar, Radar, ClipboardList, ArrowRightLeft, Map as MapIcon, ListFilter, X } from 'lucide-react';
 import { api } from '../../services/api';
+import { SearchBar } from '../../components/ui/SearchBar';
 
 /**
  * ChangeView Component
@@ -105,6 +106,9 @@ function HeatmapLayer({ points, type }) {
   return null;
 }
 
+// Default map center when no heatmap data is available yet: San Fernando, La Union.
+const SAN_FERNANDO_CENTER = [16.6195, 120.314];
+
 /**
  * Interactive Creek Mock Data
  * Holds coordinates and metadata matching the revised screenshot labels.
@@ -126,6 +130,10 @@ const HeatmapView = () => {
   const [comparisonSource, setComparisonSource] = useState('troid'); // 'troid' | 'user'
   const [comparisonLoading, setComparisonLoading] = useState(true);
   const [selectedRequestId, setSelectedRequestId] = useState(null);
+  const [isRequestModalOpen, setIsRequestModalOpen] = useState(false);
+  const [requestSearch, setRequestSearch] = useState('');
+  const [requestBarangayFilter, setRequestBarangayFilter] = useState('All');
+  const [requestStatusFilter, setRequestStatusFilter] = useState('All');
 
   useEffect(() => {
     let cancelled = false;
@@ -152,6 +160,34 @@ const HeatmapView = () => {
 
   // Scope the map + category breakdown to the selected request, or fall back to all drives.
   const comparisonScope = selectedDrive ? [selectedDrive] : comparisonData;
+
+  const requestBarangays = useMemo(
+    () => Array.from(new Set(comparisonData.map((d) => d.barangay).filter(Boolean))).sort(),
+    [comparisonData]
+  );
+  const requestStatuses = useMemo(
+    () => Array.from(new Set(comparisonData.map((d) => d.status).filter(Boolean))).sort(),
+    [comparisonData]
+  );
+
+  const filteredComparisonData = comparisonData.filter((d) => {
+    const q = requestSearch.trim().toLowerCase();
+    const matchesSearch = !q || d.request_id.toLowerCase().includes(q) || (d.barangay || '').toLowerCase().includes(q);
+    const matchesBarangay = requestBarangayFilter === 'All' || d.barangay === requestBarangayFilter;
+    const matchesStatus = requestStatusFilter === 'All' || d.status === requestStatusFilter;
+    return matchesSearch && matchesBarangay && matchesStatus;
+  });
+
+  // Polygon overlay for the selected request's collection area, if one was drawn for it.
+  const selectedAreaPoints = selectedDrive?.collection_area?.points?.length >= 3
+    ? selectedDrive.collection_area.points
+    : null;
+  const selectedAreaCenter = selectedAreaPoints
+    ? selectedAreaPoints.reduce(
+        (acc, p) => [acc[0] + p[0] / selectedAreaPoints.length, acc[1] + p[1] / selectedAreaPoints.length],
+        [0, 0]
+      )
+    : null;
 
   const comparisonPoints = comparisonScope
     .filter((d) => typeof d.latitude === 'number' && typeof d.longitude === 'number')
@@ -239,7 +275,7 @@ const HeatmapView = () => {
 
   const selectedBot = {
     name: 'All Detections',
-    center: heatmapData.length > 0 ? [heatmapData[0][0], heatmapData[0][1]] : [14.5995, 120.9842],
+    center: heatmapData.length > 0 ? [heatmapData[0][0], heatmapData[0][1]] : SAN_FERNANDO_CENTER,
     zoom: 15,
     points: heatmapData,
     categories,
@@ -598,20 +634,34 @@ const HeatmapView = () => {
           </div>
         </div>
 
-        {selectedDrive && (
-          <div className="flex items-center justify-between gap-3 rounded-xl border border-blue-100 bg-blue-50/60 px-4 py-2.5">
+        <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-100 bg-slate-50/60 px-4 py-2.5">
+          {selectedDrive ? (
             <span className="text-xs font-semibold text-slate-700">
               Showing TROID bot output for <span className="text-[#1b4de4]">{selectedDrive.request_id}</span>
               {selectedDrive.barangay ? ` — ${selectedDrive.barangay}` : ''}
+              {selectedAreaPoints ? ' · collection area shown on map' : ''}
             </span>
+          ) : (
+            <span className="text-xs font-semibold text-slate-500">Showing all completed cleanup drives</span>
+          )}
+          <div className="flex items-center gap-2 shrink-0">
+            {selectedDrive && (
+              <button
+                onClick={() => setSelectedRequestId(null)}
+                className="rounded-lg px-2.5 py-1 text-xs font-semibold text-[#1b4de4] hover:bg-blue-100 transition-colors"
+              >
+                Show all requests
+              </button>
+            )}
             <button
-              onClick={() => setSelectedRequestId(null)}
-              className="shrink-0 rounded-lg px-2.5 py-1 text-xs font-semibold text-[#1b4de4] hover:bg-blue-100 transition-colors"
+              onClick={() => setIsRequestModalOpen(true)}
+              className="flex items-center gap-1.5 rounded-lg bg-[#1b4de4] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#153eb8] transition-colors"
             >
-              Show all requests
+              <ListFilter className="w-3.5 h-3.5" />
+              Select request
             </button>
           </div>
-        )}
+        </div>
 
         {comparisonLoading ? (
           <div className="flex items-center justify-center h-75">
@@ -623,11 +673,11 @@ const HeatmapView = () => {
           </div>
         ) : (
           <>
-            <div className="grid grid-cols-1 lg:grid-cols-[1.3fr_1fr] gap-5">
+            <div className="grid grid-cols-1 lg:grid-cols-[3fr_1fr] gap-5">
               {/* Comparison heat map */}
-              <div className="rounded-xl overflow-hidden border border-slate-100 relative min-h-80">
+              <div className="rounded-xl overflow-hidden border border-slate-100 relative min-h-130">
                 <MapContainer
-                  center={comparisonPoints.length > 0 ? [comparisonPoints[0][0], comparisonPoints[0][1]] : [14.5995, 120.9842]}
+                  center={comparisonPoints.length > 0 ? [comparisonPoints[0][0], comparisonPoints[0][1]] : SAN_FERNANDO_CENTER}
                   zoom={14}
                   zoomControl={false}
                   style={{ height: '100%', width: '100%', position: 'absolute', top: 0, left: 0 }}
@@ -637,8 +687,18 @@ const HeatmapView = () => {
                     attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
                   />
                   <HeatmapLayer points={comparisonPoints} type="Trash Collected" />
-                  {selectedDrive && typeof selectedDrive.latitude === 'number' && typeof selectedDrive.longitude === 'number' && (
-                    <ChangeView center={[selectedDrive.latitude, selectedDrive.longitude]} zoom={16} />
+                  {selectedAreaPoints && (
+                    <Polygon
+                      positions={selectedAreaPoints}
+                      pathOptions={{
+                        color: selectedDrive.collection_area.color || '#1b4de4',
+                        weight: 2,
+                        fillOpacity: 0.12,
+                      }}
+                    />
+                  )}
+                  {selectedDrive && (selectedAreaCenter || (typeof selectedDrive.latitude === 'number' && typeof selectedDrive.longitude === 'number')) && (
+                    <ChangeView center={selectedAreaCenter || [selectedDrive.latitude, selectedDrive.longitude]} zoom={16} />
                   )}
                   <ZoomControl position="bottomright" />
                 </MapContainer>
@@ -689,52 +749,120 @@ const HeatmapView = () => {
                 </div>
               </div>
             </div>
-
-            {/* Per-drive comparison table */}
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="text-left text-slate-400 uppercase tracking-wider border-b border-slate-100">
-                    <th className="py-2 pr-4 font-semibold">Request</th>
-                    <th className="py-2 pr-4 font-semibold">Barangay</th>
-                    <th className="py-2 pr-4 font-semibold">Date</th>
-                    <th className="py-2 pr-4 font-semibold text-right">TROID Detected</th>
-                    <th className="py-2 pr-4 font-semibold text-right">User Reported</th>
-                    <th className="py-2 font-semibold text-right">Difference</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-50">
-                  {comparisonData.map((d) => {
-                    const diff = (d.troid_total || 0) - (d.user_total || 0);
-                    const isSelected = selectedRequestId === d.request_id;
-                    return (
-                      <tr
-                        key={d.request_id}
-                        onClick={() => setSelectedRequestId(isSelected ? null : d.request_id)}
-                        title="Select to view this request's TROID bot output"
-                        className={`cursor-pointer transition-colors ${
-                          isSelected ? 'bg-blue-50 text-slate-900' : 'text-slate-700 hover:bg-slate-50'
-                        }`}
-                      >
-                        <td className="py-2.5 pr-4 font-semibold">{d.request_id}</td>
-                        <td className="py-2.5 pr-4">{d.barangay || '—'}</td>
-                        <td className="py-2.5 pr-4 text-slate-500">
-                          {d.date_submitted ? new Date(d.date_submitted).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
-                        </td>
-                        <td className="py-2.5 pr-4 text-right font-semibold text-[#1b4de4]">{d.troid_total}</td>
-                        <td className="py-2.5 pr-4 text-right font-semibold text-emerald-600">{d.user_total}</td>
-                        <td className={`py-2.5 text-right font-bold ${diff === 0 ? 'text-slate-400' : diff > 0 ? 'text-amber-600' : 'text-rose-600'}`}>
-                          {diff > 0 ? `+${diff}` : diff}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
           </>
         )}
       </div>
+      )}
+
+      {/* Request selection modal: search + filter, opened via "Select request" */}
+      {isRequestModalOpen && (
+        <div className="fixed inset-0 z-1100 flex items-center justify-center bg-slate-900/40 p-4">
+          <div className="w-full max-w-3xl max-h-[85vh] rounded-xl bg-white border border-slate-200 flex flex-col">
+            <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-slate-100">
+              <div>
+                <h3 className="text-sm font-semibold text-slate-800">Select a cleanup request</h3>
+                <p className="text-xs text-slate-500 mt-0.5">Choose a request to view its TROID bot output and collection area on the map.</p>
+              </div>
+              <button
+                onClick={() => setIsRequestModalOpen(false)}
+                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-3 px-6 py-4 border-b border-slate-100">
+              <SearchBar
+                value={requestSearch}
+                onChange={setRequestSearch}
+                placeholder="Search by request ID or barangay..."
+                className="flex-1"
+              />
+              <select
+                value={requestBarangayFilter}
+                onChange={(e) => setRequestBarangayFilter(e.target.value)}
+                className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
+              >
+                <option value="All">All barangays</option>
+                {requestBarangays.map((b) => (
+                  <option key={b} value={b}>{b}</option>
+                ))}
+              </select>
+              <select
+                value={requestStatusFilter}
+                onChange={(e) => setRequestStatusFilter(e.target.value)}
+                className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
+              >
+                <option value="All">All statuses</option>
+                {requestStatuses.map((s) => (
+                  <option key={s} value={s} className="capitalize">{s}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="overflow-y-auto overflow-x-auto px-6 py-2 flex-1">
+              {filteredComparisonData.length === 0 ? (
+                <div className="flex items-center justify-center h-40">
+                  <span className="text-sm font-medium text-slate-400">No requests match your search/filters.</span>
+                </div>
+              ) : (
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-left text-slate-400 uppercase tracking-wider border-b border-slate-100 sticky top-0 bg-white">
+                      <th className="py-2 pr-4 font-medium">Request</th>
+                      <th className="py-2 pr-4 font-medium">Barangay</th>
+                      <th className="py-2 pr-4 font-medium">Date</th>
+                      <th className="py-2 pr-4 font-medium">Area</th>
+                      <th className="py-2 pr-4 font-medium text-right">TROID Detected</th>
+                      <th className="py-2 pr-4 font-medium text-right">User Reported</th>
+                      <th className="py-2 font-medium text-right">Difference</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50">
+                    {filteredComparisonData.map((d) => {
+                      const diff = (d.troid_total || 0) - (d.user_total || 0);
+                      const isSelected = selectedRequestId === d.request_id;
+                      return (
+                        <tr
+                          key={d.request_id}
+                          onClick={() => {
+                            setSelectedRequestId(isSelected ? null : d.request_id);
+                            setIsRequestModalOpen(false);
+                          }}
+                          title="Select to view this request's TROID bot output"
+                          className={`cursor-pointer transition-colors ${
+                            isSelected ? 'bg-blue-50 text-slate-900' : 'text-slate-700 hover:bg-slate-50'
+                          }`}
+                        >
+                          <td className="py-2.5 pr-4 font-semibold">{d.request_id}</td>
+                          <td className="py-2.5 pr-4">{d.barangay || '—'}</td>
+                          <td className="py-2.5 pr-4 text-slate-500">
+                            {d.date_submitted ? new Date(d.date_submitted).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
+                          </td>
+                          <td className="py-2.5 pr-4 text-slate-500">{d.collection_area?.name || '—'}</td>
+                          <td className="py-2.5 pr-4 text-right font-semibold text-[#1b4de4]">{d.troid_total}</td>
+                          <td className="py-2.5 pr-4 text-right font-semibold text-emerald-600">{d.user_total}</td>
+                          <td className={`py-2.5 text-right font-bold ${diff === 0 ? 'text-slate-400' : diff > 0 ? 'text-amber-600' : 'text-rose-600'}`}>
+                            {diff > 0 ? `+${diff}` : diff}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            <div className="flex justify-end px-6 py-4 border-t border-slate-100">
+              <button
+                onClick={() => setIsRequestModalOpen(false)}
+                className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       </>

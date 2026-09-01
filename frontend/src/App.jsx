@@ -151,7 +151,7 @@ function App() {
             <Route path="/mayorsoffice/requests" element={<CityHallRequests />} />
             <Route path="/mayorsoffice/requests/:id" element={<CityHallViewRequest />} />
             <Route path="/mayorsoffice/settings" element={<Settings />} />
-            <Route path="/mayorsoffice/utilities" element={<Settings />} />
+            <Route path="/mayorsoffice/utilities" element={<Utilities />} />
           </Route>
 
           {/* BARANGAY ROUTES (also used by NGO — same feature set) */}
@@ -164,7 +164,7 @@ function App() {
             <Route path="/barangay/requests/:id" element={<BarangayViewRequest />} />
             <Route path="/barangay/areas" element={<BarangayAreas />} />
             <Route path="/barangay/settings" element={<Settings />} />
-            <Route path="/barangay/utilities" element={<Settings />} />
+            <Route path="/barangay/utilities" element={<Utilities />} />
           </Route>
 
         </Route>

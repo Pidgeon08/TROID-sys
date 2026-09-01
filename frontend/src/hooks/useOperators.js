@@ -21,6 +21,9 @@ export function useOperators() {
           availability: o.availability === 'assigned' ? 'Assigned' : o.availability === 'unavailable' ? 'Unavailable' : 'Available',
           assignedBot: o.assigned_bot,
           archived: o.archived,
+          email: o.email || null,
+          accountStatus: o.account_status || null,
+          userId: o.user || null,
         })) : [];
         if (!cancelled) {
           setOperators(mapped);

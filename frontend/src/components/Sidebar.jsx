@@ -65,7 +65,7 @@ const navItems = {
 
   return (
     <>
-    <aside className="w-[260px] bg-[#0c165a] text-white flex flex-col shadow-[4px_0_24px_rgba(0,0,0,0.15)] z-10 shrink-0">
+    <aside className="w-[260px] bg-[#0c165a] text-white flex flex-col shadow-[4px_0_24px_rgba(0,0,0,0.15)] z-10 shrink-0 print:hidden">
       {/* Brand Header */}
       <div className="p-6 flex items-center gap-3.5 border-b border-white/5">
         {/* CSS Mockup of San Fernando City Seal */}

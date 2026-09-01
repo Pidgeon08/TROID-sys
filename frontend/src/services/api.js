@@ -103,6 +103,8 @@ export const api = {
   updateDeploymentSchedule: (id, data) => api.put(`/deployment-schedules/${id}/`, data),
   deleteDeploymentSchedule: (id) => api.delete(`/deployment-schedules/${id}/`),
 
+  priorityAreas: () => api.get('/priority-areas/'),
+
   landfillRecords: () => api.get('/landfill-records/'),
 
   recyclingRecords: () => api.get('/recycling-records/'),

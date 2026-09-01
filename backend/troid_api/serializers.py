@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Boat, DetectionEvent, User, Operator, Request, StatusHistory, Photo, DeploymentSchedule, LandfillRecord, RecyclingRecord, SegregationRecord, AuditLog, HeatmapData, CollectionArea, Notification
+from .models import Boat, DetectionEvent, User, Operator, Request, StatusHistory, Photo, DeploymentSchedule, PriorityArea, LandfillRecord, RecyclingRecord, SegregationRecord, AuditLog, HeatmapData, CollectionArea, Notification
 
 class DetectionEventSerializer(serializers.ModelSerializer):
     class Meta:
@@ -22,11 +22,21 @@ class LoginSerializer(serializers.Serializer):
     password = serializers.CharField()
 
 class OperatorSerializer(serializers.ModelSerializer):
+    email = serializers.SerializerMethodField()
+    account_status = serializers.SerializerMethodField()
+
+    def get_email(self, obj):
+        return obj.user.email if obj.user else None
+
+    def get_account_status(self, obj):
+        return obj.user.status if obj.user else None
+
     class Meta:
         model = Operator
-        fields = ['id', 'operator_id', 'name', 'status', 'assigned_bot', 'availability', 'archived']
+        fields = ['id', 'operator_id', 'name', 'status', 'assigned_bot', 'availability', 'archived', 'user', 'email', 'account_status']
         extra_kwargs = {
             'operator_id': {'required': False, 'allow_blank': True},
+            'user': {'read_only': True},
         }
 
 class StatusHistorySerializer(serializers.ModelSerializer):
@@ -79,6 +89,16 @@ class DeploymentScheduleSerializer(serializers.ModelSerializer):
     class Meta:
         model = DeploymentSchedule
         fields = ['id', 'bot', 'day', 'status', 'label', 'zone', 'request_id', 'cleanup_type']
+
+class PriorityAreaSerializer(serializers.ModelSerializer):
+    bot_name = serializers.SerializerMethodField()
+
+    def get_bot_name(self, obj):
+        return obj.bot.name if obj.bot else None
+
+    class Meta:
+        model = PriorityArea
+        fields = ['id', 'barangay', 'total_bags', 'window_days', 'identified_at', 'deployment_schedule', 'bot', 'bot_name', 'scheduled_day']
 
 class LandfillRecordSerializer(serializers.ModelSerializer):
     class Meta:

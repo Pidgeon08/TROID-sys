@@ -11,6 +11,7 @@ import { EmptyState } from "../../components/ui/EmptyState";
 const AVAILABILITY_STYLES = {
   Assigned: "bg-green-50 text-green-800",
   Available: "bg-blue-50 text-blue-700",
+  Unavailable: "bg-red-50 text-red-700",
 };
 
 const QUICK_ACTIONS = [
@@ -48,6 +49,7 @@ export default function OperatorManagement() {
   const [editConfirm, setEditConfirm] = useState(null);
   const [archiveConfirm, setArchiveConfirm] = useState(null);
   const [page, setPage] = useState(1);
+  const [addOperatorError, setAddOperatorError] = useState('');
 
   useEffect(() => {
     api.boats().then((res) => setBots(Array.isArray(res) ? res : [])).catch(() => {});
@@ -127,9 +129,11 @@ export default function OperatorManagement() {
   };
 
   const handleAddOperator = async (form) => {
+    setAddOperatorError('');
     try {
       const created = await api.createOperator({
         name: form.name,
+        email: form.email,
         availability: 'available',
         assigned_bot: null,
       });
@@ -140,6 +144,9 @@ export default function OperatorManagement() {
         availability: 'Available',
         assignedBot: null,
         archived: false,
+        email: created.email || null,
+        accountStatus: created.account_status || null,
+        userId: created.user || null,
       };
       addOperator(newOperator);
       setShowAddModal(false);
@@ -148,11 +155,30 @@ export default function OperatorManagement() {
         currentUser,
         action: 'Operator added',
         module: 'Operator Management',
-        details: `${newOperator.name} (${newOperator.id}) added`,
+        details: created.email_sent === false
+          ? `${newOperator.name} (${newOperator.id}) added — account created but the welcome email failed to send`
+          : `${newOperator.name} (${newOperator.id}) added with a login account at ${newOperator.email}`,
       });
     } catch (err) {
       console.error('Failed to create operator:', err);
-      alert('Failed to create operator. Please try again.');
+      setAddOperatorError(err.message || 'Failed to create operator. Please try again.');
+    }
+  };
+
+  const handleResetOperatorPassword = async () => {
+    if (!selected?.userId) return;
+    try {
+      await api.resetUserPassword(selected.userId);
+      logAudit({
+        currentUser,
+        action: 'Operator password reset',
+        module: 'Operator Management',
+        details: `Temporary password reissued for ${selected.name} (${selected.id})`,
+      });
+      alert(`A new temporary password has been emailed to ${selected.email}.`);
+    } catch (err) {
+      console.error('Failed to reset operator password:', err);
+      alert('Failed to reset password. Please try again.');
     }
   };
 
@@ -216,7 +242,7 @@ export default function OperatorManagement() {
           </button>
           <button
             type="button"
-            onClick={() => setShowAddModal(true)}
+            onClick={() => { setAddOperatorError(''); setShowAddModal(true); }}
             className="flex items-center gap-1.5 rounded-lg bg-[#1b4de4] px-3.5 py-2 text-sm font-medium text-white transition-colors hover:bg-[#153eb8]"
           >
             <Plus className="h-4 w-4" />
@@ -392,6 +418,14 @@ export default function OperatorManagement() {
                   <p className="text-slate-600">
                     <span className="text-slate-400">Operator ID: </span>{selected.id}
                   </p>
+                  <p className="text-slate-600">
+                    <span className="text-slate-400">Account: </span>
+                    {selected.email ? (
+                      <span className="font-medium text-slate-800">{selected.email}</span>
+                    ) : (
+                      <span className="text-slate-400 italic">No login account</span>
+                    )}
+                  </p>
                 </div>
                 <div className="flex flex-col items-start gap-3">
                   {(() => {
@@ -419,6 +453,14 @@ export default function OperatorManagement() {
 
           <Card title="Quick action">
             <div className="space-y-2">
+              <button
+                onClick={handleResetOperatorPassword}
+                disabled={!selected?.userId}
+                title={selected && !selected.userId ? "This operator has no login account yet" : undefined}
+                className="w-full rounded-lg border border-slate-200 py-2 text-sm text-slate-600 transition-colors hover:border-blue-400 hover:bg-blue-50 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Reset account password
+              </button>
               {QUICK_ACTIONS.map((action) => (
                 <button
                   key={action.action}
@@ -443,7 +485,11 @@ export default function OperatorManagement() {
       )}
 
       {showAddModal && (
-        <AddOperatorModal onCancel={() => setShowAddModal(false)} onSave={handleAddOperator} />
+        <AddOperatorModal
+          onCancel={() => { setShowAddModal(false); setAddOperatorError(''); }}
+          onSave={handleAddOperator}
+          error={addOperatorError}
+        />
       )}
 
       {editConfirm && (
@@ -508,8 +554,11 @@ function EditOperatorModal({ operator, onCancel, onSave }) {
   );
 }
 
-function AddOperatorModal({ onCancel, onSave }) {
-  const [form, setForm] = useState({ name: '' });
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function AddOperatorModal({ onCancel, onSave, error }) {
+  const [form, setForm] = useState({ name: '', email: '' });
+  const isValidEmail = EMAIL_PATTERN.test(form.email.trim());
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
@@ -530,6 +579,22 @@ function AddOperatorModal({ onCancel, onSave }) {
               className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
             />
           </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-slate-500">Email</label>
+            <input
+              type="email"
+              value={form.email}
+              onChange={(e) => setForm({ ...form, email: e.target.value })}
+              placeholder="operator@example.com"
+              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
+            />
+            <p className="mt-1 text-xs text-slate-400">
+              A login account is created and a temporary password is emailed to this address.
+            </p>
+          </div>
+          {error && (
+            <p className="rounded-lg bg-red-50 px-3 py-2 text-xs font-medium text-red-600">{error}</p>
+          )}
         </div>
 
         <div className="mt-6 flex justify-end gap-2">
@@ -540,7 +605,7 @@ function AddOperatorModal({ onCancel, onSave }) {
             Cancel
           </button>
           <button
-            disabled={!form.name.trim()}
+            disabled={!form.name.trim() || !isValidEmail}
             onClick={() => onSave(form)}
             className="rounded-lg bg-[#1b4de4] px-4 py-2 text-sm font-medium text-white hover:bg-[#153eb8] disabled:cursor-not-allowed disabled:opacity-50"
           >
