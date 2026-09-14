@@ -5,6 +5,7 @@ import uuid
 import paho.mqtt.client as mqtt
 from django.utils import timezone
 from .models import Boat, DetectionEvent
+from .realtime import broadcast
 
 # ==================== CONFIGURATION ====================
 MQTT_BROKER = "broker.emqx.io"
@@ -60,6 +61,12 @@ def _handle_heartbeat(bot_id, payload):
             boat.is_active = payload['is_active']
         boat.save()
         print(f"[MQTT] Updated Boat {bot_id}: online=True, battery={payload.get('battery')}, active={payload.get('is_active')}")
+        broadcast('boat.heartbeat', {
+            'boat_id': boat.id,
+            'is_online': boat.is_online,
+            'is_active': boat.is_active,
+            'battery_level': boat.battery_level,
+        })
     except Boat.DoesNotExist:
         print(f"[MQTT] Boat {bot_id} not found")
     except Exception as e:
@@ -75,7 +82,7 @@ def _handle_detection(bot_id, payload):
             print(f"[MQTT] Skipping unverified detection for Boat {bot_id}")
             return
 
-        DetectionEvent.objects.create(
+        detection = DetectionEvent.objects.create(
             boat=boat,
             latitude=payload.get('latitude', 0.0),
             longitude=payload.get('longitude', 0.0),
@@ -86,6 +93,15 @@ def _handle_detection(bot_id, payload):
         )
         print(f"[MQTT] Logged VERIFIED detection for Boat {bot_id}: {payload.get('trash_count')} items, confidence={confidence}")
         print(f"[MQTT] Categories: {payload.get('categories', {})}")
+        broadcast('boat.detection', {
+            'boat_id': boat.id,
+            'detection_id': detection.id,
+            'latitude': detection.latitude,
+            'longitude': detection.longitude,
+            'trash_count': detection.trash_count,
+            'categories': detection.categories,
+            'confidence': detection.confidence,
+        })
     except Exception as e:
         print(f"[MQTT] Detection error: {e}")
 
@@ -108,6 +124,11 @@ def _handle_status(bot_id, payload):
 
         boat.save()
         print(f"[MQTT] Status update for Boat {bot_id}: {status}")
+        broadcast('boat.status', {
+            'boat_id': boat.id,
+            'is_active': boat.is_active,
+            'battery_level': boat.battery_level,
+        })
     except Exception as e:
         print(f"[MQTT] Status error: {e}")
 
@@ -160,10 +181,12 @@ def start_offline_checker():
         while True:
             try:
                 threshold = timezone.now() - timezone.timedelta(seconds=15)
-                offline_bots = Boat.objects.filter(last_seen__lt=threshold, is_online=True)
-                count = offline_bots.update(is_online=False)
-                if count > 0:
-                    print(f"[OFFLINE] Marked {count} bots as offline")
+                offline_bots = list(Boat.objects.filter(last_seen__lt=threshold, is_online=True))
+                if offline_bots:
+                    Boat.objects.filter(id__in=[b.id for b in offline_bots]).update(is_online=False)
+                    print(f"[OFFLINE] Marked {len(offline_bots)} bots as offline")
+                    for b in offline_bots:
+                        broadcast('boat.offline', {'boat_id': b.id})
             except Exception as e:
                 print(f"[OFFLINE] Check error: {e}")
             time.sleep(15)

@@ -6,6 +6,7 @@ import 'leaflet.heat';
 import { Calendar, Radar, ClipboardList, ArrowRightLeft, Map as MapIcon, ListFilter, X } from 'lucide-react';
 import { api } from '../../services/api';
 import { SearchBar } from '../../components/ui/SearchBar';
+import { useRealtime } from '../../hooks/useRealtime';
 
 /**
  * ChangeView Component
@@ -134,6 +135,16 @@ const HeatmapView = () => {
   const [requestSearch, setRequestSearch] = useState('');
   const [requestBarangayFilter, setRequestBarangayFilter] = useState('All');
   const [requestStatusFilter, setRequestStatusFilter] = useState('All');
+  const [realtimeNonce, setRealtimeNonce] = useState(0);
+
+  // Live detection events from the Cloudflare Worker relay short-circuit the
+  // 5s poll below; the poll stays as a fallback for when the Worker isn't
+  // running/reachable.
+  useRealtime(
+    useMemo(() => (message) => {
+      if (message?.type === 'boat.detection') setRealtimeNonce((n) => n + 1);
+    }, [])
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -271,7 +282,7 @@ const HeatmapView = () => {
       cancelled = true;
       clearInterval(interval);
     };
-  }, [selectedCategory, timeFilter, dateRange]);
+  }, [selectedCategory, timeFilter, dateRange, realtimeNonce]);
 
   const selectedBot = {
     name: 'All Detections',

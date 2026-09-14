@@ -1,10 +1,11 @@
 import { MapContainer, TileLayer, useMap, Marker, ZoomControl } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet.heat';
 import { Calendar } from 'lucide-react';
 import api from '../../services/api';
+import { useRealtime } from '../../hooks/useRealtime';
 
 function ChangeView({ center, zoom }) {
   const map = useMap();
@@ -109,6 +110,16 @@ const Heatmap = ({ currentUser }) => {
   const [totalTrash, setTotalTrash] = useState(0);
   const [allCategories, setAllCategories] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [realtimeNonce, setRealtimeNonce] = useState(0);
+
+  // Live detection events from the Cloudflare Worker relay short-circuit the
+  // 5s poll below; the poll stays as a fallback for when the Worker isn't
+  // running/reachable.
+  useRealtime(
+    useCallback((message) => {
+      if (message?.type === 'boat.detection') setRealtimeNonce((n) => n + 1);
+    }, [])
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -166,7 +177,7 @@ const Heatmap = ({ currentUser }) => {
       cancelled = true;
       clearInterval(interval);
     };
-  }, [selectedCategory, timeFilter, dateRange, barangayName]);
+  }, [selectedCategory, timeFilter, dateRange, barangayName, realtimeNonce]);
 
   const selectedLoc = {
     name: selectedCategory === 'All' ? 'All Categories' : selectedCategory,

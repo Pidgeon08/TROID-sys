@@ -1,7 +1,8 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useCallback, useEffect, useState, useMemo } from 'react';
 import { useOutletContext, useNavigate } from 'react-router-dom';
 import api from '../../services/api';
 import { logAudit } from '../../services/auditLog';
+import { useRealtime } from '../../hooks/useRealtime';
 import { formatTime12h } from '../../constants/requests';
 import { Plus, Ship, Zap, WifiOff, Ban, Battery, BatteryCharging, X } from 'lucide-react';
 import { Card } from '../../components/ui/Card';
@@ -30,6 +31,16 @@ export default function ManageBots() {
     const [operators, setOperators] = useState([]);
     const [selectedBotId, setSelectedBotId] = useState('');
     const [loading, setLoading] = useState(true);
+    const [realtimeNonce, setRealtimeNonce] = useState(0);
+
+    // Live boat updates from the Cloudflare Worker relay short-circuit the
+    // 5s poll below; the poll stays as a fallback for when the Worker isn't
+    // running/reachable.
+    useRealtime(
+        useCallback((message) => {
+            if (message?.type?.startsWith('boat.')) setRealtimeNonce((n) => n + 1);
+        }, [])
+    );
 
     useEffect(() => {
         const fetchData = async () => {
@@ -101,7 +112,7 @@ export default function ManageBots() {
 
         const interval = setInterval(fetchData, 5000);
         return () => clearInterval(interval);
-    }, [selectedBotId]);
+    }, [selectedBotId, realtimeNonce]);
 
     const [isAddBotOpen, setIsAddBotOpen] = useState(false);
     const [isMaintenanceOpen, setIsMaintenanceOpen] = useState(false);
