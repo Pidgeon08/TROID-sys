@@ -1,7 +1,8 @@
-import { Trash2, Ship, ArrowUpRight, MapPin, Calendar } from 'lucide-react';
+import { Trash2, Ship, MapPin, Calendar, AlertTriangle } from 'lucide-react';
 import { MapContainer, TileLayer, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import { useEffect, useState } from 'react';
+import { useNavigate, useOutletContext } from 'react-router-dom';
 import L from 'leaflet';
 import 'leaflet.heat';
 import api from '../../services/api';
@@ -15,46 +16,68 @@ function HeatmapLayer({ points, type }) {
     let timer;
 
     const initHeatLayer = () => {
-      const size = map.getSize();
-      if (size.x === 0 || size.y === 0) {
-        timer = setTimeout(initHeatLayer, 50);
-        return;
-      }
-      map.invalidateSize();
-
-      const gradients = {
-        'Waste Density': {
-          0.4: 'blue',
-          0.6: 'cyan',
-          0.7: 'lime',
-          0.8: 'yellow',
-          1.0: 'red'
-        },
-        'Bot Pathing': {
-          0.0: '#0ea5e9',
-          0.5: '#22d3ee',
-          1.0: '#1e40af'
-        },
-        'Trash Collected': {
-          0.0: '#cbd5e1',
-          0.5: '#64748b',
-          1.0: '#0f172a'
+      try {
+        const size = map.getSize();
+        if (!size || size.x === 0 || size.y === 0) {
+          timer = setTimeout(initHeatLayer, 50);
+          return;
         }
-      };
+        map.invalidateSize();
 
-      heat = L.heatLayer(points, {
-        radius: 30,
-        blur: 20,
-        maxZoom: 17,
-        gradient: gradients[type] || gradients['Waste Density'],
-      }).addTo(map);
+        const validPoints = (Array.isArray(points) ? points : [])
+          .filter(p => {
+            if (!p || typeof p[0] !== 'number' || typeof p[1] !== 'number') return false;
+            if (isNaN(p[0]) || isNaN(p[1])) return false;
+            if (p[0] === 0 && p[1] === 0) return false;
+            return true;
+          });
+
+        if (validPoints.length === 0) return;
+
+        const gradients = {
+          'Waste Density': {
+            0.4: 'blue',
+            0.6: 'cyan',
+            0.7: 'lime',
+            0.8: 'yellow',
+            1.0: 'red'
+          },
+          'Bot Pathing': {
+            0.0: '#0ea5e9',
+            0.5: '#22d3ee',
+            1.0: '#1e40af'
+          },
+          'Trash Collected': {
+            0.0: '#cbd5e1',
+            0.5: '#64748b',
+            1.0: '#0f172a'
+          }
+        };
+
+        heat = L.heatLayer(validPoints, {
+          radius: 30,
+          blur: 20,
+          maxZoom: 17,
+          gradient: gradients[type] || gradients['Waste Density'],
+        }).addTo(map);
+      } catch (err) {
+        console.error('Heatmap render error:', err);
+      }
     };
 
     initHeatLayer();
 
     return () => {
-      if (heat) map.removeLayer(heat);
-      if (timer) clearTimeout(timer);
+      if (heat && map) {
+        try {
+          map.removeLayer(heat);
+        } catch {
+          // ignore cleanup errors
+        }
+      }
+      if (timer) {
+        clearTimeout(timer);
+      }
     };
   }, [map, points, type]);
 
@@ -62,6 +85,8 @@ function HeatmapLayer({ points, type }) {
 }
 
 const Dashboard = () => {
+  const navigate = useNavigate();
+  const { currentUser } = useOutletContext() || {};
   const [activeTab, setActiveTab] = useState('Monthly');
   const [dateRange, setDateRange] = useState({ from: '', to: '' });
   const [heatmapType, setHeatmapType] = useState('Waste Density');
@@ -70,22 +95,24 @@ const Dashboard = () => {
   const [addressPoints, setAddressPoints] = useState([]);
   const [topCreeks, setTopCreeks] = useState([]);
   const [recentActivities, setRecentActivities] = useState([]);
-  const [creekConditions, setCreekConditions] = useState([]);
   const [boatsData, setBoatsData] = useState([]);
   const [requestsData, setRequestsData] = useState([]);
+  const [priorityAreas, setPriorityAreas] = useState([]);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [heatmapRes, requestsRes, boatsRes] = await Promise.all([
+        const [heatmapRes, requestsRes, boatsRes, priorityRes] = await Promise.all([
           api.getHeatmap(),
           api.requests(),
           api.boats(),
+          api.priorityAreas(),
         ]);
 
         setAddressPoints(Array.isArray(heatmapRes) ? heatmapRes : []);
         setRequestsData(Array.isArray(requestsRes) ? requestsRes : []);
         setBoatsData(Array.isArray(boatsRes) ? boatsRes : []);
+        setPriorityAreas(Array.isArray(priorityRes) ? priorityRes : []);
 
         const creekMap = {};
         requestsRes.forEach(req => {
@@ -104,31 +131,6 @@ const Dashboard = () => {
             time: req.date_submitted
               ? new Date(req.date_submitted).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
               : req.date_submitted,
-          }))
-        );
-
-        const latestPerLocation = {};
-        requestsRes.forEach(req => {
-          if (req.location_name) {
-            const current = latestPerLocation[req.location_name];
-            if (!current || new Date(req.date_submitted) > new Date(current.date_submitted)) {
-              latestPerLocation[req.location_name] = req;
-            }
-          }
-        });
-        const statusToColor = {
-          'Pending': 'red',
-          'Approved': 'green',
-          'Declined': 'yellow',
-          'Processing': 'yellow',
-          'Completed': 'green',
-          'Segregated': 'green',
-        };
-        setCreekConditions(
-          Object.values(latestPerLocation).map(req => ({
-            name: req.location_name,
-            status: req.status.charAt(0).toUpperCase() + req.status.slice(1),
-            color: statusToColor[req.status] || 'green',
           }))
         );
       } catch (err) {
@@ -153,22 +155,22 @@ const Dashboard = () => {
   }
 
   return (
-    <div className="max-w-[1400px] mx-auto animate-fade-in pb-12">
+    <div className="h-full max-w-[1400px] mx-auto animate-fade-in flex flex-col overflow-hidden">
 
       {/* Page header */}
-      <header className="mb-6">
+      <header className="mb-6 shrink-0">
         <h1 className="text-[28px] font-bold text-slate-900 tracking-tight leading-none">Dashboard</h1>
-        <p className="text-slate-500 text-sm mt-1.5 font-medium">Welcome back, John</p>
+        <p className="text-slate-500 text-sm mt-1.5 font-medium">Welcome back, {currentUser?.name || 'Admin'}</p>
       </header>
 
       {/* Two-column layout */}
-      <div className="grid grid-cols-1 xl:grid-cols-[1fr_360px] gap-6 items-start">
+      <div className="grid grid-cols-1 xl:grid-cols-[1fr_360px] gap-6 items-start flex-1 min-h-0 overflow-hidden">
 
         {/* ── LEFT COLUMN ── */}
-        <div className="flex flex-col gap-6">
+        <div className="flex flex-col gap-6 h-full min-h-0">
 
           {/* ── STAT CARDS ROW ── */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 shrink-0">
 
             {/* Stat Card: Trash Collected */}
             <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] flex flex-col justify-between overflow-hidden relative group hover:shadow-[0_6px_24px_rgba(0,0,0,0.06)] transition-all duration-200">
@@ -181,10 +183,6 @@ const Dashboard = () => {
                   <div className="flex items-baseline gap-2.5 mt-2">
                     <span className="text-3xl font-bold text-slate-950 tracking-tight">{totalBags}</span>
                     <span className="text-sm font-semibold text-slate-500">Bags</span>
-                    <div className="flex items-center text-xs font-semibold text-red-500 ml-1">
-                      <ArrowUpRight className="w-4 h-4 mr-0.5" />
-                      <span>35.1% vs last week</span>
-                    </div>
                   </div>
                 </div>
               </div>
@@ -213,10 +211,6 @@ const Dashboard = () => {
                   <div className="flex items-baseline gap-2.5 mt-2">
                     <span className="text-3xl font-bold text-slate-950 tracking-tight">{activeBots}</span>
                     <span className="text-sm font-semibold text-slate-500">Bots</span>
-                    <div className="flex items-center text-xs font-semibold text-[#10b981] ml-1">
-                      <ArrowUpRight className="w-4 h-4 mr-0.5" />
-                      <span>24.3% vs last week</span>
-                    </div>
                   </div>
                 </div>
               </div>
@@ -237,7 +231,7 @@ const Dashboard = () => {
           </div>
 
           {/* ── HEATMAP CARD ── */}
-          <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-6 flex flex-col min-h-[550px] gap-4">
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-6 flex flex-col flex-1 min-h-0 gap-4">
 
             <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 mb-5">
               <h2 className="text-[17px] font-bold text-slate-900">Collective Hotspots</h2>
@@ -293,14 +287,14 @@ const Dashboard = () => {
               </div>
             </div>
 
-            <div className="flex-1 rounded-xl overflow-hidden border border-slate-100 relative min-h-[380px]">
+            <div className="flex-1 min-h-0 rounded-xl overflow-hidden border border-slate-100 relative">
               <MapContainer
                 center={[16.6332, 120.3191]}
                 zoom={15}
                 style={{ height: '100%', width: '100%', position: 'absolute', top: 0, left: 0 }}
               >
                 <TileLayer
-                  url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+                  url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
                   attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
                 />
                 <HeatmapLayer points={addressPoints} type={heatmapType} />
@@ -323,16 +317,63 @@ const Dashboard = () => {
         </div>
 
         {/* ── RIGHT COLUMN (Sidebar Panels) ── */}
-        <div className="flex flex-col gap-6">
+        <div className="flex flex-col gap-6 h-full min-h-0 overflow-y-auto">
+
+          {/* Panel 0: Priority Areas — barangays auto-flagged from recent high-volume cleanups,
+              each with a follow-up drive already booked on the fleet's schedule. */}
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-5 shrink-0">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-[15px] font-bold text-slate-900 flex items-center gap-1.5">
+                <AlertTriangle className="w-4 h-4 text-amber-500" />
+                Priority Areas
+              </h2>
+              <button
+                onClick={() => navigate('/admin/deployment')}
+                className="text-xs font-semibold text-slate-500 hover:text-[#1b4de4] border border-slate-200 rounded-lg px-2.5 py-1 transition-all cursor-pointer"
+              >
+                View schedule
+              </button>
+            </div>
+            {priorityAreas.length === 0 ? (
+              <p className="text-xs text-slate-400 py-2">No barangay has crossed the follow-up threshold yet.</p>
+            ) : (
+              <div className="flex flex-col gap-3">
+                {priorityAreas.slice(0, 5).map((area) => (
+                  <div key={area.id} className="flex items-center gap-3.5">
+                    <div className="w-8 h-8 rounded-full bg-amber-50 flex items-center justify-center text-amber-600 shrink-0">
+                      <AlertTriangle className="w-4 h-4" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex justify-between text-xs font-bold text-slate-900">
+                        <span className="truncate">{area.barangay}</span>
+                        <span className="shrink-0">{area.total_bags} bags</span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        {area.bot_name
+                          ? `Follow-up: ${area.bot_name} on ${area.scheduled_day}`
+                          : 'Flagged — no bot available to auto-schedule yet'}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
 
           {/* Panel 1: Most Trash Collected */}
-          <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-5">
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-5 shrink-0">
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-[15px] font-bold text-slate-900">Most Trash Collected</h2>
-              <button className="text-xs font-semibold text-slate-500 hover:text-[#1b4de4] border border-slate-200 rounded-lg px-2.5 py-1 transition-all cursor-pointer">
+              <button
+                onClick={() => navigate('/admin/reports')}
+                className="text-xs font-semibold text-slate-500 hover:text-[#1b4de4] border border-slate-200 rounded-lg px-2.5 py-1 transition-all cursor-pointer"
+              >
                 View all
               </button>
             </div>
+            {topCreeks.length === 0 ? (
+              <p className="text-xs text-slate-400 py-2">No collection data yet.</p>
+            ) : (
             <div className="flex flex-col gap-4">
               {topCreeks.map((item, idx) => (
                 <div key={idx} className="flex items-center gap-3.5">
@@ -354,16 +395,23 @@ const Dashboard = () => {
                 </div>
               ))}
             </div>
+            )}
           </div>
 
           {/* Panel 2: Recent Activities */}
-          <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-5">
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-5 shrink-0">
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-[15px] font-bold text-slate-900">Recent Activities</h2>
-              <button className="text-xs font-semibold text-slate-500 hover:text-[#1b4de4] border border-slate-200 rounded-lg px-2.5 py-1 transition-all cursor-pointer">
+              <button
+                onClick={() => navigate('/admin/requests')}
+                className="text-xs font-semibold text-slate-500 hover:text-[#1b4de4] border border-slate-200 rounded-lg px-2.5 py-1 transition-all cursor-pointer"
+              >
                 View all
               </button>
             </div>
+            {recentActivities.length === 0 ? (
+              <p className="text-xs text-slate-400 py-2">No recent activity yet.</p>
+            ) : (
             <div className="flex flex-col gap-4">
               {recentActivities.map((act, idx) => (
                 <div key={idx} className="flex items-start gap-3">
@@ -377,41 +425,9 @@ const Dashboard = () => {
                 </div>
               ))}
             </div>
+            )}
           </div>
 
-          {/* Panel 3: Creek Conditions */}
-          <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-5">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-[15px] font-bold text-slate-900">Creek Conditions</h2>
-              <button className="text-xs font-semibold text-slate-500 hover:text-[#1b4de4] border border-slate-200 rounded-lg px-2.5 py-1 transition-all cursor-pointer">
-                View in map
-              </button>
-            </div>
-            <div className="flex flex-col gap-3">
-              {creekConditions.map((creek, idx) => (
-                <div key={idx} className="flex items-center justify-between p-2.5 rounded-xl border border-slate-50 hover:bg-slate-50/50 transition-colors">
-                  <div className="flex items-center gap-3.5 min-w-0">
-                    <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-900 shrink-0">
-                      <MapPin className="w-4 h-4" />
-                    </div>
-                    <span className="text-xs font-bold text-slate-900 truncate">{creek.name}</span>
-                  </div>
-                  <div className="flex items-center gap-3 shrink-0">
-                    <span className={`text-[11px] font-semibold ${
-                      creek.color === 'red' ? 'text-red-500' :
-                      creek.color === 'yellow' ? 'text-yellow-600' : 'text-emerald-500'
-                    }`}>
-                      {creek.status}
-                    </span>
-                    <div className={`w-3 h-3 rounded-full ${
-                      creek.color === 'red' ? 'bg-red-500 shadow-[0_0_6px_#ef4444]' :
-                      creek.color === 'yellow' ? 'bg-yellow-400 shadow-[0_0_6px_#facc15]' : 'bg-emerald-500 shadow-[0_0_6px_#10b981]'
-                    }`}></div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
 
         </div>
       </div>

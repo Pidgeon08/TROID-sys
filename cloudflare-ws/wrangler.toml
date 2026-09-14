@@ -1,0 +1,15 @@
+name = "troid-realtime"
+main = "src/index.js"
+compatibility_date = "2024-11-01"
+
+[[durable_objects.bindings]]
+name = "BROADCASTER"
+class_name = "Broadcaster"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["Broadcaster"]
+
+# SHARED_SECRET must match REALTIME_WORKER_SECRET in backend/.env.
+# Local dev: put it in .dev.vars (gitignored).
+# Production: `wrangler secret put SHARED_SECRET`.

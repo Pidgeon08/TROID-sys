@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useOutletContext } from "react-router-dom";
 import { createPortal } from "react-dom";
 import {
   ChevronLeft,
@@ -12,11 +12,12 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
   CheckCircle2,
-  XCircle,
+  RotateCcw,
 } from "lucide-react";
 import api from "../../services/api";
 import { Card } from "../../components/ui/Card";
-import { REQUEST_STATUS_STYLES, mapRequest, getDeploymentStatus } from "../../constants/requests";
+import NotificationBell from "../../components/NotificationBell";
+import { REQUEST_STATUS_STYLES, mapRequest, getDeploymentStatus, formatTime12h } from "../../constants/requests";
 
 const Field = ({ label, value }) => (
   <div className="flex items-center justify-between py-2 text-sm">
@@ -28,12 +29,14 @@ const Field = ({ label, value }) => (
 export default function CityHallViewRequest() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { currentUser } = useOutletContext() || {};
   const [request, setRequest] = useState(null);
   const [loading, setLoading] = useState(true);
   const [selectedPhotoIndex, setSelectedPhotoIndex] = useState(0);
   const [showPhotoViewer, setShowPhotoViewer] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [confirmAction, setConfirmAction] = useState(null);
+  const [reasonStep, setReasonStep] = useState(null);
   const [schedule, setSchedule] = useState(null);
 
   useEffect(() => {
@@ -69,14 +72,15 @@ export default function CityHallViewRequest() {
     }
   };
 
-  const handleDecline = async () => {
+  const handleUnpark = async () => {
     setSubmitting(true);
     try {
-      await api.declineRequest(request.id);
-      setRequest(prev => ({ ...prev, status: 'Declined' }));
+      const res = await api.unparkRequest(request.id);
+      const restoredStatus = (res.status || '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+      setRequest(prev => ({ ...prev, status: restoredStatus, declineReason: '' }));
     } catch (err) {
-      console.error('Failed to decline request:', err);
-      alert('Failed to decline request. Please try again.');
+      console.error('Failed to unpark request:', err);
+      alert('Failed to unpark request. Please try again.');
     } finally {
       setSubmitting(false);
     }
@@ -100,7 +104,7 @@ export default function CityHallViewRequest() {
 
   return (
     <div className="max-w-[1400px] mx-auto animate-fade-in pb-12">
-              <div className="mb-6 flex items-center justify-between">
+              <div className="mb-4 flex items-center justify-between">
                 <button
                   onClick={() => navigate("/mayorsoffice/requests")}
                   className="flex items-center gap-1.5 text-sm font-medium text-blue-600 hover:text-blue-700"
@@ -109,6 +113,7 @@ export default function CityHallViewRequest() {
                   Back to Requests
                 </button>
                 <div className="flex items-center gap-2.5">
+                  <NotificationBell currentUser={currentUser} userType="mayorsoffice" />
                   <button className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
                     <FileText size={15} />
                     Download All
@@ -116,7 +121,7 @@ export default function CityHallViewRequest() {
                 </div>
               </div>
 
-              <div className="mb-6">
+              <div className="mb-4">
                 <div className="flex items-center gap-3">
                   <h1 className="text-[28px] font-bold text-slate-900 tracking-tight leading-none">Request Details</h1>
                   <span className={`inline-block rounded-full px-2.5 py-1 text-xs font-medium ${REQUEST_STATUS_STYLES[request.status] || 'bg-slate-100 text-slate-600'}`}>
@@ -136,6 +141,12 @@ export default function CityHallViewRequest() {
                       <Field label="Type of Request" value={request.type} />
                       <Field label="Status" value={request.status} />
                       <Field label="Date Submitted" value={request.dateSubmitted} />
+                      {request.preferredDate && (
+                        <Field
+                          label="Preferred Date/Time"
+                          value={`${new Date(request.preferredDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}${request.preferredTime ? ` · ${formatTime12h(request.preferredTime)}` : ""}`}
+                        />
+                      )}
                     </div>
                   </Card>
 
@@ -166,6 +177,12 @@ export default function CityHallViewRequest() {
                         <p className="text-slate-500">{request.location?.province}</p>
                       </div>
                     </div>
+                    {request.collectionArea && (
+                      <div className="mt-3 pt-3 border-t border-slate-100 text-sm">
+                        <p className="text-xs text-slate-400 mb-0.5">Collection Area</p>
+                        <p className="font-medium text-slate-800">{request.collectionArea.name}</p>
+                      </div>
+                    )}
                   </Card>
                 </div>
 
@@ -238,13 +255,15 @@ export default function CityHallViewRequest() {
               </span>
                     </div>
 
-{request.status === "Approved" && (
+{request.status === "Approved" && getDeploymentStatus(schedule).label === "Deployed" && (
                       <div className="flex items-start gap-2.5 rounded-lg bg-emerald-50 border border-emerald-100 px-3 py-2.5 mb-4">
                         <CheckCircle2 size={16} className="text-emerald-600 mt-0.5 shrink-0" />
                         <p className="text-xs text-emerald-800 leading-relaxed">
                           Clean-up and waste collection were already conducted.
                           <br />
-                          <span className="text-emerald-600">Date Completed: {request.dateSubmitted}</span>
+                          <span className="text-emerald-600">
+                            Date Completed: {new Date(schedule.day + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} · {formatTime12h(schedule.label)}
+                          </span>
                         </p>
                       </div>
                     )}
@@ -327,6 +346,15 @@ export default function CityHallViewRequest() {
                               <div>
                                 <p className="text-sm font-semibold text-slate-800">{step.label}</p>
                                 <p className="text-xs text-slate-400 mt-0.5">{step.date}</p>
+                                {step.details && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setReasonStep(step)}
+                                    className="mt-1 text-xs font-semibold text-red-600 hover:text-red-700 underline underline-offset-2"
+                                  >
+                                    View reason
+                                  </button>
+                                )}
                               </div>
                               <div className="text-right shrink-0">
                                 <p className="text-xs font-medium text-slate-600">{step.actor}</p>
@@ -337,50 +365,64 @@ export default function CityHallViewRequest() {
                         ))}
                       </div>
                     </div>
-                  </Card>
-                </div>
-              </div>
+                   </Card>
 
-              {request.status === "Pending Mayor Approval" && (
-                <div className="mt-6 bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-6">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h3 className="text-sm font-semibold text-slate-900">Take Action on This Request</h3>
-                      <p className="text-xs text-slate-500 mt-1">Your decision will be recorded and the request status will update immediately.</p>
-                    </div>
-                     <div className="flex items-center gap-3">
+                   {request.status === "Pending Mayor Approval" && (
+                   <Card title="Decision">
+                     <div className="flex flex-col gap-4">
+                       <p className="text-xs text-slate-500">
+                         Your decision will be recorded and the request status will update immediately.
+                       </p>
+                       <div className="flex items-center justify-evenly gap-3">
+                         <button
+                           onClick={() => setConfirmAction('approve')}
+                           disabled={submitting}
+                           className="flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700 transition-colors disabled:opacity-50"
+                         >
+                           <CheckCircle2 size={16} />
+                           Approve
+                         </button>
+                       </div>
+                     </div>
+                   </Card>
+                   )}
+
+                   {request.status === "Parked" && (
+                   <Card title="Parked">
+                     <div className="flex flex-col gap-4">
+                       <p className="text-xs text-slate-500">
+                         This request is parked and not yet accepted. Unpark it to return it to review, where it can still be approved later.
+                       </p>
+                       {request.declineReason && (
+                         <p className="text-xs text-purple-700 bg-purple-50 border border-purple-100 rounded-lg px-3 py-2">
+                           {request.declineReason}
+                         </p>
+                       )}
                        <button
-                         onClick={() => setConfirmAction('decline')}
+                         onClick={() => setConfirmAction('unpark')}
                          disabled={submitting}
-                         className="flex items-center gap-2 rounded-lg border-2 border-red-200 px-4 py-2.5 text-sm font-semibold text-red-700 hover:bg-red-50 transition-colors disabled:opacity-50"
+                         className="flex items-center justify-center gap-2 rounded-lg bg-[#1b4de4] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#153eb8] transition-colors disabled:opacity-50"
                        >
-                         <XCircle size={16} />
-                         Decline
-                       </button>
-                       <button
-                         onClick={() => setConfirmAction('approve')}
-                         disabled={submitting}
-                         className="flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700 transition-colors disabled:opacity-50"
-                       >
-                         <CheckCircle2 size={16} />
-                         Approve
+                         <RotateCcw size={16} />
+                         Unpark
                        </button>
                      </div>
-                   </div>
+                   </Card>
+                   )}
                  </div>
-               )}
+               </div>
 
-      {confirmAction && createPortal(
+       {confirmAction && createPortal(
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 p-4">
           <div className="w-full max-w-sm bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden">
             <div className="p-6 border-b border-slate-100">
               <h3 className="text-lg font-bold text-slate-900">
-                {confirmAction === 'approve' ? 'Approve Request' : 'Decline Request'}
+                {confirmAction === 'approve' ? 'Approve Request' : 'Unpark Request'}
               </h3>
               <p className="text-xs text-slate-500 mt-1">
                 {confirmAction === 'approve'
                   ? 'This request will be forwarded to CENRO for final approval.'
-                  : 'This request will be declined and the barangay will be notified.'}
+                  : 'This request will be returned to review, where it can be approved again.'}
               </p>
             </div>
             <div className="p-6 flex gap-3">
@@ -394,14 +436,50 @@ export default function CityHallViewRequest() {
               <button
                 onClick={async () => {
                   const action = confirmAction;
-                  setConfirmAction(null);
                   if (action === 'approve') await handleApprove();
-                  else await handleDecline();
+                  else await handleUnpark();
+                  setConfirmAction(null);
                 }}
                 disabled={submitting}
-                className={`flex-1 rounded-lg px-4 py-2.5 text-sm font-medium text-white transition-colors disabled:opacity-50 ${confirmAction === 'approve' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-red-600 hover:bg-red-700'}`}
+                className={`flex-1 flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${confirmAction === 'approve' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-[#1b4de4] hover:bg-[#153eb8]'}`}
               >
-                {confirmAction === 'approve' ? 'Approve' : 'Decline'}
+                {submitting && (
+                  <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                )}
+                {submitting
+                  ? (confirmAction === 'approve' ? 'Approving...' : 'Unparking...')
+                  : (confirmAction === 'approve' ? 'Approve' : 'Unpark')}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {reasonStep && createPortal(
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 p-4" onClick={() => setReasonStep(null)}>
+          <div className="w-full max-w-sm bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="p-6 border-b border-slate-100 flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-bold text-slate-900">{reasonStep.label}</h3>
+                <p className="text-xs text-slate-500 mt-1">{reasonStep.date}</p>
+              </div>
+              <button onClick={() => setReasonStep(null)} className="text-slate-400 hover:text-slate-600" aria-label="Close">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="p-6">
+              <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">{reasonStep.details}</p>
+            </div>
+            <div className="px-6 pb-6 flex justify-end">
+              <button
+                onClick={() => setReasonStep(null)}
+                className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors"
+              >
+                Close
               </button>
             </div>
           </div>

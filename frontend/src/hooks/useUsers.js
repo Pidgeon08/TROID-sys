@@ -13,7 +13,8 @@ export function useUsers() {
     async function fetchUsers() {
       try {
         const res = await api.users();
-        const mapped = Array.isArray(res) ? res.map((u) => ({
+        // Operator accounts are managed on the Operator Management page, not here.
+        const mapped = Array.isArray(res) ? res.filter((u) => u.role !== 'operator').map((u) => ({
           id: u.id,
           name: u.name,
           email: u.email,
@@ -21,6 +22,7 @@ export function useUsers() {
             .replace('mayorsoffice', 'Mayor')
             .replace('spearhead', 'Spearhead')
             .replace('barangay', 'Barangay')
+            .replace('ngo', 'NGO')
             .replace('admin', 'Admin'),
           status: u.status === 'active' ? 'Active' : u.status === 'pending' ? 'Pending' : u.status === 'offline' ? 'Offline' : u.status === 'archived' ? 'Archived' : u.status,
           location: u.location || '—',

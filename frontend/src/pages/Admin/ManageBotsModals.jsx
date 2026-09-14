@@ -1,4 +1,3 @@
-import React from 'react';
 import { X, AlertTriangle } from 'lucide-react';
 
 export function AddBotModal({ isOpen, onClose, onSubmit, newBot, setNewBot, bots, operators }) {

@@ -1,16 +1,17 @@
 import { useMemo, useState, useEffect } from "react";
-import { Search, Plus, User, Pencil, Archive, X, Users, UserCheck, Clock, Ban } from "lucide-react";
+import { Plus, User, Pencil, Archive, X, Users, UserCheck, Clock, Ban } from "lucide-react";
 import api from "../../services/api";
+import { logAudit } from "../../services/auditLog";
 import { useUsers } from "../../hooks/useUsers";
 import { Card } from "../../components/ui/Card";
 import { SearchBar } from "../../components/ui/SearchBar";
-import { Badge } from "../../components/ui/Badge";
 import { EmptyState } from "../../components/ui/EmptyState";
 
 const ROLE_STYLES = {
   Admin: "bg-blue-50 text-blue-700",
   Mayor: "bg-amber-50 text-amber-800",
   Barangay: "bg-emerald-50 text-emerald-700",
+  NGO: "bg-purple-50 text-purple-700",
 };
 
 const STATUS_STYLES = {
@@ -23,7 +24,7 @@ const STATUS_STYLES = {
 const QUICK_ACTIONS = [
   { label: "Reset password", action: "resetPassword" },
   { label: "Change role", action: "changeRole" },
-  { label: "Reassign area", action: "reassignArea" },
+  { label: "Reassign barangay", action: "reassignArea" },
   { label: "Suspend account", action: "suspendAccount" },
 ];
 
@@ -76,6 +77,12 @@ export default function UserManagement({ currentUser }) {
     try {
       await api.updateUser(user.id, { status: newStatus });
       updateUser(user.id, { status: newStatus === 'active' ? 'Active' : 'Archived' });
+      logAudit({
+        currentUser,
+        action: newStatus === 'archived' ? 'User removed' : 'User restored',
+        module: 'User Management',
+        details: `${user.name} (${user.email}) ${newStatus === 'archived' ? 'archived' : 'restored'}`,
+      });
     } catch (err) {
       console.error('Failed to update user status:', err);
       alert('Failed to update user status. Please try again.');
@@ -87,13 +94,19 @@ export default function UserManagement({ currentUser }) {
       const payload = {
         name: updated.name,
         email: updated.email,
-        role: updated.role === 'Admin' ? 'admin' : updated.role === 'Mayor' ? 'mayorsoffice' : updated.role === 'Barangay' ? 'barangay' : updated.role,
+        role: updated.role === 'Admin' ? 'admin' : updated.role === 'Mayor' ? 'mayorsoffice' : updated.role === 'Barangay' ? 'barangay' : updated.role === 'NGO' ? 'ngo' : updated.role,
         status: updated.status === 'Active' ? 'active' : updated.status === 'Pending' ? 'pending' : updated.status === 'Offline' ? 'offline' : updated.status === 'Archived' ? 'archived' : updated.status,
         location: updated.location,
       };
       await api.updateUser(updated.id, payload);
       updateUser(updated.id, updated);
       setEditingUser(null);
+      logAudit({
+        currentUser,
+        action: 'User updated',
+        module: 'User Management',
+        details: `Updated details for ${updated.name} (${updated.email})`,
+      });
     } catch (err) {
       console.error('Failed to save user:', err);
       alert('Failed to save user. Please try again.');
@@ -105,7 +118,7 @@ export default function UserManagement({ currentUser }) {
       const payload = {
         name: form.name,
         email: form.email,
-        role: form.role === 'Admin' ? 'admin' : form.role === 'Mayor' ? 'mayorsoffice' : form.role === 'Barangay' ? 'barangay' : form.role,
+        role: form.role === 'Admin' ? 'admin' : form.role === 'Mayor' ? 'mayorsoffice' : form.role === 'Barangay' ? 'barangay' : form.role === 'NGO' ? 'ngo' : form.role,
         status: form.status === 'Active' ? 'active' : form.status === 'Pending' ? 'pending' : form.status === 'Offline' ? 'offline' : 'active',
         location: form.location || '',
       };
@@ -114,7 +127,7 @@ export default function UserManagement({ currentUser }) {
         id: created.id,
         name: created.name,
         email: created.email,
-        role: created.role.replace('mayorsoffice', "Mayor").replace('barangay', 'Barangay').replace('admin', 'Admin'),
+        role: created.role.replace('mayorsoffice', "Mayor").replace('barangay', 'Barangay').replace('ngo', 'NGO').replace('admin', 'Admin'),
         status: created.status === 'active' ? 'Active' : created.status === 'pending' ? 'Pending' : created.status === 'offline' ? 'Offline' : created.status === 'archived' ? 'Archived' : created.status,
         location: created.location || '—',
         date: new Date().toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' }),
@@ -122,9 +135,20 @@ export default function UserManagement({ currentUser }) {
       addUser(newUser);
       setShowAddModal(false);
       setSelectedId(newUser.id);
+      logAudit({
+        currentUser,
+        action: 'User added',
+        module: 'User Management',
+        details: `${newUser.role} account created for ${newUser.name} (${newUser.email})`,
+      });
+      alert(
+        created.email_sent
+          ? `Account created for ${newUser.name}. A temporary password has been emailed to ${newUser.email}.`
+          : `Account created for ${newUser.name}, but the temporary password email could NOT be sent (email isn't configured yet). Check backend/.env and share the password with them manually via the Reset password action once email is set up.`
+      );
     } catch (err) {
       console.error('Failed to create user:', err);
-      alert('Failed to create user. Please try again.');
+      alert(`Failed to create user: ${err.message}`);
     }
   };
 
@@ -137,9 +161,19 @@ export default function UserManagement({ currentUser }) {
   const handleResetPassword = async () => {
     if (!selected) return;
     try {
-      await api.post(`/users/${selected.id}/reset-password/`);
-      alert(`Password reset successfully for ${selected.email}`);
+      const res = await api.resetUserPassword(selected.id);
+      alert(
+        res.email_sent
+          ? `A new temporary password has been emailed to ${selected.email}. They will be asked to set a new password on next sign-in.`
+          : `Password was reset, but the email could NOT be sent to ${selected.email} (email isn't configured yet). Check backend/.env before relying on this.`
+      );
       closeModal();
+      logAudit({
+        currentUser,
+        action: 'Password reset',
+        module: 'User Management',
+        details: `Password reset for ${selected.name} (${selected.email})`,
+      });
     } catch (err) {
       console.error('Failed to reset password:', err);
       alert('Failed to reset password. Please try again.');
@@ -149,10 +183,16 @@ export default function UserManagement({ currentUser }) {
   const handleRoleChange = async (newRole) => {
     if (!selected) return;
     try {
-      const roleValue = newRole === 'Admin' ? 'admin' : newRole === 'Mayor' ? 'mayorsoffice' : 'barangay';
+      const roleValue = newRole === 'Admin' ? 'admin' : newRole === 'Mayor' ? 'mayorsoffice' : newRole === 'NGO' ? 'ngo' : 'barangay';
       await api.updateUser(selected.id, { role: roleValue });
       updateUser(selected.id, { role: newRole });
       closeModal();
+      logAudit({
+        currentUser,
+        action: 'Role changed',
+        module: 'User Management',
+        details: `${selected.name} role changed to ${newRole}`,
+      });
     } catch (err) {
       console.error('Failed to update role:', err);
       alert('Failed to update role. Please try again.');
@@ -165,6 +205,12 @@ export default function UserManagement({ currentUser }) {
       await api.updateUser(selected.id, { location: newLocation });
       updateUser(selected.id, { location: newLocation });
       closeModal();
+      logAudit({
+        currentUser,
+        action: 'Area reassigned',
+        module: 'User Management',
+        details: `${selected.name} reassigned to ${newLocation || '—'}`,
+      });
     } catch (err) {
       console.error('Failed to reassign area:', err);
       alert('Failed to reassign area. Please try again.');
@@ -177,6 +223,12 @@ export default function UserManagement({ currentUser }) {
       await api.updateUser(selected.id, { status: 'archived' });
       updateUser(selected.id, { status: 'Archived' });
       closeModal();
+      logAudit({
+        currentUser,
+        action: 'User removed',
+        module: 'User Management',
+        details: `${selected.name} (${selected.email}) suspended`,
+      });
     } catch (err) {
       console.error('Failed to suspend account:', err);
       alert('Failed to suspend account. Please try again.');
@@ -268,6 +320,7 @@ export default function UserManagement({ currentUser }) {
                 <option>Admin</option>
                 <option>Mayor</option>
                 <option>Barangay</option>
+                <option>NGO</option>
               </select>
               <select
                 value={statusFilter}
@@ -290,7 +343,7 @@ export default function UserManagement({ currentUser }) {
                     <th className="px-4 py-2.5 font-medium">Role</th>
                     <th className="px-4 py-2.5 font-medium">Status</th>
                     <th className="px-4 py-2.5 font-medium">Date created</th>
-                    <th className="px-4 py-2.5 font-medium">Assigned location</th>
+                    <th className="px-4 py-2.5 font-medium">Barangay</th>
                     <th className="px-4 py-2.5 font-medium text-right">Action</th>
                   </tr>
                 </thead>
@@ -430,7 +483,7 @@ export default function UserManagement({ currentUser }) {
                 </div>
                 <div className="flex flex-col items-start gap-3">
                   <p className="text-sm text-slate-600">
-                    <span className="text-slate-400">Assigned location: </span>{selected.location}
+                    <span className="text-slate-400">Barangay: </span>{selected.location}
                   </p>
                   <div>
                     <p className="mb-2 text-xs text-slate-400">Profile</p>
@@ -539,33 +592,26 @@ function EditUserModal({ user, onCancel, onSave }) {
             <label className="mb-1 block text-xs font-medium text-slate-500">Role</label>
             <select
               value={form.role}
-              onChange={(e) => setForm({ ...form, role: e.target.value })}
+              onChange={(e) => {
+                const role = e.target.value;
+                setForm({ ...form, role, location: (role === 'Barangay' || role === 'NGO') ? form.location : '' });
+              }}
               className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
             >
               <option>Admin</option>
               <option>Mayor</option>
               <option>Barangay</option>
+              <option>NGO</option>
             </select>
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-slate-500">Status</label>
-              <select
-                value={form.status}
-                onChange={(e) => setForm({ ...form, status: e.target.value })}
-                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
-              >
-                <option>Active</option>
-                <option>Pending</option>
-                <option>Offline</option>
-                <option>Archived</option>
-              </select>
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-500">Assigned location</label>
+            <label className="mb-1 block text-xs font-medium text-slate-500">Barangay</label>
             <input
               value={form.location}
               onChange={(e) => setForm({ ...form, location: e.target.value })}
-              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
+              placeholder="e.g. Carlatan"
+              disabled={form.role !== 'Barangay' && form.role !== 'NGO'}
+              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30 disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed"
             />
           </div>
         </div>
@@ -597,6 +643,17 @@ function AddUserModal({ onCancel, onSave }) {
     status: 'Active',
     location: '',
   });
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleSubmit = async () => {
+    if (submitting) return;
+    setSubmitting(true);
+    try {
+      await onSave(form);
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
@@ -629,32 +686,26 @@ function AddUserModal({ onCancel, onSave }) {
             <label className="mb-1 block text-xs font-medium text-slate-500">Role</label>
             <select
               value={form.role}
-              onChange={(e) => setForm({ ...form, role: e.target.value })}
+              onChange={(e) => {
+                const role = e.target.value;
+                setForm({ ...form, role, location: (role === 'Barangay' || role === 'NGO') ? form.location : '' });
+              }}
               className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
             >
               <option>Admin</option>
               <option>Mayor</option>
               <option>Barangay</option>
+              <option>NGO</option>
             </select>
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-slate-500">Status</label>
-            <select
-              value={form.status}
-              onChange={(e) => setForm({ ...form, status: e.target.value })}
-              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
-            >
-              <option>Active</option>
-              <option>Pending</option>
-              <option>Offline</option>
-            </select>
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-500">Assigned location</label>
+            <label className="mb-1 block text-xs font-medium text-slate-500">Barangay</label>
             <input
               value={form.location}
               onChange={(e) => setForm({ ...form, location: e.target.value })}
-              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
+              placeholder="e.g. Carlatan"
+              disabled={form.role !== 'Barangay' && form.role !== 'NGO'}
+              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30 disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed"
             />
           </div>
         </div>
@@ -662,16 +713,18 @@ function AddUserModal({ onCancel, onSave }) {
         <div className="mt-6 flex justify-end gap-2">
           <button
             onClick={onCancel}
-            className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
+            disabled={submitting}
+            className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Cancel
           </button>
-<button
-              onClick={() => onSave(form)}
-              className="rounded-lg bg-[#1b4de4] px-4 py-2 text-sm font-medium text-white hover:bg-[#153eb8]"
-            >
-              Create user
-            </button>
+          <button
+            onClick={handleSubmit}
+            disabled={submitting || !form.name.trim() || !form.email.trim()}
+            className="rounded-lg bg-[#1b4de4] px-4 py-2 text-sm font-medium text-white hover:bg-[#153eb8] disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {submitting ? 'Creating...' : 'Create user'}
+          </button>
         </div>
       </div>
     </div>
@@ -729,6 +782,7 @@ function ChangeRoleModal({ user, onCancel, onSave }) {
             <option>Admin</option>
             <option>Mayor</option>
             <option>Barangay</option>
+            <option>NGO</option>
           </select>
         </div>
         <div className="flex justify-end gap-2">
@@ -751,20 +805,20 @@ function ReassignAreaModal({ user, onCancel, onSave }) {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
       <div className="w-full max-w-sm rounded-xl bg-white p-6 border border-slate-200">
         <div className="mb-4 flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-slate-800">Reassign Area</h3>
+          <h3 className="text-sm font-semibold text-slate-800">Reassign Barangay</h3>
           <button onClick={onCancel} className="text-slate-400 hover:text-slate-600" aria-label="Close">
             <X size={18} />
           </button>
         </div>
         <p className="text-sm text-slate-600 mb-3">
-          Reassign area for <strong>{user.name}</strong>
+          Reassign barangay for <strong>{user.name}</strong>
         </p>
         <div className="mb-4">
-          <label className="mb-1 block text-xs font-medium text-slate-500">Assigned Location</label>
+          <label className="mb-1 block text-xs font-medium text-slate-500">Barangay</label>
           <input
             value={location}
             onChange={(e) => setLocation(e.target.value)}
-            placeholder="Enter location"
+            placeholder="Enter barangay"
             className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
           />
         </div>
@@ -808,8 +862,7 @@ function SuspendAccountModal({ user, onCancel, onConfirm }) {
 }
 
 function EditUserConfirmModal({ form, onCancel, onConfirm }) {
-  const roleLabel = form.role === 'admin' ? 'Admin' : form.role === 'mayorsoffice' ? 'Mayor' : form.role === 'barangay' ? 'Barangay' : form.role;
-  const statusLabel = form.status === 'active' ? 'Active' : form.status === 'Pending' ? 'Pending' : form.status === 'Offline' ? 'Offline' : form.status === 'Archived' ? 'Archived' : form.status;
+  const roleLabel = form.role === 'admin' ? 'Admin' : form.role === 'mayorsoffice' ? 'Mayor' : form.role === 'barangay' ? 'Barangay' : form.role === 'ngo' ? 'NGO' : form.role;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
       <div className="w-full max-w-sm rounded-xl bg-white p-6 border border-slate-200">
@@ -826,8 +879,7 @@ function EditUserConfirmModal({ form, onCancel, onConfirm }) {
           <p className="text-slate-600"><span className="text-slate-400">Name: </span><span className="font-medium text-slate-800">{form.name}</span></p>
           <p className="text-slate-600"><span className="text-slate-400">Email: </span><span className="font-medium text-slate-800">{form.email}</span></p>
           <p className="text-slate-600"><span className="text-slate-400">Role: </span><span className="font-medium text-slate-800">{roleLabel}</span></p>
-          <p className="text-slate-600"><span className="text-slate-400">Status: </span><span className="font-medium text-slate-800">{statusLabel}</span></p>
-          <p className="text-slate-600"><span className="text-slate-400">Assigned location: </span><span className="font-medium text-slate-800">{form.location || '—'}</span></p>
+          <p className="text-slate-600"><span className="text-slate-400">Barangay: </span><span className="font-medium text-slate-800">{form.location || '—'}</span></p>
         </div>
         <div className="flex justify-end gap-2">
           <button onClick={onCancel} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">

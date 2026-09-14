@@ -1,31 +1,41 @@
+import { useState } from "react";
+import { createPortal } from "react-dom";
 import { NavLink } from 'react-router-dom';
-import { Home, Map, FileText, Settings as SettingsIcon, LogOut, Shield, ClipboardList, Users, Bot, InboxIcon, Send, CalendarClock, Recycle } from 'lucide-react';
+import { Home, Map, FileText, LogOut, Shield, Users, Bot, InboxIcon, Send, CalendarClock, MapPin, UserCog, Wrench } from 'lucide-react';
 
 const navItems = {
   admin: [
     { to: '/admin/dashboard', icon: Home, label: 'Dashboard' },
     { to: '/admin/manage-bots', icon: Bot, label: 'Bot Management' },
-    { to: '/admin/requests', icon: InboxIcon, label: 'Requests' },
     { to: '/admin/users', icon: Users, label: 'User Management' },
+    { to: '/admin/operators', icon: UserCog, label: 'Operator Management' },
+    { to: '/admin/requests', icon: InboxIcon, label: 'Requests' },
+    { to: '/admin/collection-areas', icon: MapPin, label: 'Collection Areas' },
     { to: '/admin/deployment', icon: CalendarClock, label: 'Deployment Schedule' },
-    // { to: '/admin/collection-schedule', icon: CalendarClock, label: 'Collection Schedule' },
-    // { to: '/admin/landfill', icon: MapPin, label: 'Landfill Tracking' },
-    // { to: '/admin/recycling', icon: Recycle, label: 'Recycling Center' },
     { to: '/admin/heatmap', icon: Map, label: 'Heatmap' },
     { to: '/admin/reports', icon: FileText, label: 'Report Generation' },
-    { to: '/admin/audit', icon: ClipboardList, label: 'Audit Logs' },
-    { to: '/admin/settings', icon: SettingsIcon, label: 'Settings' },
+    { to: '/admin/utilities', icon: Wrench, label: 'Utilities' },
   ],
   mayorsoffice: [
     { to: '/mayorsoffice/dashboard', icon: Home, label: 'Dashboard' },
     { to: '/mayorsoffice/requests', icon: InboxIcon, label: 'Requests' },
+    { to: '/mayorsoffice/utilities', icon: Wrench, label: 'Utilities' },
   ],
   barangay: [
     { to: '/barangay/dashboard', icon: Home, label: 'Dashboard' },
+    { to: '/barangay/areas', icon: MapPin, label: 'Collection Areas' },
     { to: '/barangay/requests', icon: InboxIcon, label: 'My Requests' },
     { to: '/barangay/request', icon: Send, label: 'Submit Request' },
-    { to: '/barangay/segregation', icon: Recycle, label: 'Trash Segregation' },
     { to: '/barangay/heatmap', icon: Map, label: 'Bot Tracking' },
+    { to: '/barangay/utilities', icon: Wrench, label: 'Utilities' },
+  ],
+  ngo: [
+    { to: '/barangay/dashboard', icon: Home, label: 'Dashboard' },
+    { to: '/barangay/areas', icon: MapPin, label: 'Collection Areas' },
+    { to: '/barangay/requests', icon: InboxIcon, label: 'My Requests' },
+    { to: '/barangay/request', icon: Send, label: 'Submit Request' },
+    { to: '/barangay/heatmap', icon: Map, label: 'Bot Tracking' },
+    { to: '/barangay/utilities', icon: Wrench, label: 'Utilities' },
   ],
 };
 
@@ -33,14 +43,18 @@ const navItems = {
     admin: 'CENRO',
     mayorsoffice: 'Mayor\'s Office',
     barangay: 'Barangay',
+    ngo: 'NGO',
   };
   const roleInitial = {
     admin: 'CE',
     mayorsoffice: 'MO',
     barangay: 'BG',
+    ngo: 'NG',
   };
 
   const Sidebar = ({ onLogout, userType = 'admin', currentUser = null }) => {
+  const [showLogoutModal, setShowLogoutModal] = useState(false);
+
   const getNavLinkClass = (isActive) =>
     `flex items-center px-4 py-3 text-slate-300 hover:text-white hover:bg-white/5 rounded-xl transition-all duration-200 font-medium text-[15px] group ${isActive ? 'bg-[#1b4de4] text-white shadow-[0_4px_12px_rgba(27,77,228,0.25)]' : ''
     }`;
@@ -50,7 +64,8 @@ const navItems = {
     }`;
 
   return (
-    <aside className="w-[260px] bg-[#0c165a] text-white flex flex-col shadow-[4px_0_24px_rgba(0,0,0,0.15)] z-10 shrink-0">
+    <>
+    <aside className="w-[260px] bg-[#0c165a] text-white flex flex-col shadow-[4px_0_24px_rgba(0,0,0,0.15)] z-10 shrink-0 print:hidden">
       {/* Brand Header */}
       <div className="p-6 flex items-center gap-3.5 border-b border-white/5">
         {/* CSS Mockup of San Fernando City Seal */}
@@ -83,7 +98,7 @@ const navItems = {
       <div className="p-4 border-t border-white/5 flex flex-col gap-4">
         {/* Logout button */}
         <button
-          onClick={onLogout}
+          onClick={() => setShowLogoutModal(true)}
           className="flex items-center px-4 py-3 text-slate-400 hover:text-white hover:bg-white/5 rounded-xl transition-all duration-200 font-medium text-[15px] bg-transparent border-none w-full cursor-pointer text-left group"
         >
           <LogOut className="w-5 h-5 mr-3.5 text-slate-400 group-hover:text-white" />
@@ -107,6 +122,32 @@ const navItems = {
         </div>
       </div>
     </aside>
+    {showLogoutModal && createPortal(
+      <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60" onClick={() => setShowLogoutModal(false)}>
+        <div className="bg-white rounded-2xl shadow-2xl border border-slate-100 w-full max-w-sm mx-4 overflow-hidden" onClick={(e) => e.stopPropagation()}>
+          <div className="p-6 border-b border-slate-100">
+            <h3 className="text-lg font-bold text-slate-900">Confirm Logout</h3>
+            <p className="text-xs text-slate-500 mt-1">Are you sure you want to log out of your account?</p>
+          </div>
+          <div className="p-6 flex gap-3">
+            <button
+              onClick={() => setShowLogoutModal(false)}
+              className="flex-1 rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => { setShowLogoutModal(false); onLogout(); }}
+              className="flex-1 rounded-lg bg-[#1b4de4] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#153eb8] transition-colors"
+            >
+              Logout
+            </button>
+          </div>
+        </div>
+      </div>,
+      document.body
+    )}
+    </>
   );
 };
 

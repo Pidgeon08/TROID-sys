@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Recycle, Trash2, MapPin, Calendar, Package, Scale, Send, CheckCircle2, AlertTriangle, Droplets, ChevronDown, Plus, Truck } from "lucide-react";
+import api from "../../services/api";
 
 const TRASH_TYPES = [
   "Plastic Bottles",
@@ -49,6 +50,8 @@ export default function SegregationForm() {
     notes: "",
   });
   const [success, setSuccess] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState("");
 
   const handleAddItem = () => {
     setFormData((prev) => ({
@@ -71,20 +74,38 @@ export default function SegregationForm() {
     }));
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    setSuccess(true);
-    setTimeout(() => setSuccess(false), 4000);
-    setFormData({
-      zone: "",
-      date: new Date().toISOString().split("T")[0],
-      totalBags: "",
-      totalWeightKg: "",
-      trashItems: [],
-      nonUsableWeightKg: "",
-      recyclableWeightKg: "",
-      notes: "",
-    });
+    setSubmitError("");
+    setSubmitting(true);
+    try {
+      await api.createSegregationRecord({
+        zone: formData.zone,
+        date: formData.date,
+        total_bags: Number(formData.totalBags) || 0,
+        total_weight_kg: Number(formData.totalWeightKg) || 0,
+        non_usable_weight_kg: Number(formData.nonUsableWeightKg) || 0,
+        recyclable_weight_kg: Number(formData.recyclableWeightKg) || 0,
+        notes: formData.notes.trim(),
+      });
+      setSuccess(true);
+      setTimeout(() => setSuccess(false), 4000);
+      setFormData({
+        zone: "",
+        date: new Date().toISOString().split("T")[0],
+        totalBags: "",
+        totalWeightKg: "",
+        trashItems: [],
+        nonUsableWeightKg: "",
+        recyclableWeightKg: "",
+        notes: "",
+      });
+    } catch (err) {
+      console.error("Failed to submit segregation data:", err);
+      setSubmitError("Failed to submit segregation data. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -108,6 +129,13 @@ export default function SegregationForm() {
         <div className="mb-6 flex items-center gap-3 rounded-xl bg-emerald-50 border border-emerald-100 p-4">
           <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
           <p className="text-sm font-medium text-emerald-700">Segregation data submitted successfully! The non-usable waste will be sent to the landfill and recyclables to the recycling center.</p>
+        </div>
+      )}
+
+      {submitError && (
+        <div className="mb-6 flex items-center gap-3 rounded-xl bg-red-50 border border-red-100 p-4">
+          <AlertTriangle className="w-5 h-5 text-red-500 shrink-0" />
+          <p className="text-sm font-medium text-red-700">{submitError}</p>
         </div>
       )}
 
@@ -323,10 +351,11 @@ export default function SegregationForm() {
 
         <button
           type="submit"
-          className="w-full flex items-center justify-center gap-2 rounded-lg bg-[#1b4de4] py-3 px-4 text-sm font-medium text-white hover:bg-[#153eb8] transition-colors"
+          disabled={submitting}
+          className="w-full flex items-center justify-center gap-2 rounded-lg bg-[#1b4de4] py-3 px-4 text-sm font-medium text-white hover:bg-[#153eb8] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <Send size={16} />
-          Submit Segregation Data
+          {submitting ? "Submitting..." : "Submit Segregation Data"}
         </button>
       </form>
     </div>

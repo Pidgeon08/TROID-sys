@@ -7,13 +7,15 @@ import {
   CheckCircle2,
   XCircle,
   Eye,
-  ChevronLeft,
-  ChevronRight,
   ShieldCheck,
   Signature,
 } from "lucide-react";
 import api from "../../services/api";
-import { mapRequest } from "../../constants/requests";
+import { mapRequest, matchesRequestQuery } from "../../constants/requests";
+import { SummaryCard } from "../../components/ui/SummaryCard";
+import { Pagination } from "../../components/ui/Pagination";
+
+const PAGE_SIZE = 5;
 
 const TABS = ["All Requests", "Pending Approval", "Approved", "Declined"];
 
@@ -21,46 +23,29 @@ const STATUS_STYLES = {
   Pending: "bg-amber-50 text-amber-700",
   Approved: "bg-emerald-50 text-emerald-700",
   Declined: "bg-red-50 text-red-700",
+  Parked: "bg-purple-50 text-purple-700",
   "Pending Mayor Approval": "bg-amber-50 text-amber-700",
   "Pending Admin Approval": "bg-blue-50 text-blue-700",
+  Processing: "bg-sky-50 text-sky-700",
+  Completed: "bg-emerald-50 text-emerald-700",
+  Segregated: "bg-purple-50 text-purple-700",
+  "Pending Verification": "bg-orange-50 text-orange-700",
+  Verified: "bg-slate-100 text-slate-600",
 };
 
 const STATUS_DOT = {
   Pending: "bg-amber-500",
   Approved: "bg-emerald-500",
   Declined: "bg-red-500",
+  Parked: "bg-purple-500",
   "Pending Mayor Approval": "bg-amber-500",
   "Pending Admin Approval": "bg-blue-500",
+  Processing: "bg-sky-500",
+  Completed: "bg-emerald-500",
+  Segregated: "bg-purple-500",
+  "Pending Verification": "bg-orange-500",
+  Verified: "bg-slate-400",
 };
-
-function SummaryCard({ icon: Icon, label, value, sub }) {
-  return (
-    <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-6 flex items-center gap-4">
-      <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 shrink-0">
-        <Icon className="w-6 h-6" strokeWidth={2} />
-      </div>
-      <div className="min-w-0">
-        <p className="text-sm font-medium text-slate-600">{label}</p>
-        <p className="text-2xl font-bold text-slate-900 mt-1">{value}</p>
-        <p className="text-xs text-slate-400 mt-1">{sub}</p>
-      </div>
-    </div>
-  );
-}
-
-const Card = ({ title, children, className = "" }) => (
-  <div className={`bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-5 ${className}`}>
-    {title && <h3 className="text-sm font-semibold text-slate-800 mb-4">{title}</h3>}
-    {children}
-  </div>
-);
-
-const Field = ({ label, value }) => (
-  <div className="flex items-center justify-between py-2 text-sm">
-    <span className="text-slate-500">{label}</span>
-    <span className="font-medium text-slate-800 text-right">{value}</span>
-  </div>
-);
 
 export default function Requests() {
   const navigate = useNavigate();
@@ -88,11 +73,13 @@ export default function Requests() {
     return () => { cancelled = true; };
   }, []);
 
-  const filteredByTab = activeTab === "All Requests"
+  const filteredByTab = (activeTab === "All Requests"
     ? requests
-    : requests.filter((r) => r.status === activeTab);
+    : requests.filter((r) => r.status === activeTab)
+  ).filter((req) => matchesRequestQuery(req, searchQuery));
 
-  const paginated = filteredByTab.slice((currentPage - 1) * 5, currentPage * 5);
+  const totalPages = Math.max(1, Math.ceil(filteredByTab.length / PAGE_SIZE));
+  const paginated = filteredByTab.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
   return (
     <div className="max-w-[1400px] mx-auto animate-fade-in pb-12">
@@ -123,9 +110,6 @@ export default function Requests() {
               className="w-56 rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm text-slate-700 placeholder:text-slate-400 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
             />
           </div>
-          <button className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
-            Filter
-          </button>
         </div>
       </header>
 
@@ -217,36 +201,13 @@ export default function Requests() {
           </table>
         </div>
 
-        <div className="flex items-center justify-between px-5 py-3.5 border-t border-slate-100">
-          <p className="text-xs text-slate-500">Showing {filteredByTab.length === 0 ? 0 : (currentPage - 1) * 5 + 1}–{Math.min(currentPage * 5, filteredByTab.length)} of {filteredByTab.length} requests</p>
-          <div className="flex items-center gap-1.5">
-            <button
-              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-              disabled={currentPage === 1}
-              className="w-7 h-7 flex items-center justify-center rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-40"
-            >
-              <ChevronLeft size={14} />
-            </button>
-            {[1, 2, 3].map((page) => (
-              <button
-                key={page}
-                onClick={() => setCurrentPage(page)}
-                className={`w-7 h-7 flex items-center justify-center rounded-md text-xs font-medium border ${
-                  currentPage === page ? "bg-blue-50 border-blue-200 text-blue-600" : "border-slate-200 text-slate-500 hover:bg-slate-50"
-                }`}
-              >
-                {page}
-              </button>
-            ))}
-            <button
-              onClick={() => setCurrentPage((p) => Math.min(Math.ceil(filteredByTab.length / 5), p + 1))}
-              disabled={currentPage >= Math.ceil(filteredByTab.length / 5)}
-              className="w-7 h-7 flex items-center justify-center rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-40"
-            >
-              <ChevronRight size={14} />
-            </button>
-          </div>
-        </div>
+        <Pagination
+          page={currentPage}
+          totalPages={totalPages}
+          onPageChange={setCurrentPage}
+          totalItems={filteredByTab.length}
+          pageSize={PAGE_SIZE}
+        />
       </div>
       </>
       )}

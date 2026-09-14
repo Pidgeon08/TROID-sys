@@ -10,22 +10,37 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
+import os
 from pathlib import Path
+from dotenv import load_dotenv
+import dj_database_url
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+# Loads backend/.env if present (gitignored). Real SMTP credentials live
+# there instead of in this file so they never get committed.
+load_dotenv(BASE_DIR / '.env')
+
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
+#
+# All three of these fall back to the original hardcoded dev values when the
+# env vars aren't set, so local `python manage.py runserver` keeps working
+# unchanged. Set SECRET_KEY/DEBUG=False/ALLOWED_HOSTS for real deployments.
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-i&l$xyhtr+q=0rqs-0_!=%=(_$+#c@#k0@*0(p*=6pbn2o*xau'
+SECRET_KEY = os.environ.get(
+    'SECRET_KEY',
+    'django-insecure-i&l$xyhtr+q=0rqs-0_!=%=(_$+#c@#k0@*0(p*=6pbn2o*xau',
+)
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.environ.get('DEBUG', 'True') == 'True'
 
-ALLOWED_HOSTS = ['localhost', '127.0.0.1']
+# Comma-separated in production, e.g. "troid-backend.onrender.com"
+ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
 
 # API is accessed by the React frontend running on another origin.
 # Keep DEBUG for development only.
@@ -54,6 +69,7 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -84,13 +100,24 @@ WSGI_APPLICATION = 'core.wsgi.application'
 
 # Database
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
+#
+# Set DATABASE_URL (in backend/.env) to point at a shared/hosted Postgres
+# instance, e.g. postgres://user:pass@host:5432/dbname
+# With no DATABASE_URL, falls back to the local db.sqlite3 for solo dev.
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+DATABASE_URL = os.environ.get('DATABASE_URL')
+
+if DATABASE_URL:
+    DATABASES = {
+        'default': dj_database_url.parse(DATABASE_URL, conn_max_age=600)
     }
-}
+else:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
+        }
+    }
 
 
 # Password validation
@@ -128,4 +155,32 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = 'static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'
+STORAGES = {
+    'staticfiles': {
+        'BACKEND': 'whitenoise.storage.CompressedManifestStaticFilesStorage',
+    },
+}
 CORS_ALLOW_ALL_ORIGINS = True
+
+
+# Email
+# Defaults to printing emails to the console so account-creation emails are
+# visible during development without any SMTP setup. Set these env vars to
+# send through a real provider in production.
+EMAIL_BACKEND = os.environ.get('EMAIL_BACKEND', 'django.core.mail.backends.console.EmailBackend')
+EMAIL_HOST = os.environ.get('EMAIL_HOST', '')
+EMAIL_PORT = int(os.environ.get('EMAIL_PORT', '587'))
+EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER', '')
+EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
+EMAIL_USE_TLS = os.environ.get('EMAIL_USE_TLS', 'True') == 'True'
+DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', 'CENRO TROID <no-reply@troid.local>')
+
+
+# Realtime (Cloudflare Worker + Durable Object WebSocket relay)
+# See cloudflare-ws/ for the Worker source. Django POSTs events to it after
+# handling MQTT messages; the Worker fans them out to connected browser
+# clients over WebSocket so the dashboard updates instantly instead of
+# waiting on its polling interval.
+REALTIME_WORKER_URL = os.environ.get('REALTIME_WORKER_URL', 'http://127.0.0.1:8787')
+REALTIME_WORKER_SECRET = os.environ.get('REALTIME_WORKER_SECRET', 'dev-shared-secret-change-me')

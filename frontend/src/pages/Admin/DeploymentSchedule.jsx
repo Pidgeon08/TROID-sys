@@ -1,10 +1,11 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+import { useOutletContext } from "react-router-dom";
 import { createPortal } from "react-dom";
 import {
   Bot,
   CalendarCheck,
   UserRound,
-  Wrench,
+  CheckCircle2,
   Plus,
   Filter,
   Info,
@@ -14,8 +15,11 @@ import {
   ChevronLeft,
   Eye,
   X,
+  Search,
+  AlertTriangle,
 } from "lucide-react";
 import { api } from '../../services/api';
+import { logAudit } from '../../services/auditLog';
 import ViewRequest from './ViewRequest';
 
 const DAYS = [
@@ -35,7 +39,6 @@ const TIME_SLOTS = [
 
 const STATUS_STYLES = {
   scheduled: "bg-emerald-50 text-emerald-700 border border-emerald-100",
-  maintenance: "bg-amber-50 text-amber-700 border border-amber-100",
   available: "bg-sky-50 text-sky-700 border border-sky-100",
   none: "bg-slate-50 text-slate-400 border border-slate-100",
 };
@@ -49,6 +52,16 @@ function toDateInput(date) {
 
 function dateKey(date) {
   return toDateInput(date);
+}
+
+function formatTime12h(time) {
+  if (!time) return time;
+  const [hourStr, minuteStr = "00"] = time.split(":");
+  const hour = parseInt(hourStr, 10);
+  if (Number.isNaN(hour)) return time;
+  const period = hour >= 12 ? "PM" : "AM";
+  const hour12 = hour % 12 === 0 ? 12 : hour % 12;
+  return `${hour12}:${minuteStr} ${period}`;
 }
 
 function SummaryCard({ icon: Icon, label, value, sub }) {
@@ -88,115 +101,268 @@ function Cell({ entry, onClick, dateObj }) {
         entry.status === 'scheduled' ? 'cursor-pointer hover:brightness-95' : ''
       } ${styles}`}
     >
-      <p className="font-semibold leading-tight">{entry.label}</p>
+      <p className="font-semibold leading-tight">{formatTime12h(entry.label)}</p>
       {entry.zone && <p className="mt-0.5 truncate leading-tight opacity-80 flex items-center gap-1"><MapPin className="w-3 h-3" />{entry.zone}</p>}
     </button>
   );
 }
 
-function ScheduleModal({ bots, approvedRequests, scheduledRequestIds = new Set(), onClose, onSave, onViewRequest, prefillBot, prefillZone }) {
-  const [selectedBots, setSelectedBots] = useState(prefillBot ? [prefillBot] : []);
-  const [selectedDate, setSelectedDate] = useState(toDateInput(new Date()));
-  const [selectedTime, setSelectedTime] = useState("06:00");
-  const [selectedRequestId, setSelectedRequestId] = useState("");
-  const [zone, setZone] = useState("");
-  const [landmark, setLandmark] = useState("");
+function ScheduleModal({ bots, operators, approvedRequests, priorityBarangays = new Set(), scheduledRequestIds = new Set(), onClose, onSave, onReschedule, onViewRequest, prefillBot, prefillZone, schedule, editingSchedule }) {
+  const isEditing = !!editingSchedule;
+  const [isRequestListOpen, setIsRequestListOpen] = useState(false);
+  const requestDropdownRef = useRef(null);
+
+  useEffect(() => {
+    if (!isRequestListOpen) return;
+    const handleClickOutside = (e) => {
+      if (requestDropdownRef.current && !requestDropdownRef.current.contains(e.target)) {
+        setIsRequestListOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isRequestListOpen]);
+
+  const requestBarangay = (r) => r.location?.barangay || r.requestedBy?.barangay || '';
+  const isPriorityRequest = (r) => priorityBarangays.has(requestBarangay(r));
+
+  // Priority-area requests surface first, so the barangays TROID flagged as needing a
+  // follow-up are the easiest to pick when scheduling a TROID-assisted cleanup.
+  const orderedRequests = [...approvedRequests].sort((a, b) => {
+    const aPriority = isPriorityRequest(a) ? 0 : 1;
+    const bPriority = isPriorityRequest(b) ? 0 : 1;
+    return aPriority - bPriority;
+  });
+
+  const [selectedBots, setSelectedBots] = useState(
+    isEditing ? [editingSchedule.botId] : (prefillBot ? [prefillBot] : [])
+  );
+  const [selectedOperators, setSelectedOperators] = useState(() => {
+    if (!isEditing) return [];
+    const currentOp = operators.find((o) => o.assigned_bot === editingSchedule.botId);
+    return currentOp ? [currentOp.id] : [];
+  });
+  const [selectedDate, setSelectedDate] = useState(isEditing ? editingSchedule.day : toDateInput(new Date()));
+  const [selectedTime, setSelectedTime] = useState(isEditing ? editingSchedule.entry.label : "");
+  const [selectedRequestId, setSelectedRequestId] = useState(isEditing ? (editingSchedule.entry.requestId || "") : "");
+  const [zone, setZone] = useState(isEditing ? (editingSchedule.entry.zone || "") : (prefillZone || ""));
+  const [landmark, setLandmark] = useState(isEditing ? (editingSchedule.entry.landmark || "") : "");
+  const [cleanupType, setCleanupType] = useState(isEditing ? (editingSchedule.entry.cleanupType || "troid_supported") : "troid_supported");
   const [confirmData, setConfirmData] = useState(null);
-  const [showSetSchedule, setShowSetSchedule] = useState(false);
-  const [botPage, setBotPage] = useState(0);
+  const [showBotModal, setShowBotModal] = useState(false);
+  const [showOperatorModal, setShowOperatorModal] = useState(false);
 
-  const selectSlot = (time, botId) => {
-    setSelectedTime(time);
-    setSelectedBots((prev) => {
-      if (time !== selectedTime) return [botId];
-      return prev.includes(botId) ? prev.filter((b) => b !== botId) : [...prev, botId];
-    });
-  };
+  const isSelfSlot = (botId, date) => isEditing && String(botId) === String(editingSchedule.botId) && date === editingSchedule.day;
 
-  const handleRequestChange = (e) => {
-    const id = e.target.value;
+  const selectRequest = (id) => {
     setSelectedRequestId(id);
+    setIsRequestListOpen(false);
     const req = approvedRequests.find((r) => r.id === id);
-    setZone(req ? req.location?.barangay || req.requestedBy?.barangay || '' : '');
+    setZone(req ? requestBarangay(req) : '');
+    if (req?.preferredDate) {
+      handleDateChange({ target: { value: req.preferredDate } });
+    }
+    if (req?.preferredTime && TIME_SLOTS.includes(req.preferredTime)) {
+      setSelectedTime(req.preferredTime);
+    }
   };
+
+  const isUnsupported = cleanupType === 'unsupported';
+
+  const operatorsMatchBots = selectedBots.length > 0 && selectedOperators.length === selectedBots.length;
+
+  // Each bot can only hold one schedule per day, so if any selected bot is already
+  // booked on the chosen date, no time slot on that date is actually usable for it.
+  // (A bot's own current slot doesn't count as a conflict against itself while rescheduling.)
+  const busyBotsOnDate = selectedBots
+    .map((id) => bots.find((b) => b.id === id))
+    .filter((b) => b && schedule?.[b.id]?.[selectedDate]?.status === 'scheduled' && !isSelfSlot(b.id, selectedDate));
+  const dateHasConflict = busyBotsOnDate.length > 0;
 
   const openConfirm = () => {
-    if (!selectedBots.length || !selectedRequestId || !selectedDate || !selectedTime) return;
-    setConfirmData({ botIds: selectedBots, date: selectedDate, time: selectedTime, zone, landmark, requestId: selectedRequestId });
+    if (!selectedBots.length || !selectedRequestId || !selectedDate || !selectedTime || !operatorsMatchBots || dateHasConflict) return;
+    setConfirmData({ botIds: selectedBots, operatorIds: selectedOperators, date: selectedDate, time: selectedTime, zone, landmark, requestId: selectedRequestId, cleanupType });
   };
 
   const doSave = () => {
     if (!confirmData) return;
-    confirmData.botIds.forEach((botId) => {
-      onSave(botId, confirmData.date, confirmData.time, confirmData.zone, confirmData.landmark, confirmData.requestId);
-    });
+    if (isEditing) {
+      onReschedule(
+        editingSchedule.entry.id,
+        editingSchedule.botId,
+        editingSchedule.day,
+        confirmData.botIds[0],
+        confirmData.date,
+        confirmData.time,
+        confirmData.zone,
+        confirmData.landmark,
+        confirmData.requestId,
+        confirmData.operatorIds[0] || null,
+        confirmData.cleanupType
+      );
+    } else {
+      confirmData.botIds.forEach((botId, idx) => {
+        onSave(botId, confirmData.date, confirmData.time, confirmData.zone, confirmData.landmark, confirmData.requestId, confirmData.operatorIds[idx], confirmData.cleanupType);
+      });
+    }
     setConfirmData(null);
     setSelectedBots([]);
+    setSelectedOperators([]);
     setSelectedRequestId("");
     setZone("");
     setLandmark("");
+    setCleanupType("troid_supported");
     setSelectedDate(toDateInput(new Date()));
-    setSelectedTime("06:00");
-    setShowSetSchedule(false);
-    setBotPage(0);
+    setSelectedTime("");
   };
 
-  const confirmBots = bots.filter((b) => confirmData?.botIds?.includes(b.id));
   const confirmRequest = approvedRequests.find((r) => r.id === confirmData?.requestId);
+  const confirmPairs = confirmData?.botIds.map((botId, idx) => ({
+    bot: bots.find((b) => b.id === botId),
+    operator: operators.find((o) => o.id === confirmData.operatorIds[idx]),
+  })) || [];
 
-  const BOTS_PER_PAGE = 6;
-  const totalBotPages = Math.max(1, Math.ceil(bots.length / BOTS_PER_PAGE));
-  const pagedBots = bots.slice(botPage * BOTS_PER_PAGE, (botPage + 1) * BOTS_PER_PAGE);
+  const hasTimeSlot = !!selectedTime;
+
+  // A bot can only hold one schedule per date, so "available" just means not already scheduled that day
+  // (except the bot's own current slot when rescheduling it).
+  const availableBots = bots.filter((b) => schedule?.[b.id]?.[selectedDate]?.status !== 'scheduled' || isSelfSlot(b.id, selectedDate));
+  // An operator is unavailable if the bot they're assigned to already has a deployment that day.
+  const availableOperators = operators.filter(
+    (o) => !o.archived && !(o.assigned_bot && schedule?.[o.assigned_bot]?.[selectedDate]?.status === 'scheduled' && !isSelfSlot(o.assigned_bot, selectedDate))
+  );
+
+  const handleDateChange = (e) => {
+    const newDate = e.target.value;
+    setSelectedDate(newDate);
+    const stillAvailableIds = new Set(
+      bots.filter((b) => schedule?.[b.id]?.[newDate]?.status !== 'scheduled' || isSelfSlot(b.id, newDate)).map((b) => b.id)
+    );
+    setSelectedBots((prev) => prev.filter((id) => stillAvailableIds.has(id)));
+  };
+
+  const toggleBot = (botId) => {
+    if (isEditing) {
+      setSelectedBots([botId]);
+      setSelectedOperators([]);
+      return;
+    }
+    setSelectedBots((prev) => (prev.includes(botId) ? prev.filter((id) => id !== botId) : [...prev, botId]));
+  };
+
+  const toggleOperator = (opId) => {
+    if (isEditing) {
+      setSelectedOperators([opId]);
+      return;
+    }
+    setSelectedOperators((prev) => {
+      if (prev.includes(opId)) return prev.filter((id) => id !== opId);
+      if (prev.length >= selectedBots.length) return prev;
+      return [...prev, opId];
+    });
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
-      <div className="w-full max-w-lg bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden">
-        <div className="p-7 border-b border-slate-100">
+      <div className="w-full max-w-lg h-[85vh] max-h-195 bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden flex flex-col">
+        <div className="p-7 border-b border-slate-100 shrink-0">
           <div className="flex items-center justify-between">
-            <h3 className="text-lg font-bold text-slate-900">Schedule Deployment</h3>
+            <h3 className="text-lg font-bold text-slate-900">{isEditing ? 'Reschedule Deployment' : 'Schedule Deployment'}</h3>
             <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 transition-colors">
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
             </button>
           </div>
-          <p className="text-xs text-slate-500 mt-1">Assign a bot to an approved request location.</p>
+          <p className="text-xs text-slate-500 mt-1">
+            {isEditing ? 'Update the bot, operator, date, or time for this deployment.' : 'Assign a bot to an approved request location.'}
+          </p>
         </div>
-        <div className="p-7 space-y-5">
+        <div className="p-7 space-y-5 overflow-y-auto flex-1">
           <div>
             <label className="block text-xs font-semibold text-slate-500 mb-1.5">Approved Request / Zone</label>
-            <div className="flex items-center gap-2">
-              <div className="relative flex-1">
-                <select
-                  value={selectedRequestId}
-                  onChange={handleRequestChange}
-                  className="w-full rounded-lg border border-slate-200 bg-white py-2.5 px-3 text-sm text-slate-700 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30 appearance-none"
+            {isEditing ? (
+              <div className="flex items-center gap-2">
+                <div className="flex-1 rounded-lg border border-slate-200 bg-slate-50 py-2.5 px-3 text-sm text-slate-600">
+                  {selectedRequestId || '—'}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => selectedRequestId && onViewRequest(selectedRequestId)}
+                  disabled={!selectedRequestId}
+                  className="shrink-0 flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  <option value="">-- Select Approved Request --</option>
-                  {approvedRequests.map((r) => {
-                    const isScheduled = scheduledRequestIds.has(r.id);
-                    return (
-                      <option
-                        key={r.id}
-                        value={r.id}
-                        disabled={isScheduled}
-                        className={isScheduled ? "text-slate-400" : ""}
-                      >
-                        {r.id} - {r.location?.barangay || r.requestedBy?.barangay || 'Unknown zone'}{isScheduled ? " (Scheduled)" : ""}
-                      </option>
-                    );
-                  })}
-                </select>
-                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                  <Eye size={16} />
+                  View
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={() => selectedRequestId && onViewRequest(selectedRequestId)}
-                disabled={!selectedRequestId}
-                className="shrink-0 flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <Eye size={16} />
-                View
-              </button>
-            </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <div className="relative flex-1" ref={requestDropdownRef}>
+                  <button
+                    type="button"
+                    onClick={() => setIsRequestListOpen((v) => !v)}
+                    className="w-full flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white py-2.5 px-3 text-sm text-left outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
+                  >
+                    {selectedRequestId ? (
+                      (() => {
+                        const selected = approvedRequests.find((r) => r.id === selectedRequestId);
+                        const selectedIsPriority = selected && isPriorityRequest(selected);
+                        return (
+                          <span className={`flex items-center gap-1.5 truncate ${selectedIsPriority ? 'text-amber-700 font-semibold' : 'text-slate-700'}`}>
+                            {selectedIsPriority && <AlertTriangle size={14} className="shrink-0 text-amber-500" />}
+                            <span className="truncate">{selectedRequestId} - {selected ? requestBarangay(selected) || 'Unknown zone' : ''}</span>
+                          </span>
+                        );
+                      })()
+                    ) : (
+                      <span className="text-slate-400">-- Select Approved Request --</span>
+                    )}
+                    <ChevronDown className="shrink-0 w-4 h-4 text-slate-400" />
+                  </button>
+
+                  {isRequestListOpen && (
+                    <div className="absolute z-10 mt-1 w-full max-h-64 overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg py-1">
+                      {orderedRequests.length === 0 && (
+                        <p className="px-3 py-2 text-sm text-slate-400">No approved requests available.</p>
+                      )}
+                      {orderedRequests.map((r) => {
+                        const isScheduled = scheduledRequestIds.has(r.id);
+                        const priority = isPriorityRequest(r);
+                        return (
+                          <button
+                            type="button"
+                            key={r.id}
+                            disabled={isScheduled}
+                            onClick={() => selectRequest(r.id)}
+                            className={`w-full flex items-center gap-1.5 px-3 py-2 text-sm text-left transition-colors ${
+                              isScheduled
+                                ? 'text-slate-400 cursor-not-allowed'
+                                : priority
+                                ? 'text-amber-700 font-semibold hover:bg-amber-50'
+                                : 'text-slate-700 hover:bg-slate-50'
+                            }`}
+                            title={priority ? 'Priority area — flagged for a TROID follow-up cleanup' : undefined}
+                          >
+                            {priority && <AlertTriangle size={14} className={`shrink-0 ${isScheduled ? 'text-slate-400' : 'text-amber-500'}`} />}
+                            <span className="truncate">
+                              {r.id} - {requestBarangay(r) || 'Unknown zone'}{isScheduled ? ' (Scheduled)' : ''}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => selectedRequestId && onViewRequest(selectedRequestId)}
+                  disabled={!selectedRequestId}
+                  className="shrink-0 flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Eye size={16} />
+                  View
+                </button>
+              </div>
+            )}
           </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
@@ -218,51 +384,240 @@ function ScheduleModal({ bots, approvedRequests, scheduledRequestIds = new Set()
                   placeholder="e.g. Near the plaza"
                   className="w-full rounded-lg border border-slate-200 bg-white py-2.5 px-3 text-sm text-slate-700 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
                 />
+               </div>
+               </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 mb-1.5">Date</label>
+              <input
+                type="date"
+                value={selectedDate}
+                onChange={handleDateChange}
+                className="w-full rounded-lg border border-slate-200 bg-white py-2.5 px-3 text-sm text-slate-700 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 mb-1.5">Time Slot</label>
+              <div className="relative">
+                <select
+                  value={selectedTime}
+                  onChange={(e) => setSelectedTime(e.target.value)}
+                  disabled={dateHasConflict}
+                  className="w-full rounded-lg border border-slate-200 bg-white py-2.5 px-3 text-sm text-slate-700 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30 appearance-none disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <option value="">-- Select a time slot --</option>
+                  {TIME_SLOTS.map((slot) => (
+                    <option key={slot} value={slot}>{formatTime12h(slot)} — Available</option>
+                  ))}
+                </select>
+                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
               </div>
             </div>
+            {dateHasConflict && (
+              <p className="col-span-2 -mt-2 text-xs text-amber-600">
+                No time slots are available on this date for {busyBotsOnDate.map((b) => b.name).join(", ")} — already scheduled that day. Choose another date.
+              </p>
+            )}
+          </div>
           <div>
-            <label className="block text-xs font-semibold text-slate-500 mb-1.5">Schedule</label>
-            <button
-              type="button"
-              onClick={() => setShowSetSchedule(true)}
-              className="w-full flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white py-2.5 px-3 text-sm text-left outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30 hover:bg-slate-50 transition-colors"
-            >
-              <span className={selectedBots.length ? "text-slate-700 font-medium" : "text-slate-400"}>
-                {selectedBots.length
-                  ? `${selectedBots.map((id) => bots.find((b) => b.id === id)?.name || id).join(", ")} • ${selectedDate} • ${selectedTime}`
-                  : "Set schedule"}
-              </span>
-              <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />
-            </button>
+            <label className="block text-xs font-semibold text-slate-500 mb-1.5">Cleanup Type</label>
+            <div className="relative">
+              <select
+                value={cleanupType}
+                onChange={(e) => setCleanupType(e.target.value)}
+                className="w-full rounded-lg border border-slate-200 bg-white py-2.5 px-3 text-sm text-slate-700 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30 appearance-none"
+              >
+                <option value="troid_supported">TROID Supported</option>
+                <option value="unsupported">Unsupported</option>
+              </select>
+              <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+            </div>
           </div>
-          <div className="flex gap-3 pt-2">
-            <button
-              onClick={onClose}
-              className="flex-1 rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={openConfirm}
-              disabled={!selectedBots.length || !selectedRequestId}
-              className="flex-1 rounded-lg bg-[#1b4de4] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#153eb8] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              Save Schedule
-            </button>
+          <div className="grid grid-cols-2 gap-4">
+            <div className={isUnsupported || !hasTimeSlot ? "opacity-40 pointer-events-none transition-opacity" : "transition-opacity"}>
+              <label className="block text-xs font-semibold text-slate-500 mb-1.5">Bots</label>
+              <button
+                type="button"
+                onClick={() => setShowBotModal(true)}
+                disabled={isUnsupported || !hasTimeSlot}
+                className="w-full flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white py-2.5 px-3 text-sm text-left outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30 hover:bg-slate-50 transition-colors"
+              >
+                <span className={selectedBots.length ? "text-slate-700 font-medium" : "text-slate-400"}>
+                  {selectedBots.length
+                    ? `${selectedBots.length} bot${selectedBots.length === 1 ? "" : "s"} selected`
+                    : "Select bots"}
+                </span>
+                <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />
+              </button>
+              {!isUnsupported && hasTimeSlot && availableBots.length === 0 && (
+                <p className="mt-1.5 text-xs text-amber-600">No bots are available on this date.</p>
+              )}
+            </div>
+            <div className={isUnsupported || !hasTimeSlot ? "opacity-40 pointer-events-none transition-opacity" : "transition-opacity"}>
+              <label className="block text-xs font-semibold text-slate-500 mb-1.5">Operators</label>
+              <button
+                type="button"
+                onClick={() => selectedBots.length && setShowOperatorModal(true)}
+                disabled={isUnsupported || !hasTimeSlot || !selectedBots.length}
+                className="w-full flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white py-2.5 px-3 text-sm text-left outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30 hover:bg-slate-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <span className={selectedOperators.length ? "text-slate-700 font-medium" : "text-slate-400"}>
+                  {!selectedBots.length
+                    ? "Select bots first"
+                    : `${selectedOperators.length} / ${selectedBots.length} operator${selectedBots.length === 1 ? "" : "s"} selected`}
+                </span>
+                <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />
+              </button>
+              {!isUnsupported && selectedBots.length > 0 && !operatorsMatchBots && (
+                <p className="mt-1.5 text-xs text-amber-600">
+                  Select {selectedBots.length} operator{selectedBots.length === 1 ? "" : "s"} to match the {selectedBots.length} bot{selectedBots.length === 1 ? "" : "s"} chosen.
+                </p>
+              )}
+            </div>
           </div>
+          {isUnsupported ? (
+            <p className="-mt-3 text-xs text-slate-400">Bots and operators aren't required for unsupported cleanups.</p>
+          ) : !hasTimeSlot ? (
+            <p className="-mt-3 text-xs text-slate-400">Select a date and time slot to see available bots and operators.</p>
+          ) : null}
+        </div>
+        <div className="p-6 border-t border-slate-100 flex gap-3 shrink-0">
+          <button
+            onClick={onClose}
+            className="flex-1 rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={openConfirm}
+            disabled={!selectedBots.length || !selectedRequestId || !selectedTime || !operatorsMatchBots || dateHasConflict}
+            className="flex-1 rounded-lg bg-[#1b4de4] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#153eb8] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isEditing ? 'Save Changes' : 'Save Schedule'}
+          </button>
         </div>
       </div>
+
+      {showBotModal && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/60 p-4">
+          <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden">
+            <div className="p-7 border-b border-slate-100">
+              <h3 className="text-lg font-bold text-slate-900">Select Bots</h3>
+              <p className="text-xs text-slate-500 mt-1">Choose one or more bots available on {selectedDate}.</p>
+            </div>
+            <div className="p-7 space-y-4">
+              <div className="max-h-[45vh] overflow-y-auto space-y-1.5 border border-slate-100 rounded-xl p-2">
+                {availableBots.map((b) => {
+                  const isSelected = selectedBots.includes(b.id);
+                  return (
+                    <label
+                      key={b.id}
+                      className={`flex w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-sm cursor-pointer transition-colors ${
+                        isSelected ? "border-[#1b4de4] bg-blue-50 text-[#1b4de4] font-medium" : "border-slate-200 text-slate-600 hover:bg-slate-50"
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => toggleBot(b.id)}
+                        className="h-4 w-4 rounded border-slate-300 text-[#1b4de4] focus:ring-blue-500/30"
+                      />
+                      <span className="flex-1">{b.name} ({b.id})</span>
+                    </label>
+                  );
+                })}
+                {availableBots.length === 0 && (
+                  <p className="py-6 text-center text-sm text-slate-400">No bots available on this date.</p>
+                )}
+              </div>
+              <p className="text-xs font-medium text-slate-500 text-right">{selectedBots.length} selected</p>
+            </div>
+            <div className="p-6 border-t border-slate-100 flex gap-3">
+              <button
+                onClick={() => setShowBotModal(false)}
+                className="flex-1 rounded-lg bg-[#1b4de4] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#153eb8] transition-colors"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showOperatorModal && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/60 p-4">
+          <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden">
+            <div className="p-7 border-b border-slate-100">
+              <h3 className="text-lg font-bold text-slate-900">Select Operators</h3>
+              <p className="text-xs text-slate-500 mt-1">
+                Choose exactly {selectedBots.length} operator{selectedBots.length === 1 ? "" : "s"} to match the {selectedBots.length} bot{selectedBots.length === 1 ? "" : "s"} selected.
+              </p>
+            </div>
+            <div className="p-7 space-y-4">
+              <div className="max-h-[45vh] overflow-y-auto space-y-1.5 border border-slate-100 rounded-xl p-2">
+                {availableOperators.map((o) => {
+                  const isSelected = selectedOperators.includes(o.id);
+                  const disabled = !isSelected && selectedOperators.length >= selectedBots.length;
+                  return (
+                    <label
+                      key={o.id}
+                      className={`flex w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-sm transition-colors ${
+                        isSelected
+                          ? "border-[#1b4de4] bg-blue-50 text-[#1b4de4] font-medium cursor-pointer"
+                          : disabled
+                            ? "border-slate-100 bg-slate-50 text-slate-300 cursor-not-allowed"
+                            : "border-slate-200 text-slate-600 hover:bg-slate-50 cursor-pointer"
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        disabled={disabled}
+                        onChange={() => toggleOperator(o.id)}
+                        className="h-4 w-4 rounded border-slate-300 text-[#1b4de4] focus:ring-blue-500/30 disabled:opacity-50"
+                      />
+                      <span className="flex-1">{o.name}</span>
+                    </label>
+                  );
+                })}
+                {availableOperators.length === 0 && (
+                  <p className="py-6 text-center text-sm text-slate-400">No operators available.</p>
+                )}
+              </div>
+              <p className="text-xs font-medium text-slate-500 text-right">
+                {selectedOperators.length} / {selectedBots.length} selected
+              </p>
+            </div>
+            <div className="p-6 border-t border-slate-100 flex gap-3">
+              <button
+                onClick={() => setShowOperatorModal(false)}
+                className="flex-1 rounded-lg bg-[#1b4de4] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#153eb8] transition-colors"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {confirmData && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/60 p-4">
           <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden">
             <div className="p-7 border-b border-slate-100">
-              <h3 className="text-lg font-bold text-slate-900">Confirm Schedule</h3>
+              <h3 className="text-lg font-bold text-slate-900">{isEditing ? 'Confirm Reschedule' : 'Confirm Schedule'}</h3>
               <p className="text-xs text-slate-500 mt-1">Please review the schedule details before saving.</p>
             </div>
             <div className="p-7 space-y-3 text-sm">
-              <div className="flex justify-between gap-4">
-                <span className="text-slate-500">Bots</span>
-                <span className="font-semibold text-slate-900 text-right">{confirmBots.map((b) => `${b.name} (${b.id})`).join(", ")}</span>
+              <div>
+                <span className="text-slate-500">Bots &amp; Operators</span>
+                <div className="mt-1.5 space-y-1">
+                  {confirmPairs.map(({ bot, operator }) => (
+                    <div key={bot?.id} className="flex justify-between gap-4 rounded-lg bg-slate-50 px-3 py-1.5">
+                      <span className="font-semibold text-slate-900">{bot ? `${bot.name} (${bot.id})` : '—'}</span>
+                      <span className="text-slate-600">{operator?.name || '—'}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
               <div className="flex justify-between gap-4">
                 <span className="text-slate-500">Request</span>
@@ -274,7 +629,11 @@ function ScheduleModal({ bots, approvedRequests, scheduledRequestIds = new Set()
               </div>
               <div className="flex justify-between gap-4">
                 <span className="text-slate-500">Time</span>
-                <span className="font-semibold text-slate-900">{confirmData.time}</span>
+                <span className="font-semibold text-slate-900">{formatTime12h(confirmData.time)}</span>
+              </div>
+              <div className="flex justify-between gap-4">
+                <span className="text-slate-500">Cleanup Type</span>
+                <span className="font-semibold text-slate-900">{confirmData.cleanupType === 'troid_supported' ? 'TROID Supported' : 'Unsupported'}</span>
               </div>
               {confirmData.landmark && (
                 <div className="flex justify-between gap-4">
@@ -300,130 +659,6 @@ function ScheduleModal({ bots, approvedRequests, scheduledRequestIds = new Set()
           </div>
         </div>
       )}
-
-      {showSetSchedule && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/60 p-4">
-          <div className="w-full max-w-full bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden">
-            <div className="p-7 border-b border-slate-100">
-              <h3 className="text-lg font-bold text-slate-900">Set Schedule</h3>
-              <p className="text-xs text-slate-500 mt-1">Select one or more bots for the same deployment time.</p>
-            </div>
-            <div className="p-7 space-y-5">
-              <div className="flex items-center justify-between mb-1.5">
-                <label className="text-xs font-semibold text-slate-500">Schedule</label>
-                <input
-                  type="date"
-                  value={selectedDate}
-                  onChange={(e) => setSelectedDate(e.target.value)}
-                  className="rounded-md border border-slate-200 bg-white py-1.5 px-2 text-xs text-slate-700 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
-                />
-              </div>
-              <div>
-                <div className="border border-slate-100 rounded-xl">
-                  <div className="overflow-auto max-h-[55vh]">
-                    <div className="min-w-[640px]">
-                      <div
-                        className="grid gap-1.5 p-2 border-b border-slate-100 bg-slate-50 sticky top-0 z-20"
-                        style={{ gridTemplateColumns: `160px repeat(${TIME_SLOTS.length}, minmax(64px, 1fr))` }}
-                      >
-                        <div className="bg-slate-50 sticky left-0 z-20 border-r border-slate-200">
-                          <span className="block px-1 py-3 text-center text-[11px] font-semibold uppercase tracking-wider text-slate-400">Bot</span>
-                        </div>
-                        {TIME_SLOTS.map((slot) => (
-                          <div key={slot} className="flex justify-center bg-slate-50 text-[11px] font-semibold uppercase tracking-wider text-slate-400 py-1">
-                            {slot}
-                          </div>
-                        ))}
-                      </div>
-                      <div className="divide-y divide-slate-50">
-                        {pagedBots.map((b) => (
-                          <div
-                            key={b.id}
-                            className="grid gap-1.5 p-2 items-center"
-                            style={{ gridTemplateColumns: `160px repeat(${TIME_SLOTS.length}, minmax(64px, 1fr))` }}
-                          >
-                            <div className="bg-white sticky left-0 z-10 border-r border-slate-200">
-                              <span className="block px-1 py-3 truncate text-xs font-semibold text-slate-500" title={b.name}>{b.name}</span>
-                            </div>
-                            {TIME_SLOTS.map((slot) => {
-                              const isSel = selectedTime === slot && selectedBots.includes(b.id);
-                              return (
-                                <button
-                                  key={slot}
-                                  type="button"
-                                  onClick={() => selectSlot(slot, b.id)}
-                                  className={`h-9 rounded-lg text-[11px] font-medium transition-colors ${
-                                    isSel
-                                      ? "bg-[#1b4de4] text-white"
-                                      : "bg-slate-50 text-slate-500 hover:bg-slate-100"
-                                  }`}
-                                >
-                                  {isSel ? slot : ""}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <div className="flex items-center justify-between pt-1">
-                <span className="text-xs text-slate-400">Page {botPage + 1} of {totalBotPages}</span>
-                <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => setBotPage((p) => Math.max(0, p - 1))}
-                    disabled={botPage === 0}
-                    aria-label="Previous page"
-                    className="flex items-center justify-center rounded-lg border border-slate-200 w-8 h-8 text-slate-500 hover:bg-slate-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <ChevronLeft size={16} />
-                  </button>
-                  {Array.from({ length: totalBotPages }).map((_, i) => (
-                    <button
-                      key={i}
-                      type="button"
-                      onClick={() => setBotPage(i)}
-                      className={`flex items-center justify-center rounded-lg border w-8 h-8 text-xs font-medium transition-colors ${
-                        i === botPage
-                          ? "border-[#1b4de4] bg-[#1b4de4] text-white"
-                          : "border-slate-200 text-slate-500 hover:bg-slate-50"
-                      }`}
-                    >
-                      {i + 1}
-                    </button>
-                  ))}
-                  <button
-                    type="button"
-                    onClick={() => setBotPage((p) => Math.min(totalBotPages - 1, p + 1))}
-                    disabled={botPage >= totalBotPages - 1}
-                    aria-label="Next page"
-                    className="flex items-center justify-center rounded-lg border border-slate-200 w-8 h-8 text-slate-500 hover:bg-slate-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <ChevronRight size={16} />
-                  </button>
-                </div>
-              </div>
-            <div className="p-6 border-t border-slate-100 flex gap-3">
-              <button
-                onClick={() => setShowSetSchedule(false)}
-                className="flex-1 rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => setShowSetSchedule(false)}
-                className="flex-1 rounded-lg bg-[#1b4de4] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#153eb8] transition-colors"
-              >
-                Done
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    )}
     </div>
   );
 }
@@ -431,6 +666,7 @@ function ScheduleModal({ bots, approvedRequests, scheduledRequestIds = new Set()
 const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 export default function DeploymentSchedule() {
+  const { currentUser } = useOutletContext() || {};
   const [view, setView] = useState("Week");
   const [showModal, setShowModal] = useState(false);
   const [prefillBot, setPrefillBot] = useState("");
@@ -440,12 +676,15 @@ export default function DeploymentSchedule() {
   const [schedule, setSchedule] = useState({});
   const [loading, setLoading] = useState(true);
   const [approvedRequests, setApprovedRequests] = useState([]);
+  const [priorityBarangays, setPriorityBarangays] = useState(new Set());
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [overviewId, setOverviewId] = useState(null);
+  const [reschedulingEntry, setReschedulingEntry] = useState(null);
+  const [searchQuery, setSearchQuery] = useState("");
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([api.boats(), api.operators(), api.deploymentSchedules(), api.requests()]).then(([boatsData, operatorsData, schedulesData, requestsData]) => {
+    Promise.all([api.boats(), api.operators(), api.deploymentSchedules(), api.requests(), api.priorityAreas()]).then(([boatsData, operatorsData, schedulesData, requestsData, priorityData]) => {
       if (cancelled) return;
 
       const mappedBots = boatsData.map((b) => ({
@@ -463,6 +702,8 @@ export default function DeploymentSchedule() {
         requestedBy: {
           barangay: r.barangay || r.requested_by_barangay || '',
         },
+        preferredDate: r.preferred_date || '',
+        preferredTime: r.preferred_time || '',
       }));
 
       const scheduleMap = {};
@@ -470,10 +711,12 @@ export default function DeploymentSchedule() {
         const botId = String(s.bot);
         scheduleMap[botId] = scheduleMap[botId] || {};
         scheduleMap[botId][s.day] = {
+          id: s.id,
           status: s.status || 'none',
           label: s.label || 'Available',
           zone: s.zone || '',
           requestId: s.request_id || null,
+          cleanupType: s.cleanup_type || 'troid_supported',
         };
       });
 
@@ -481,13 +724,21 @@ export default function DeploymentSchedule() {
       setOperators(operatorsData);
       setSchedule(scheduleMap);
       setApprovedRequests(approved);
+      setPriorityBarangays(new Set((priorityData || []).map((p) => p.barangay)));
       setLoading(false);
     }).catch(() => setLoading(false));
 
     return () => { cancelled = true; };
   }, []);
 
-  const filteredBots = bots;
+  const filteredBots = bots.filter((bot) => {
+    if (!searchQuery.trim()) return true;
+    const q = searchQuery.toLowerCase();
+    return (
+      String(bot.id).toLowerCase().includes(q) ||
+      bot.name?.toLowerCase().includes(q)
+    );
+  });
 
   const selectedDayKey = dateKey(selectedDate);
   const selectedDayLabel = DAY_LABELS[selectedDate.getDay()];
@@ -520,9 +771,10 @@ export default function DeploymentSchedule() {
   };
 
   const scheduledToday = Object.values(schedule).filter((s) => s?.[selectedDayKey]?.status === "scheduled").length;
-  const inMaintenance = Object.values(schedule).filter((s) =>
-    Object.values(s).some((d) => d.status === "maintenance")
-  ).length;
+  const completedDeployments = Object.values(schedule).reduce(
+    (acc, botSched) => acc + Object.values(botSched).filter((d) => d.status === "scheduled").length,
+    0
+  );
 
   const handleNext = () => {
     const newDate = new Date(selectedDate);
@@ -543,7 +795,7 @@ export default function DeploymentSchedule() {
     });
   });
 
-  const handleSaveSchedule = (botId, day, timeSlot, zone, landmark, requestId) => {
+  const handleSaveSchedule = (botId, day, timeSlot, zone, landmark, requestId, operatorId, cleanupType) => {
     const bot = bots.find(b => String(b.id) === String(botId));
     if (!bot) return;
 
@@ -555,25 +807,108 @@ export default function DeploymentSchedule() {
       zone,
       landmark,
       request_id: requestId,
-    }).then(() => {
+      cleanup_type: cleanupType,
+    }).then((created) => {
       setSchedule((prev) => ({
         ...prev,
         [String(botId)]: {
           ...prev[String(botId)],
-          [day]: { status: "scheduled", label: timeSlot, zone, landmark, requestId },
+          [day]: { id: created?.id, status: "scheduled", label: timeSlot, zone, landmark, requestId, cleanupType },
         },
       }));
     }).catch(console.error);
 
+    if (operatorId) {
+      const operator = operators.find((o) => o.id === operatorId);
+      if (operator) {
+        api.updateOperator(operator.id, {
+          name: operator.name,
+          assigned_bot: botId,
+          availability: 'assigned',
+        }).then(() => {
+          setOperators((prev) => prev.map((o) => (o.id === operatorId ? { ...o, assigned_bot: botId, availability: 'assigned' } : o)));
+        }).catch(console.error);
+      }
+    }
+
     setShowModal(false);
     setPrefillBot("");
     setPrefillZone("");
+
+    const operatorName = operatorId ? operators.find((o) => o.id === operatorId)?.name : null;
+    logAudit({
+      currentUser,
+      action: 'Schedule edited',
+      module: 'Collection Schedule',
+      details: `${bot.name} scheduled for ${zone || 'unspecified zone'} on ${day} at ${timeSlot}${operatorName ? ` with ${operatorName}` : ''}`,
+    });
   };
 
-  const handleCellClick = (entry) => {
-    if (entry?.requestId) {
-      setOverviewId(entry.requestId);
+  const handleRescheduleSchedule = (scheduleId, oldBotId, oldDay, botId, day, timeSlot, zone, landmark, requestId, operatorId, cleanupType) => {
+    const bot = bots.find((b) => String(b.id) === String(botId));
+    if (!bot) return;
+
+    api.updateDeploymentSchedule(scheduleId, {
+      bot: botId,
+      day,
+      status: "scheduled",
+      label: timeSlot,
+      zone,
+      request_id: requestId,
+      cleanup_type: cleanupType,
+    }).then(() => {
+      setSchedule((prev) => {
+        const next = { ...prev };
+        if (next[String(oldBotId)]) {
+          const remainingDays = { ...next[String(oldBotId)] };
+          delete remainingDays[oldDay];
+          next[String(oldBotId)] = remainingDays;
+        }
+        next[String(botId)] = {
+          ...next[String(botId)],
+          [day]: { id: scheduleId, status: "scheduled", label: timeSlot, zone, landmark, requestId, cleanupType },
+        };
+        return next;
+      });
+    }).catch(console.error);
+
+    const prevOperator = operators.find((o) => o.assigned_bot === oldBotId);
+    const newOperator = operatorId ? operators.find((o) => o.id === operatorId) : null;
+
+    if (prevOperator && prevOperator.id !== newOperator?.id) {
+      api.updateOperator(prevOperator.id, {
+        name: prevOperator.name,
+        assigned_bot: null,
+        availability: 'available',
+      }).then(() => {
+        setOperators((prev) => prev.map((o) => (o.id === prevOperator.id ? { ...o, assigned_bot: null, availability: 'available' } : o)));
+      }).catch(console.error);
     }
+    if (newOperator && newOperator.id !== prevOperator?.id) {
+      api.updateOperator(newOperator.id, {
+        name: newOperator.name,
+        assigned_bot: botId,
+        availability: 'assigned',
+      }).then(() => {
+        setOperators((prev) => prev.map((o) => (o.id === newOperator.id ? { ...o, assigned_bot: botId, availability: 'assigned' } : o)));
+      }).catch(console.error);
+    }
+
+    setShowModal(false);
+    setReschedulingEntry(null);
+
+    logAudit({
+      currentUser,
+      action: 'Schedule rescheduled',
+      module: 'Collection Schedule',
+      details: `${bot.name} rescheduled to ${zone || 'unspecified zone'} on ${day} at ${timeSlot}${newOperator ? ` with ${newOperator.name}` : ''}`,
+    });
+  };
+
+  const handleCellClick = (entry, botId, day) => {
+    if (!entry || entry.status !== 'scheduled') return;
+    setReschedulingEntry({ botId, day, entry });
+    setShowModal(true);
   };
 
   const robotsOnDuty = operators.filter(op => op.availability === 'assigned' || op.assigned_bot).length;
@@ -615,7 +950,7 @@ export default function DeploymentSchedule() {
                   </div>
                 </div>
                 {weekDays.map((d) => (
-                  <Cell key={d.key} entry={schedule[bot.id]?.[dateKey(d.dateObj)]} onClick={handleCellClick} dateObj={d.dateObj} />
+                  <Cell key={d.key} entry={schedule[bot.id]?.[dateKey(d.dateObj)]} onClick={(entry) => handleCellClick(entry, bot.id, dateKey(d.dateObj))} dateObj={d.dateObj} />
                 ))}
               </div>
             ))}
@@ -632,36 +967,54 @@ export default function DeploymentSchedule() {
 
   const renderDayView = () => {
     return (
-      <div className="overflow-x-auto">
-        <div className="min-w-[400px]">
-          <div className="grid grid-cols-[160px_1fr] gap-2 border-b border-slate-100 pb-2">
-            <div className="text-xs font-semibold uppercase tracking-wider text-slate-400">Robot / Operator</div>
-            <div className="text-center text-xs font-semibold uppercase tracking-wider text-slate-400">
-              <div>{selectedDayLabel}</div>
-              <div className="mx-auto mt-0.5 flex h-5 w-5 items-center justify-center rounded-full text-[11px] bg-[#1b4de4] font-medium text-white">
-                {selectedDate.getDate()}
-              </div>
-              <div className="text-[10px] mt-0.5 text-slate-400">{selectedDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}</div>
+      <div className="overflow-auto">
+        <div className="min-w-[760px]">
+          <div
+            className="grid gap-1.5 p-2 border-b border-slate-100 bg-slate-50 sticky top-0 z-20"
+            style={{ gridTemplateColumns: `160px repeat(${TIME_SLOTS.length}, minmax(64px, 1fr))` }}
+          >
+            <div className="bg-slate-50 sticky left-0 z-20 border-r border-slate-200">
+              <span className="block px-1 py-3 text-center text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                {selectedDayLabel} · {selectedDate.getDate()} {selectedDate.toLocaleDateString('en-US', { month: 'short' })}
+              </span>
             </div>
-          </div>
-          <div className="divide-y divide-slate-100">
-            {filteredBots.map((bot) => (
-              <div
-                key={bot.id}
-                className="grid grid-cols-[160px_1fr] items-center gap-2 py-2.5"
-              >
-                <div className="flex items-center gap-2">
-                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500">
-                    <Bot className="h-4 w-4" />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold text-slate-900">{bot.id}</p>
-                    <p className="truncate text-xs text-slate-400">{bot.battery > 0 ? `${bot.battery}% battery` : 'No data'}</p>
-                  </div>
-                </div>
-                <Cell key={selectedDayKey} entry={schedule[bot.id]?.[dateKey(selectedDate)]} onClick={handleCellClick} dateObj={selectedDate} />
+            {TIME_SLOTS.map((slot) => (
+              <div key={slot} className="flex justify-center bg-slate-50 text-[11px] font-semibold uppercase tracking-wider text-slate-400 py-1">
+                {formatTime12h(slot)}
               </div>
             ))}
+          </div>
+          <div className="divide-y divide-slate-50">
+            {filteredBots.map((bot) => {
+              const dayEntry = schedule[bot.id]?.[dateKey(selectedDate)];
+              const scheduledSlot = dayEntry?.status === "scheduled" ? dayEntry.label : null;
+              return (
+                <div
+                  key={bot.id}
+                  className="grid gap-1.5 p-2 items-center"
+                  style={{ gridTemplateColumns: `160px repeat(${TIME_SLOTS.length}, minmax(64px, 1fr))` }}
+                >
+                  <div className="bg-white sticky left-0 z-10 border-r border-slate-200">
+                    <div className="flex items-center gap-2 px-1 py-1">
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500">
+                        <Bot className="h-4 w-4" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-slate-900">{bot.id}</p>
+                        <p className="truncate text-xs text-slate-400">{bot.battery > 0 ? `${bot.battery}% battery` : 'No data'}</p>
+                      </div>
+                    </div>
+                  </div>
+                  {TIME_SLOTS.map((slot) =>
+                    scheduledSlot === slot ? (
+                      <Cell key={slot} entry={dayEntry} onClick={(entry) => handleCellClick(entry, bot.id, dateKey(selectedDate))} dateObj={selectedDate} />
+                    ) : (
+                      <div key={slot} className="rounded-xl border border-dashed border-slate-200 px-2 py-2.5" />
+                    )
+                  )}
+                </div>
+              );
+            })}
             {filteredBots.length === 0 && (
               <p className="py-6 text-center text-sm text-slate-400">
                 No robots match the selected filters.
@@ -697,10 +1050,8 @@ export default function DeploymentSchedule() {
                   const isToday = date.toDateString() === new Date().toDateString();
                   const isSelected = date.toDateString() === selectedDate.toDateString();
                   const hasSchedule = filteredBots.some(bot => schedule[bot.id]?.[dayKey]?.status === 'scheduled');
-                  const hasMaintenance = filteredBots.some(bot => schedule[bot.id]?.[dayKey]?.status === 'maintenance');
                   let statusClass = "border border-dashed border-slate-200";
                   if (hasSchedule) statusClass = "bg-emerald-50 border border-emerald-100";
-                  else if (hasMaintenance) statusClass = "bg-amber-50 border border-amber-100";
 
                   return (
                     <div
@@ -714,7 +1065,6 @@ export default function DeploymentSchedule() {
                         </span>
                       </div>
                       {hasSchedule && <div className="mt-1 h-1 w-1 rounded-full bg-emerald-500 mx-auto" />}
-                      {hasMaintenance && <div className="mt-1 h-1 w-1 rounded-full bg-amber-500 mx-auto" />}
                     </div>
                   );
                 })}
@@ -754,12 +1104,11 @@ export default function DeploymentSchedule() {
           <div className="hidden items-center gap-3 sm:flex">
             <LegendDot className="bg-sky-500" label="Scheduled" />
             <LegendDot className="bg-emerald-500" label="Active" />
-            <LegendDot className="bg-amber-500" label="In Maintenance" />
             <LegendDot className="bg-slate-300" label="Offline" />
           </div>
           <button
             type="button"
-            onClick={() => setShowModal(true)}
+            onClick={() => { setReschedulingEntry(null); setShowModal(true); }}
             className="flex items-center gap-1.5 rounded-lg bg-[#1b4de4] px-3.5 py-2 text-sm font-medium text-white transition-colors hover:bg-[#153eb8]"
           >
             <Plus className="h-4 w-4" />
@@ -771,15 +1120,6 @@ export default function DeploymentSchedule() {
       {/* Filter bar */}
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-3">
-{view !== 'Day' && (
-            <button
-              type="button"
-              className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
-            >
-              <Filter className="h-4 w-4" />
-              Filter
-            </button>
-          )}
           <div className="flex items-center gap-2">
             <button
               onClick={handlePrev}
@@ -808,6 +1148,20 @@ export default function DeploymentSchedule() {
           </button>
         </div>
         <div className="flex items-center gap-3">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search robots..."
+              className="w-56 rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm text-slate-700 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30 placeholder:text-slate-400"
+            />
+          </div>
+          <button className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
+            <Filter className="h-4 w-4" />
+            Filter
+          </button>
           <div className="flex rounded-lg border border-slate-200 bg-white p-0.5 text-sm">
             {["Day", "Week", "Month"].map((v) => (
               <button
@@ -821,10 +1175,6 @@ export default function DeploymentSchedule() {
               </button>
             ))}
           </div>
-          <button className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
-            <Filter className="h-4 w-4" />
-            Filter
-          </button>
         </div>
       </div>
 
@@ -849,10 +1199,10 @@ export default function DeploymentSchedule() {
           sub={`Available: ${operators.length - robotsOnDuty}`}
         />
         <SummaryCard
-          icon={Wrench}
-          label="Maintenance"
-          value={inMaintenance}
-          sub="Units"
+          icon={CheckCircle2}
+          label="Deployment Complete"
+          value={completedDeployments}
+          sub="Completed deployments"
         />
       </div>
 
@@ -872,7 +1222,6 @@ export default function DeploymentSchedule() {
         <div className="mt-4 flex flex-wrap items-center gap-4 border-t border-slate-100 pt-4">
           <LegendDot className="bg-emerald-500" label="Scheduled" />
           <LegendDot className="bg-sky-500" label="Available" />
-          <LegendDot className="bg-amber-500" label="Maintenance" />
           <LegendDot className="bg-slate-300" label="No Schedule" />
         </div>
       </div>
@@ -880,13 +1229,18 @@ export default function DeploymentSchedule() {
       {showModal && createPortal(
         <ScheduleModal
           bots={bots}
+          operators={operators}
           approvedRequests={approvedRequests}
+          priorityBarangays={priorityBarangays}
           scheduledRequestIds={scheduledRequestIds}
-          onClose={() => { setShowModal(false); setPrefillBot(""); setPrefillZone(""); }}
+          onClose={() => { setShowModal(false); setPrefillBot(""); setPrefillZone(""); setReschedulingEntry(null); }}
           onSave={handleSaveSchedule}
+          onReschedule={handleRescheduleSchedule}
           onViewRequest={setOverviewId}
           prefillBot={prefillBot}
           prefillZone={prefillZone}
+          schedule={schedule}
+          editingSchedule={reschedulingEntry}
         />,
         document.body
       )}
@@ -905,7 +1259,7 @@ export default function DeploymentSchedule() {
             >
               <X size={18} />
             </button>
-            <style>{`.rsp-overview-modal .mb-6.flex.items-center.justify-between > * { display: none; }`}</style>
+            <style>{`.rsp-overview-modal [data-hide-in-schedule-overview] { display: none; }`}</style>
             <div className="max-h-[95vh] overflow-y-auto p-8">
               <ViewRequest id={overviewId} onClose={() => setOverviewId(null)} />
             </div>
