@@ -21,13 +21,6 @@ const STATUS_STYLES = {
   Archived: "bg-slate-100 text-slate-600",
 };
 
-const QUICK_ACTIONS = [
-  { label: "Reset password", action: "resetPassword" },
-  { label: "Change role", action: "changeRole" },
-  { label: "Reassign barangay", action: "reassignArea" },
-  { label: "Suspend account", action: "suspendAccount" },
-];
-
 const PAGE_SIZE = 5;
 
 export default function UserManagement({ currentUser }) {
@@ -38,7 +31,6 @@ export default function UserManagement({ currentUser }) {
   const [showArchived, setShowArchived] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
   const [showAddModal, setShowAddModal] = useState(false);
-  const [activeModal, setActiveModal] = useState(null);
   const [editConfirm, setEditConfirm] = useState(null);
   const [archiveConfirm, setArchiveConfirm] = useState(null);
   const [page, setPage] = useState(1);
@@ -149,89 +141,6 @@ export default function UserManagement({ currentUser }) {
     } catch (err) {
       console.error('Failed to create user:', err);
       alert(`Failed to create user: ${err.message}`);
-    }
-  };
-
-  const openModal = (action) => {
-    if (selected) setActiveModal(action);
-  };
-
-  const closeModal = () => setActiveModal(null);
-
-  const handleResetPassword = async () => {
-    if (!selected) return;
-    try {
-      const res = await api.resetUserPassword(selected.id);
-      alert(
-        res.email_sent
-          ? `A new temporary password has been emailed to ${selected.email}. They will be asked to set a new password on next sign-in.`
-          : `Password was reset, but the email could NOT be sent to ${selected.email} (email isn't configured yet). Check backend/.env before relying on this.`
-      );
-      closeModal();
-      logAudit({
-        currentUser,
-        action: 'Password reset',
-        module: 'User Management',
-        details: `Password reset for ${selected.name} (${selected.email})`,
-      });
-    } catch (err) {
-      console.error('Failed to reset password:', err);
-      alert('Failed to reset password. Please try again.');
-    }
-  };
-
-  const handleRoleChange = async (newRole) => {
-    if (!selected) return;
-    try {
-      const roleValue = newRole === 'Admin' ? 'admin' : newRole === 'Mayor' ? 'mayorsoffice' : newRole === 'NGO' ? 'ngo' : 'barangay';
-      await api.updateUser(selected.id, { role: roleValue });
-      updateUser(selected.id, { role: newRole });
-      closeModal();
-      logAudit({
-        currentUser,
-        action: 'Role changed',
-        module: 'User Management',
-        details: `${selected.name} role changed to ${newRole}`,
-      });
-    } catch (err) {
-      console.error('Failed to update role:', err);
-      alert('Failed to update role. Please try again.');
-    }
-  };
-
-  const handleReassignArea = async (newLocation) => {
-    if (!selected) return;
-    try {
-      await api.updateUser(selected.id, { location: newLocation });
-      updateUser(selected.id, { location: newLocation });
-      closeModal();
-      logAudit({
-        currentUser,
-        action: 'Area reassigned',
-        module: 'User Management',
-        details: `${selected.name} reassigned to ${newLocation || '—'}`,
-      });
-    } catch (err) {
-      console.error('Failed to reassign area:', err);
-      alert('Failed to reassign area. Please try again.');
-    }
-  };
-
-  const handleSuspendAccount = async () => {
-    if (!selected) return;
-    try {
-      await api.updateUser(selected.id, { status: 'archived' });
-      updateUser(selected.id, { status: 'Archived' });
-      closeModal();
-      logAudit({
-        currentUser,
-        action: 'User removed',
-        module: 'User Management',
-        details: `${selected.name} (${selected.email}) suspended`,
-      });
-    } catch (err) {
-      console.error('Failed to suspend account:', err);
-      alert('Failed to suspend account. Please try again.');
     }
   };
 
@@ -457,82 +366,75 @@ export default function UserManagement({ currentUser }) {
         </div>
 
         <div className="flex flex-col gap-8">
-          <Card title="Selected account information">
+          <Card title="Selected account information" className="flex-1">
             {selected ? (
-              <div className="grid grid-cols-1 gap-x-8 gap-y-3 sm:grid-cols-2">
-                <div className="space-y-2.5 text-sm">
-                  <p className="text-slate-600">
-                    <span className="text-slate-400">Name: </span>
-                    <span className="font-medium text-slate-800">{selected.name}</span>
-                  </p>
-                  <p className="text-slate-600">
-                    <span className="text-slate-400">Email: </span>{selected.email}
-                  </p>
-                  <p className="text-slate-600">
-                    <span className="text-slate-400">Status: </span>
-                    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_STYLES[selected.status] || 'bg-slate-100 text-slate-600'}`}>
+              <div className="flex flex-col gap-6">
+                <div className="flex items-center gap-4">
+                  <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-slate-100">
+                    <User size={28} className="text-slate-400" />
+                  </div>
+                  <div>
+                    <p className="text-base font-semibold text-slate-800">{selected.name}</p>
+                    <p className="text-sm text-slate-500">{selected.email}</p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2">
+                  <div className="space-y-1">
+                    <p className="text-xs text-slate-400">Status</p>
+                    <span className={`inline-block rounded-full px-2.5 py-1 text-xs font-medium ${STATUS_STYLES[selected.status] || 'bg-slate-100 text-slate-600'}`}>
                       {selected.status}
                     </span>
-                  </p>
-                  <p className="text-slate-600">
-                    <span className="text-slate-400">Role: </span>{selected.role}
-                  </p>
-                  <p className="text-slate-600">
-                    <span className="text-slate-400">Date created: </span>{selected.date}
-                  </p>
-                </div>
-                <div className="flex flex-col items-start gap-3">
-                  <p className="text-sm text-slate-600">
-                    <span className="text-slate-400">Barangay: </span>{selected.location}
-                  </p>
-                  <div>
-                    <p className="mb-2 text-xs text-slate-400">Profile</p>
-                    <div className="flex h-14 w-14 items-center justify-center rounded-full bg-slate-100">
-                      <User size={24} className="text-slate-400" />
-                    </div>
                   </div>
+                  <div className="space-y-1">
+                    <p className="text-xs text-slate-400">Role</p>
+                    <span className={`inline-block rounded-full px-2.5 py-1 text-xs font-medium ${ROLE_STYLES[selected.role] || 'bg-slate-100 text-slate-600'}`}>
+                      {selected.role}
+                    </span>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-xs text-slate-400">Date created</p>
+                    <p className="text-sm font-medium text-slate-700">{selected.date}</p>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-xs text-slate-400">Barangay</p>
+                    <p className="text-sm font-medium text-slate-700">{selected.location || '—'}</p>
+                  </div>
+                </div>
+
+                <div className="flex gap-2 border-t border-slate-100 pt-4">
+                  <button
+                    onClick={() => setEditingUser(selected)}
+                    className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-3.5 py-2 text-sm font-medium text-slate-600 transition-colors hover:border-blue-400 hover:bg-blue-50 hover:text-blue-700"
+                  >
+                    <Pencil size={14} />
+                    Edit account
+                  </button>
+                  <button
+                    onClick={() => setArchiveConfirm(selected)}
+                    disabled={currentUser && String(selected.id) === String(currentUser.id)}
+                    className={`flex items-center gap-1.5 rounded-lg border px-3.5 py-2 text-sm font-medium transition-colors ${
+                      currentUser && String(selected.id) === String(currentUser.id)
+                        ? "border-slate-200 text-slate-300 cursor-not-allowed"
+                        : selected.status === 'Archived'
+                        ? "border-amber-300 bg-amber-50 text-amber-700"
+                        : "border-red-200 bg-red-50 text-red-600 hover:bg-red-100"
+                    }`}
+                  >
+                    <Archive size={14} />
+                    {selected.status === 'Archived' ? 'Restore account' : 'Archive account'}
+                  </button>
                 </div>
               </div>
             ) : (
               <p className="text-sm text-slate-400">Select an account to see its details.</p>
             )}
           </Card>
-
-          <Card title="Quick action">
-            <div className="space-y-2">
-              {QUICK_ACTIONS.map((action) => (
-                <button
-                  key={action.action}
-                  onClick={() => openModal(action.action)}
-                  disabled={!selected}
-                  className="w-full rounded-lg border border-slate-200 py-2 text-sm text-slate-600 transition-colors hover:border-blue-400 hover:bg-blue-50 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {action.label}
-                </button>
-              ))}
-            </div>
-          </Card>
         </div>
       </div>
 
       {editingUser && (
         <EditUserModal user={editingUser} onCancel={() => setEditingUser(null)} onSave={(form) => setEditConfirm(form)} />
-      )}
-
-      {activeModal === 'resetPassword' && selected && (
-        <ResetPasswordModal user={selected} onCancel={closeModal} onConfirm={handleResetPassword} />
-      )}
-
-      {activeModal === 'changeRole' && selected && (
-        <ChangeRoleModal user={selected} onCancel={closeModal} onSave={handleRoleChange} />
-      )}
-
-      {activeModal === 'reassignArea' && selected && (
-        <ReassignAreaModal user={selected} onCancel={closeModal} onSave={handleReassignArea} />
-      )}
-
-      {activeModal === 'suspendAccount' && selected && (
-        <SuspendAccountModal user={selected} onCancel={closeModal} onConfirm={handleSuspendAccount} />
       )}
 
       {showAddModal && (
@@ -590,29 +492,17 @@ function EditUserModal({ user, onCancel, onSave }) {
           </div>
           <div>
             <label className="mb-1 block text-xs font-medium text-slate-500">Role</label>
-            <select
-              value={form.role}
-              onChange={(e) => {
-                const role = e.target.value;
-                setForm({ ...form, role, location: (role === 'Barangay' || role === 'NGO') ? form.location : '' });
-              }}
-              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
-            >
-              <option>Admin</option>
-              <option>Mayor</option>
-              <option>Barangay</option>
-              <option>NGO</option>
-            </select>
+            <p className="w-full rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-sm text-slate-500">
+              {form.role}
+            </p>
+            <p className="mt-1 text-xs text-slate-400">Role can't be changed after an account is created.</p>
           </div>
           <div>
             <label className="mb-1 block text-xs font-medium text-slate-500">Barangay</label>
-            <input
-              value={form.location}
-              onChange={(e) => setForm({ ...form, location: e.target.value })}
-              placeholder="e.g. Carlatan"
-              disabled={form.role !== 'Barangay' && form.role !== 'NGO'}
-              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30 disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed"
-            />
+            <p className="w-full rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-sm text-slate-500">
+              {form.location || '—'}
+            </p>
+            <p className="mt-1 text-xs text-slate-400">Barangay assignment can't be changed after an account is created.</p>
           </div>
         </div>
 
@@ -724,136 +614,6 @@ function AddUserModal({ onCancel, onSave }) {
             className="rounded-lg bg-[#1b4de4] px-4 py-2 text-sm font-medium text-white hover:bg-[#153eb8] disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {submitting ? 'Creating...' : 'Create user'}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ResetPasswordModal({ user, onCancel, onConfirm }) {
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
-      <div className="w-full max-w-sm rounded-xl bg-white p-6 border border-slate-200">
-        <div className="mb-4 flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-slate-800">Reset Password</h3>
-          <button onClick={onCancel} className="text-slate-400 hover:text-slate-600" aria-label="Close">
-            <X size={18} />
-          </button>
-        </div>
-        <p className="text-sm text-slate-600 mb-4">
-          Reset password for <strong>{user.name}</strong>? A new temporary password will be sent to {user.email}.
-        </p>
-        <div className="flex justify-end gap-2">
-          <button onClick={onCancel} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
-            Cancel
-          </button>
-          <button onClick={onConfirm} className="rounded-lg bg-[#1b4de4] px-4 py-2 text-sm font-medium text-white hover:bg-[#153eb8]">
-            Reset Password
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ChangeRoleModal({ user, onCancel, onSave }) {
-  const [selectedRole, setSelectedRole] = useState(user.role);
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
-      <div className="w-full max-w-sm rounded-xl bg-white p-6 border border-slate-200">
-        <div className="mb-4 flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-slate-800">Change Role</h3>
-          <button onClick={onCancel} className="text-slate-400 hover:text-slate-600" aria-label="Close">
-            <X size={18} />
-          </button>
-        </div>
-        <p className="text-sm text-slate-600 mb-3">
-          Change role for <strong>{user.name}</strong>
-        </p>
-        <div className="mb-4">
-          <label className="mb-1 block text-xs font-medium text-slate-500">New Role</label>
-          <select
-            value={selectedRole}
-            onChange={(e) => setSelectedRole(e.target.value)}
-            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
-          >
-            <option>Admin</option>
-            <option>Mayor</option>
-            <option>Barangay</option>
-            <option>NGO</option>
-          </select>
-        </div>
-        <div className="flex justify-end gap-2">
-          <button onClick={onCancel} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
-            Cancel
-          </button>
-          <button onClick={() => onSave(selectedRole)} className="rounded-lg bg-[#1b4de4] px-4 py-2 text-sm font-medium text-white hover:bg-[#153eb8]">
-            Save
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ReassignAreaModal({ user, onCancel, onSave }) {
-  const [location, setLocation] = useState(user.location || '');
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
-      <div className="w-full max-w-sm rounded-xl bg-white p-6 border border-slate-200">
-        <div className="mb-4 flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-slate-800">Reassign Barangay</h3>
-          <button onClick={onCancel} className="text-slate-400 hover:text-slate-600" aria-label="Close">
-            <X size={18} />
-          </button>
-        </div>
-        <p className="text-sm text-slate-600 mb-3">
-          Reassign barangay for <strong>{user.name}</strong>
-        </p>
-        <div className="mb-4">
-          <label className="mb-1 block text-xs font-medium text-slate-500">Barangay</label>
-          <input
-            value={location}
-            onChange={(e) => setLocation(e.target.value)}
-            placeholder="Enter barangay"
-            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
-          />
-        </div>
-        <div className="flex justify-end gap-2">
-          <button onClick={onCancel} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
-            Cancel
-          </button>
-          <button onClick={() => onSave(location)} className="rounded-lg bg-[#1b4de4] px-4 py-2 text-sm font-medium text-white hover:bg-[#153eb8]">
-            Save
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function SuspendAccountModal({ user, onCancel, onConfirm }) {
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
-      <div className="w-full max-w-sm rounded-xl bg-white p-6 border border-slate-200">
-        <div className="mb-4 flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-slate-800">Suspend Account</h3>
-          <button onClick={onCancel} className="text-slate-400 hover:text-slate-600" aria-label="Close">
-            <X size={18} />
-          </button>
-        </div>
-        <p className="text-sm text-slate-600 mb-4">
-          Suspend account for <strong>{user.name}</strong>? This will archive the account and prevent login.
-        </p>
-        <div className="flex justify-end gap-2">
-          <button onClick={onCancel} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
-            Cancel
-          </button>
-          <button onClick={onConfirm} className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700">
-            Suspend Account
           </button>
         </div>
       </div>

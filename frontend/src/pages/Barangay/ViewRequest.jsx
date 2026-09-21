@@ -13,11 +13,22 @@ import {
   ChevronRightIcon,
   XCircle,
   Ban,
+  ClipboardCheck,
+  FileCheck2,
 } from "lucide-react";
 import api from "../../services/api";
+import { logAudit } from "../../services/auditLog";
 import { Card } from "../../components/ui/Card";
 import NotificationBell from "../../components/NotificationBell";
-import { REQUEST_STATUS_STYLES, mapRequest, getDeploymentStatus, formatTime12h } from "../../constants/requests";
+import { REQUEST_STATUS_STYLES, TRASH_CATEGORIES, mapRequest, getDeploymentStatus, formatTime12h } from "../../constants/requests";
+
+function emptyCategoryValues() {
+  return TRASH_CATEGORIES.reduce((acc, cat) => ({ ...acc, [cat]: "" }), {});
+}
+
+function stripLeadingZero(raw) {
+  return raw.replace(/^0+(?=\d)/, "");
+}
 
 const Field = ({ label, value }) => (
   <div className="flex items-center justify-between py-2 text-sm">
@@ -36,6 +47,15 @@ export default function BarangayViewRequest() {
   const [showPhotoViewer, setShowPhotoViewer] = useState(false);
   const [schedule, setSchedule] = useState(null);
   const [reasonStep, setReasonStep] = useState(null);
+  const [markingCompleted, setMarkingCompleted] = useState(false);
+  const [showTrashReport, setShowTrashReport] = useState(false);
+  const [trashCategoryValues, setTrashCategoryValues] = useState(emptyCategoryValues);
+  const [trashBags, setTrashBags] = useState("");
+  const [trashWeightKg, setTrashWeightKg] = useState("");
+  const [trashNonUsableKg, setTrashNonUsableKg] = useState("");
+  const [trashRecyclableKg, setTrashRecyclableKg] = useState("");
+  const [trashNotes, setTrashNotes] = useState("");
+  const [submittingTrashReport, setSubmittingTrashReport] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -56,6 +76,74 @@ export default function BarangayViewRequest() {
     fetchRequest();
     return () => { cancelled = true; };
   }, [id]);
+
+  const handleMarkSessionCompleted = async () => {
+    setMarkingCompleted(true);
+    try {
+      await api.markSessionCompleted(request.id);
+      setRequest((prev) => ({ ...prev, status: "Processing" }));
+      logAudit({
+        currentUser,
+        action: "Session marked completed",
+        module: "Requests",
+        details: `${request.id} (${request.location?.barangay || "unknown zone"}) marked as session completed`,
+      });
+    } catch (err) {
+      console.error("Failed to mark session completed:", err);
+      alert("Failed to mark session completed. Please try again.");
+    } finally {
+      setMarkingCompleted(false);
+    }
+  };
+
+  const openTrashReport = () => {
+    setTrashCategoryValues(emptyCategoryValues());
+    setTrashBags("");
+    setTrashWeightKg("");
+    setTrashNonUsableKg("");
+    setTrashRecyclableKg("");
+    setTrashNotes("");
+    setShowTrashReport(true);
+  };
+
+  const handleSubmitTrashReport = async () => {
+    const trashCategoriesPayload = Object.fromEntries(
+      Object.entries(trashCategoryValues).map(([cat, v]) => [cat, Number(v)])
+    );
+    setSubmittingTrashReport(true);
+    try {
+      const res = await api.submitTrashReport(request.id, {
+        bags: Number(trashBags),
+        weight_kg: Number(trashWeightKg),
+        non_usable_kg: Number(trashNonUsableKg),
+        recyclable_kg: Number(trashRecyclableKg),
+        trash_categories: trashCategoriesPayload,
+        notes: trashNotes.trim(),
+      });
+      const newStatus = (res.status || '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+      setRequest((prev) => ({
+        ...prev,
+        status: newStatus,
+        bags: Number(trashBags),
+        weightKg: Number(trashWeightKg),
+        nonUsableKg: Number(trashNonUsableKg),
+        recyclableKg: Number(trashRecyclableKg),
+        trashCategories: trashCategoriesPayload,
+      }));
+      logAudit({
+        currentUser,
+        action: "Trash report filed",
+        module: "Requests",
+        details: `${request.id} (${request.location?.barangay || "unknown zone"}) trash report filed by Barangay`,
+      });
+      setShowTrashReport(false);
+    } catch (err) {
+      console.error("Failed to submit trash report:", err);
+      alert("Failed to submit trash report. Please try again.");
+    } finally {
+      setSubmittingTrashReport(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -89,6 +177,16 @@ export default function BarangayViewRequest() {
             <FileText size={15} />
             Download All
           </button>
+          {request.status === "Approved" && (
+            <button
+              onClick={handleMarkSessionCompleted}
+              disabled={markingCompleted}
+              className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-white px-3.5 py-2 text-sm font-medium text-emerald-600 hover:bg-emerald-50 disabled:opacity-50"
+            >
+              <ClipboardCheck size={15} />
+              {markingCompleted ? "Marking..." : "Mark as Finished"}
+            </button>
+          )}
         </div>
       </div>
 
@@ -361,8 +459,143 @@ export default function BarangayViewRequest() {
               </div>
             </div>
           </Card>
+
+          {request.status === "Processing" && (
+          <Card title="Trash Report Required">
+            <div className="flex flex-col gap-4">
+              <p className="text-xs text-slate-500">
+                The session has been marked finished. File the trash collection report to close out this request.
+              </p>
+              <button
+                onClick={openTrashReport}
+                className="flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700 transition-colors"
+              >
+                <FileCheck2 size={16} />
+                Fill Trash Report
+              </button>
+            </div>
+          </Card>
+          )}
         </div>
       </div>
+
+      {showTrashReport && createPortal(
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 p-4">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleSubmitTrashReport();
+            }}
+            className="w-full max-w-lg bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden max-h-[90vh] flex flex-col"
+          >
+            <div className="p-6 border-b border-slate-100">
+              <h3 className="text-lg font-bold text-slate-900">Trash Collection Report</h3>
+              <p className="text-xs text-slate-500 mt-1">
+                {schedule?.cleanup_type === "troid_supported"
+                  ? "This cleanup is TROID-supported — the counts you enter here stand in as TROID's detected output until CENRO reviews and verifies them."
+                  : "This cleanup is unsupported by TROID — record what was actually collected manually."}
+              </p>
+            </div>
+            <div className="px-6 pt-4 space-y-4 overflow-y-auto">
+              <div>
+                <p className="mb-1.5 text-xs font-semibold text-slate-500">Trash by category</p>
+                <div className="grid grid-cols-2 gap-3">
+                  {TRASH_CATEGORIES.map((cat) => (
+                    <div key={cat}>
+                      <label className="mb-1 block text-[11px] text-slate-500">{cat}</label>
+                      <input
+                        type="number"
+                        min="0"
+                        required
+                        value={trashCategoryValues[cat]}
+                        onChange={(e) => {
+                          const raw = stripLeadingZero(e.target.value);
+                          setTrashCategoryValues((prev) => ({ ...prev, [cat]: raw }));
+                        }}
+                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/20"
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="mb-1.5 block text-xs font-semibold text-slate-500">Total Bags</label>
+                  <input
+                    type="number"
+                    min="0"
+                    required
+                    value={trashBags}
+                    onChange={(e) => setTrashBags(stripLeadingZero(e.target.value))}
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/20"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-xs font-semibold text-slate-500">Total Weight (kg)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    required
+                    value={trashWeightKg}
+                    onChange={(e) => setTrashWeightKg(stripLeadingZero(e.target.value))}
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/20"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-xs font-semibold text-slate-500">Non-usable (kg)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    required
+                    value={trashNonUsableKg}
+                    onChange={(e) => setTrashNonUsableKg(stripLeadingZero(e.target.value))}
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/20"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-xs font-semibold text-slate-500">Recyclable (kg)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    required
+                    value={trashRecyclableKg}
+                    onChange={(e) => setTrashRecyclableKg(stripLeadingZero(e.target.value))}
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/20"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold text-slate-500">Notes (optional)</label>
+                <textarea
+                  value={trashNotes}
+                  onChange={(e) => setTrashNotes(e.target.value)}
+                  rows={3}
+                  placeholder="Any additional observations..."
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/20"
+                />
+              </div>
+            </div>
+            <div className="p-6 flex gap-3 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setShowTrashReport(false)}
+                disabled={submittingTrashReport}
+                className="flex-1 rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={submittingTrashReport}
+                className="flex-1 rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-emerald-700 transition-colors disabled:opacity-50"
+              >
+                {submittingTrashReport ? "Submitting..." : "Submit Report"}
+              </button>
+            </div>
+          </form>
+        </div>,
+        document.body
+      )}
 
       {reasonStep && createPortal(
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 p-4" onClick={() => setReasonStep(null)}>

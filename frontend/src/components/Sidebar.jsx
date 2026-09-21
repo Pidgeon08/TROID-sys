@@ -1,14 +1,21 @@
 import { useState } from "react";
 import { createPortal } from "react-dom";
-import { NavLink } from 'react-router-dom';
-import { Home, Map, FileText, LogOut, Shield, Users, Bot, InboxIcon, Send, CalendarClock, MapPin, UserCog, Wrench } from 'lucide-react';
+import { NavLink, useLocation } from 'react-router-dom';
+import { Home, Map, FileText, LogOut, Shield, Users, Bot, InboxIcon, Send, CalendarClock, MapPin, UserCog, Wrench, ChevronDown, LayoutGrid } from 'lucide-react';
 
 const navItems = {
   admin: [
     { to: '/admin/dashboard', icon: Home, label: 'Dashboard' },
-    { to: '/admin/manage-bots', icon: Bot, label: 'Bot Management' },
-    { to: '/admin/users', icon: Users, label: 'User Management' },
-    { to: '/admin/operators', icon: UserCog, label: 'Operator Management' },
+    {
+      type: 'group',
+      icon: LayoutGrid,
+      label: 'Management',
+      children: [
+        { to: '/admin/manage-bots', icon: Bot, label: 'Bot Management' },
+        { to: '/admin/users', icon: Users, label: 'User Management' },
+        { to: '/admin/operators', icon: UserCog, label: 'Operator Management' },
+      ],
+    },
     { to: '/admin/requests', icon: InboxIcon, label: 'Requests' },
     { to: '/admin/collection-areas', icon: MapPin, label: 'Collection Areas' },
     { to: '/admin/deployment', icon: CalendarClock, label: 'Deployment Schedule' },
@@ -54,6 +61,16 @@ const navItems = {
 
   const Sidebar = ({ onLogout, userType = 'admin', currentUser = null }) => {
   const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const location = useLocation();
+
+  const items = navItems[userType] || [];
+  const groupContainsActive = (item) =>
+    item.type === 'group' && item.children.some((child) => location.pathname.startsWith(child.to));
+
+  const [openGroup, setOpenGroup] = useState(() => {
+    const active = items.find(groupContainsActive);
+    return active ? active.label : null;
+  });
 
   const getNavLinkClass = (isActive) =>
     `flex items-center px-4 py-3 text-slate-300 hover:text-white hover:bg-white/5 rounded-xl transition-all duration-200 font-medium text-[15px] group ${isActive ? 'bg-[#1b4de4] text-white shadow-[0_4px_12px_rgba(27,77,228,0.25)]' : ''
@@ -82,16 +99,72 @@ const navItems = {
 
       {/* Navigation */}
       <nav className="flex-1 py-8 px-4 flex flex-col gap-2">
-        {navItems[userType]?.map((item) => (
-          <NavLink key={item.to} to={item.to} className={({ isActive }) => getNavLinkClass(isActive)}>
-            {({ isActive }) => (
-              <>
-                <item.icon className={getIconClass(isActive)} />
-                <span>{item.label}</span>
-              </>
-            )}
-          </NavLink>
-        ))}
+        {items.map((item) => {
+          const anyGroupOpen = openGroup !== null;
+          if (item.type === 'group') {
+            const isOpen = openGroup === item.label;
+            const isGroupActive = groupContainsActive(item);
+            return (
+              <div key={item.label}>
+                <button
+                  type="button"
+                  onClick={() => setOpenGroup(isOpen ? null : item.label)}
+                  aria-expanded={isOpen}
+                  className={`flex w-full items-center px-4 py-3 text-slate-300 hover:text-white hover:bg-white/5 rounded-xl transition-all duration-200 font-medium text-[15px] group ${isGroupActive && !isOpen ? 'bg-[#1b4de4] text-white shadow-[0_4px_12px_rgba(27,77,228,0.25)]' : ''
+                  }`}
+                >
+                  <item.icon className={getIconClass(isGroupActive && !isOpen)} />
+                  <span className="flex-1 text-left">{item.label}</span>
+                  <ChevronDown
+                    className={`w-4 h-4 text-slate-400 group-hover:text-white transition-transform duration-300 ${isOpen ? 'rotate-180' : ''}`}
+                  />
+                </button>
+                <div
+                  className="grid transition-[grid-template-rows] duration-300 ease-in-out"
+                  style={{ gridTemplateRows: isOpen ? '1fr' : '0fr' }}
+                >
+                  <div className="overflow-hidden">
+                    <div className="flex flex-col gap-1 pt-1 pl-4">
+                      {item.children.map((child) => (
+                        <NavLink key={child.to} to={child.to} className={({ isActive }) => getNavLinkClass(isActive)}>
+                          {({ isActive }) => (
+                            <>
+                              <child.icon className={getIconClass(isActive)} />
+                              <span>{child.label}</span>
+                            </>
+                          )}
+                        </NavLink>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          }
+          return (
+            <div
+              key={item.to}
+              className="grid transition-[grid-template-rows] duration-300 ease-in-out"
+              style={{ gridTemplateRows: anyGroupOpen ? '0fr' : '1fr' }}
+            >
+              <div className="overflow-hidden">
+                <NavLink
+                  to={item.to}
+                  className={({ isActive }) =>
+                    `${getNavLinkClass(isActive)} transition-opacity duration-200 ${anyGroupOpen ? 'opacity-0 pointer-events-none' : 'opacity-100'}`
+                  }
+                >
+                  {({ isActive }) => (
+                    <>
+                      <item.icon className={getIconClass(isActive)} />
+                      <span>{item.label}</span>
+                    </>
+                  )}
+                </NavLink>
+              </div>
+            </div>
+          );
+        })}
       </nav>
 
       {/* Footer Block */}

@@ -8,7 +8,7 @@ class_name = "Broadcaster"
 
 [[migrations]]
 tag = "v1"
-new_classes = ["Broadcaster"]
+new_sqlite_classes = ["Broadcaster"]
 
 # SHARED_SECRET must match REALTIME_WORKER_SECRET in backend/.env.
 # Local dev: put it in .dev.vars (gitignored).
