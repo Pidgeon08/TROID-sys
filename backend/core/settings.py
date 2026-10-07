@@ -39,7 +39,7 @@ SECRET_KEY = os.environ.get(
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get('DEBUG', 'True') == 'True'
 
-# Comma-separated in production, e.g. "troid-backend.onrender.com"
+# Comma-separated in production, e.g. "troid-sys.onrender.com"
 ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
 
 # API is accessed by the React frontend running on another origin.
