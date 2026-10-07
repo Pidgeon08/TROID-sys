@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Eye, EyeOff } from 'lucide-react';
 import { logAudit } from '../services/auditLog';
+import { API_BASE } from '../services/api';
 import ForceChangePasswordModal from '../components/ForceChangePasswordModal';
 import ForgotPasswordModal from '../components/ForgotPasswordModal';
 import LoadingModal from '../components/LoadingModal';
@@ -32,7 +33,7 @@ const Login = ({ onLogin }) => {
     setLoading(true);
 
     try {
-      const res = await fetch('http://localhost:8000/api/login/', {
+      const res = await fetch(`${API_BASE}/login/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
