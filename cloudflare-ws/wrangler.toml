@@ -13,3 +13,7 @@ new_sqlite_classes = ["Broadcaster"]
 # SHARED_SECRET must match REALTIME_WORKER_SECRET in backend/.env.
 # Local dev: put it in .dev.vars (gitignored).
 # Production: `wrangler secret put SHARED_SECRET`.
+#
+# Email relay (/send-email) also needs, as secrets:
+#   wrangler secret put SMTP_USER   -> the Gmail address
+#   wrangler secret put SMTP_PASS   -> a Gmail app password

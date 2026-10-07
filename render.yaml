@@ -25,14 +25,9 @@ services:
         sync: false
       - key: REALTIME_WORKER_SECRET
         sync: false
-      # Free plan blocks outbound SMTP, so email goes via the Gmail API.
+      # Free plan blocks outbound SMTP, so email is relayed through the
+      # Cloudflare Worker (needs SMTP_USER/SMTP_PASS secrets on the Worker).
       - key: EMAIL_BACKEND
-        value: troid_api.email_backends.GmailApiEmailBackend
-      - key: GMAIL_CLIENT_ID
-        sync: false
-      - key: GMAIL_CLIENT_SECRET
-        sync: false
-      - key: GMAIL_REFRESH_TOKEN
-        sync: false
+        value: troid_api.email_backends.WorkerEmailBackend
       - key: DEFAULT_FROM_EMAIL
         sync: false
