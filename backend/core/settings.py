@@ -175,9 +175,11 @@ EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER', '')
 EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
 EMAIL_USE_TLS = os.environ.get('EMAIL_USE_TLS', 'True') == 'True'
 DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', 'CENRO TROID <no-reply@troid.local>')
-# Used by troid_api.email_backends.BrevoEmailBackend (needed on Render's free
-# plan, which blocks outbound SMTP).
-BREVO_API_KEY = os.environ.get('BREVO_API_KEY', '')
+# Used by troid_api.email_backends.GmailApiEmailBackend (needed on Render's
+# free plan, which blocks outbound SMTP). See `manage.py gmail_auth`.
+GMAIL_CLIENT_ID = os.environ.get('GMAIL_CLIENT_ID', '')
+GMAIL_CLIENT_SECRET = os.environ.get('GMAIL_CLIENT_SECRET', '')
+GMAIL_REFRESH_TOKEN = os.environ.get('GMAIL_REFRESH_TOKEN', '')
 # Don't let an unreachable SMTP server hang a request indefinitely.
 EMAIL_TIMEOUT = 15
 

@@ -25,10 +25,14 @@ services:
         sync: false
       - key: REALTIME_WORKER_SECRET
         sync: false
-      # Free plan blocks outbound SMTP, so email goes via Brevo's HTTPS API.
+      # Free plan blocks outbound SMTP, so email goes via the Gmail API.
       - key: EMAIL_BACKEND
-        value: troid_api.email_backends.BrevoEmailBackend
-      - key: BREVO_API_KEY
+        value: troid_api.email_backends.GmailApiEmailBackend
+      - key: GMAIL_CLIENT_ID
+        sync: false
+      - key: GMAIL_CLIENT_SECRET
+        sync: false
+      - key: GMAIL_REFRESH_TOKEN
         sync: false
       - key: DEFAULT_FROM_EMAIL
         sync: false
