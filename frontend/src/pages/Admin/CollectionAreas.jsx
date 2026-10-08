@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useOutletContext } from "react-router-dom";
 import { createPortal } from "react-dom";
 import { MapContainer, TileLayer, Polyline, Polygon, useMap } from "react-leaflet";
+import { TILE_URL, TILE_ATTRIBUTION } from "../../services/mapTiles";
 import "leaflet/dist/leaflet.css";
 import {
   Map as MapIcon,
@@ -258,8 +259,8 @@ export default function CollectionAreas() {
           <div className="relative h-[600px] rounded-xl overflow-hidden border border-slate-100">
             <MapContainer center={DEFAULT_CENTER} zoom={DEFAULT_ZOOM} style={{ height: "100%", width: "100%" }}>
               <TileLayer
-                url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
-                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                url={TILE_URL}
+                attribution={TILE_ATTRIBUTION}
               />
               {flyTo && <FlyTo position={flyTo} />}
               {filtered.map((a) =>

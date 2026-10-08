@@ -1,4 +1,5 @@
 import { MapContainer, TileLayer, useMap, Marker, Polygon, ZoomControl } from 'react-leaflet';
+import { TILE_URL, TILE_ATTRIBUTION } from '../../services/mapTiles';
 import 'leaflet/dist/leaflet.css';
 import { useEffect, useMemo, useState } from 'react';
 import L from 'leaflet';
@@ -520,8 +521,8 @@ const HeatmapView = () => {
 
               {/* Minimal light base tiles */}
               <TileLayer
-                url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
-                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                url={TILE_URL}
+                attribution={TILE_ATTRIBUTION}
               />
               
               {/* Point Baywalk custom indicator marker */}
@@ -694,8 +695,8 @@ const HeatmapView = () => {
                   style={{ height: '100%', width: '100%', position: 'absolute', top: 0, left: 0 }}
                 >
                   <TileLayer
-                    url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
-                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                    url={TILE_URL}
+                    attribution={TILE_ATTRIBUTION}
                   />
                   <HeatmapLayer points={comparisonPoints} type="Trash Collected" />
                   {selectedAreaPoints && (

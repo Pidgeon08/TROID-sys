@@ -1,4 +1,5 @@
 import { MapContainer, TileLayer, useMap, Marker, ZoomControl } from 'react-leaflet';
+import { TILE_URL, TILE_ATTRIBUTION } from '../../services/mapTiles';
 import 'leaflet/dist/leaflet.css';
 import { useCallback, useEffect, useState } from 'react';
 import L from 'leaflet';
@@ -381,8 +382,8 @@ const Heatmap = ({ currentUser }) => {
                   <ChangeView center={selectedLoc.center} zoom={selectedLoc.zoom} />
 
                   <TileLayer
-                    url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
-                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                    url={TILE_URL}
+                    attribution={TILE_ATTRIBUTION}
                   />
 
                   <Marker position={[16.6335, 120.3110]} icon={baywalkIcon} />

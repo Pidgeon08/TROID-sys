@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { MapPin, Calendar, Trash2, Ship } from "lucide-react";
 import { MapContainer, TileLayer, useMap } from "react-leaflet";
+import { TILE_URL, TILE_ATTRIBUTION } from "../../services/mapTiles";
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
 import "leaflet.heat";
@@ -365,8 +366,8 @@ const Dashboard = ({ currentUser }) => {
                 style={{ height: '100%', width: '100%', position: 'absolute', top: 0, left: 0 }}
               >
                 <TileLayer
-                  url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
-                  attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                  url={TILE_URL}
+                  attribution={TILE_ATTRIBUTION}
                 />
                 <HeatmapLayer points={addressPoints} type={heatmapType} />
               </MapContainer>

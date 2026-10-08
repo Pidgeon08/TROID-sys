@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useOutletContext } from "react-router-dom";
 import { MapContainer, TileLayer, Polyline, Polygon, CircleMarker, useMapEvents, useMap } from "react-leaflet";
+import { TILE_URL, TILE_ATTRIBUTION } from "../../services/mapTiles";
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
 import {
@@ -417,8 +418,8 @@ function BarangayAreas() {
               style={{ height: "100%", width: "100%" }}
             >
               <TileLayer
-                url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
-                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                url={TILE_URL}
+                attribution={TILE_ATTRIBUTION}
               />
 
               <MapClickHandler
