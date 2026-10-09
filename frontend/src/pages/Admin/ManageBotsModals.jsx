@@ -51,17 +51,6 @@ export function AddBotModal({ isOpen, onClose, onSubmit, newBot, setNewBot, bots
                     </div>
 
                     <div>
-                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Assigned Barangay</label>
-                        <input
-                            type="text"
-                            placeholder="e.g. Carlatan"
-                            value={newBot.barangay}
-                            onChange={(e) => setNewBot({ ...newBot, barangay: e.target.value })}
-                            className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-[#1b4de4]"
-                        />
-                    </div>
-
-                    <div>
                         <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Assign Operator</label>
                         <select
                             value={newBot.assignedOperator}

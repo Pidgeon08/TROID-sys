@@ -123,7 +123,7 @@ export default function ManageBots() {
     const [statusFilter, setStatusFilter] = useState('All statuses');
     const [page, setPage] = useState(1);
 
-    const [newBot, setNewBot] = useState({ id: '', barangay: 'Not Assigned', assignedOperator: 'Not Assigned' });
+    const [newBot, setNewBot] = useState({ id: '', assignedOperator: 'Not Assigned' });
 
     const selectedBot = useMemo(() => {
         return bots.find(b => b.id === selectedBotId) || bots.find(b => !b.archived) || null;
@@ -173,7 +173,7 @@ export default function ManageBots() {
                 status: created.is_active ? 'Active' : 'Offline',
                 online: 'Offline',
                 battery: created.battery_level,
-                assignedLocation: newBot.barangay !== 'Not Assigned' ? newBot.barangay : 'Not Assigned',
+                assignedLocation: 'Not Assigned',
                 assignedOperator: newBot.assignedOperator !== 'Not Assigned' ? newBot.assignedOperator : 'Not Assigned',
                 lastActive: created.last_seen
                     ? new Date(created.last_seen).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -200,7 +200,7 @@ export default function ManageBots() {
                 }
             }
 
-            setNewBot({ id: '', barangay: 'Not Assigned', assignedOperator: 'Not Assigned' });
+            setNewBot({ id: '', assignedOperator: 'Not Assigned' });
             setIsAddBotOpen(false);
             setSelectedBotId(botToAdd.id);
 
@@ -305,7 +305,7 @@ export default function ManageBots() {
             .filter(n => !isNaN(n));
         const maxNum = existingIds.length > 0 ? Math.max(...existingIds) : 0;
         const nextId = `TRD-${String(maxNum + 1).padStart(3, '0')}`;
-        setNewBot({ id: nextId, barangay: 'Not Assigned', assignedOperator: 'Not Assigned' });
+        setNewBot({ id: nextId, assignedOperator: 'Not Assigned' });
         setIsAddBotOpen(true);
     };
 
@@ -570,16 +570,6 @@ export default function ManageBots() {
                                     required
                                     value={newBot.id}
                                     className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600 outline-none"
-                                />
-                            </div>
-                            <div>
-                                <label className="mb-1 block text-xs font-medium text-slate-500">Assigned barangay</label>
-                                <input
-                                    type="text"
-                                    placeholder="e.g. Carlatan"
-                                    value={newBot.barangay === 'Not Assigned' ? '' : newBot.barangay}
-                                    onChange={(e) => setNewBot({ ...newBot, barangay: e.target.value || 'Not Assigned' })}
-                                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
                                 />
                             </div>
 
