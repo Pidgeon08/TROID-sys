@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 import requests
 from django.utils.dateparse import parse_datetime
 from rest_framework import status, viewsets
-from rest_framework.decorators import action, api_view
+from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
 from django.contrib.auth.hashers import check_password
 from django.core.mail import send_mail
@@ -31,6 +31,7 @@ from .serializers import (
     SegregationRecordSerializer, AuditLogSerializer, HeatmapDataSerializer, LoginSerializer,
     CollectionAreaSerializer, NotificationSerializer, PriorityAreaSerializer
 )
+from .permissions import ADMIN, HasRole
 from .priority import check_and_schedule_priority_followup
 
 SPECIAL_CHARS = '!@#$%^&*()-_=+?'
@@ -148,18 +149,13 @@ def login(request):
 
 
 @api_view(['GET'])
+@permission_classes([HasRole(
+    *ADMIN,
+    always_enforce=True,
+    not_authenticated_message='A valid admin session is required.',
+    message='Admin access is required.',
+)])
 def task_status_updates(request):
-    scheme, _, credentials = request.headers.get('Authorization', '').partition(' ')
-    user_id, separator, session_token = credentials.partition(':')
-    if scheme != 'Session' or not separator or not user_id.isdecimal() or not session_token:
-        return Response({'error': 'A valid admin session is required.'}, status=status.HTTP_401_UNAUTHORIZED)
-
-    user = User.objects.filter(pk=user_id).only('role', 'session_token').first()
-    if not user or not secrets.compare_digest(user.session_token or '', session_token):
-        return Response({'error': 'A valid admin session is required.'}, status=status.HTTP_401_UNAUTHORIZED)
-    if user.role != 'admin':
-        return Response({'error': 'Admin access is required.'}, status=status.HTTP_403_FORBIDDEN)
-
     try:
         supabase_url = urlparse(settings.SUPABASE_URL)
         supabase_configured = (

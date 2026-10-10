@@ -73,6 +73,16 @@ class User(models.Model):
             self.password = make_password(self.password)
         super().save(*args, **kwargs)
 
+    # A User loaded by SessionTokenAuthentication is always a signed-in user;
+    # DRF permissions check these the same way as on Django's own user model.
+    @property
+    def is_authenticated(self):
+        return True
+
+    @property
+    def is_anonymous(self):
+        return False
+
     def __str__(self):
         return self.name
 

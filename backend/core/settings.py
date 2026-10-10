@@ -54,10 +54,16 @@ if RENDER_EXTERNAL_HOSTNAME:
 # API is accessed by the React frontend running on another origin.
 # Keep DEBUG for development only.
 REST_FRAMEWORK = {
-    # Avoid SessionAuthentication/CSRF for this project’s simple fetch-based frontend.
-    'DEFAULT_AUTHENTICATION_CLASSES': [],
-    'DEFAULT_PERMISSION_CLASSES': ['rest_framework.permissions.AllowAny'],
+    # Avoid SessionAuthentication/CSRF for this project’s simple fetch-based frontend;
+    # requests carry the login's session token in an Authorization header instead.
+    'DEFAULT_AUTHENTICATION_CLASSES': ['troid_api.authentication.SessionTokenAuthentication'],
+    'DEFAULT_PERMISSION_CLASSES': ['troid_api.permissions.RolePermission'],
+    'EXCEPTION_HANDLER': 'troid_api.exceptions.api_exception_handler',
 }
+
+# While False, API permission failures are only logged ("[auth] would deny ...")
+# and the request is allowed, so the rollout can surface gaps before enforcing.
+API_AUTH_ENFORCED = os.environ.get('API_AUTH_ENFORCED', 'False') == 'True'
 
 
 # Application definition
