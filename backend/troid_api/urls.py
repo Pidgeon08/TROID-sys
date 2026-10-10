@@ -9,6 +9,7 @@ urlpatterns = [
     path('notifications/unread-count/', views.unread_notification_count, name='unread-notification-count'),
     path('', include(views.router.urls)),
     path('login/', views.login, name='login'),
+    path('logout/', views.logout, name='logout'),
     path('forgot-password/', views.forgot_password, name='forgot-password'),
     path('log-detection/', views.log_detection, name='log-detection'),
     path('heatmap/', views.get_heatmap_data, name='get-heatmap'),

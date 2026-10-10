@@ -1,3 +1,4 @@
+import logging
 import re
 import secrets
 import string
@@ -11,7 +12,7 @@ from rest_framework import status, viewsets
 from rest_framework.decorators import action, api_view, authentication_classes, permission_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
-from django.contrib.auth.hashers import check_password
+from django.contrib.auth.hashers import check_password, make_password
 from django.core.mail import send_mail
 from django.conf import settings
 from django.utils import timezone
@@ -32,10 +33,16 @@ from .serializers import (
     SegregationRecordSerializer, AuditLogSerializer, HeatmapDataSerializer, LoginSerializer,
     CollectionAreaSerializer, NotificationSerializer, PriorityAreaSerializer
 )
-from .permissions import ADMIN, ANY_ROLE, MAYOR, PUBLIC, REQUESTERS, STAFF, HasRole, RoleViewSetMixin
+from .authentication import INACTIVE_STATUSES
+from .permissions import ADMIN, ANY_ROLE, MAYOR, PUBLIC, REQUESTERS, STAFF, HasRole, RoleViewSetMixin, require
 from .priority import check_and_schedule_priority_followup
 
+logger = logging.getLogger(__name__)
+
 SPECIAL_CHARS = '!@#$%^&*()-_=+?'
+
+# Matches the role labels the frontend writes into audit logs.
+ROLE_LABELS = {'admin': 'Admin', 'mayorsoffice': 'Mayor', 'barangay': 'Barangay', 'ngo': 'NGO', 'operator': 'Operator'}
 
 # DeploymentSchedule.day is a local calendar date chosen in the browser (San Fernando, La Union,
 # Philippines); TIME_ZONE is UTC, so comparisons against it must be converted to local time first.
@@ -94,6 +101,23 @@ def send_temp_password_email(user, temp_password):
         return False
 
 
+def record_audit(request, **fields):
+    """Writes an AuditLog row stamped with the server's time and the caller's IP."""
+    return AuditLog.objects.create(
+        time=timezone.localtime().strftime('%b %d, %Y %I:%M %p'),
+        ip=request.META.get('REMOTE_ADDR') or '-',
+        **fields,
+    )
+
+
+def own_user_id(request, requested_id):
+    """Signed-in callers only ever see their own notifications; anonymous
+    callers (report-only phase) keep the old ?user_id= behavior."""
+    if getattr(request.user, 'is_authenticated', False):
+        return request.user.pk
+    return requested_id
+
+
 def notify_request_update(req, notif_type, title, message):
     """Creates an in-app Notification for the requester (matched by email) and
     emails them, mirroring send_temp_password_email's best-effort error handling."""
@@ -127,28 +151,46 @@ def login(request):
     serializer.is_valid(raise_exception=True)
     email = serializer.validated_data['email']
     password = serializer.validated_data['password']
-    try:
-        user = User.objects.get(email=email)
-        if not check_password(password, user.password):
-            return Response({"error": "Invalid email or password"}, status=status.HTTP_401_UNAUTHORIZED)
-        # Only one active session per account: each login mints a new token,
-        # invalidating whatever session was previously active for this user.
-        session_token = secrets.token_hex(16)
-        user.session_token = session_token
-        user.save(update_fields=['session_token'])
-        return Response({
-            "id": user.id,
-            "user_id": user.user_id,
-            "name": user.name,
-            "email": user.email,
-            "role": user.role,
-            "status": user.status,
-            "location": user.location,
-            "must_change_password": user.must_change_password,
-            "session_token": session_token,
-        })
-    except User.DoesNotExist:
+    user = User.objects.filter(email=email).first()
+    if not user or not check_password(password, user.password):
+        # Logged here rather than by the browser, which has no session yet.
+        record_audit(request, user=email[:100], role='-', action='Login failed', module='Authentication',
+                     details='Invalid email or password', status='failed')
         return Response({"error": "Invalid email or password"}, status=status.HTTP_401_UNAUTHORIZED)
+    if user.status in INACTIVE_STATUSES:
+        if settings.API_AUTH_ENFORCED:
+            record_audit(request, user=email[:100], role=ROLE_LABELS.get(user.role, user.role), action='Login failed',
+                         module='Authentication', details=f'Account is {user.status}', status='failed')
+            return Response({"error": "This account is not active. Please contact CENRO."},
+                            status=status.HTTP_403_FORBIDDEN)
+        logger.warning('[auth] would deny POST %s user=%s reason=account %s', request.path, user.pk, user.status)
+
+    # Only one active session per account: each login mints a new token,
+    # invalidating whatever session was previously active for this user.
+    session_token = secrets.token_hex(16)
+    user.session_token = session_token
+    user.save(update_fields=['session_token'])
+    return Response({
+        "id": user.id,
+        "user_id": user.user_id,
+        "name": user.name,
+        "email": user.email,
+        "role": user.role,
+        "status": user.status,
+        "location": user.location,
+        "must_change_password": user.must_change_password,
+        "session_token": session_token,
+    })
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def logout(request):
+    """Ends the caller's session on the server, so the token stops working."""
+    if getattr(request.user, 'is_authenticated', False):
+        request.user.session_token = None
+        request.user.save(update_fields=['session_token'])
+    return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 @api_view(['GET'])
@@ -266,7 +308,7 @@ def forgot_password(request):
         return generic_response
 
     temp_password = generate_temp_password()
-    user.password = temp_password
+    user.password = make_password(temp_password)
     user.must_change_password = True
     user.save()
     send_temp_password_email(user, temp_password)
@@ -378,7 +420,7 @@ def pending_request_count(request):
 @api_view(['GET'])
 @permission_classes([HasRole(*ANY_ROLE)])
 def unread_notification_count(request):
-    user_id = request.query_params.get('user_id')
+    user_id = own_user_id(request, request.query_params.get('user_id'))
     count = Notification.objects.filter(recipient_id=user_id, is_read=False).count()
     return Response({"unread_count": count})
 
@@ -404,18 +446,32 @@ class UserViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         temp_password = generate_temp_password()
-        user = serializer.save(password=temp_password, must_change_password=True)
+        user = serializer.save(password=make_password(temp_password), must_change_password=True)
         email_sent = send_temp_password_email(user, temp_password)
         headers = self.get_success_headers(serializer.data)
         data = dict(serializer.data)
         data['email_sent'] = email_sent
         return Response(data, status=status.HTTP_201_CREATED, headers=headers)
 
+    # What non-admins may change on their own account (Settings page).
+    SELF_EDITABLE_FIELDS = ('name', 'email')
+
+    def partial_update(self, request, *args, **kwargs):
+        caller = request.user
+        if not getattr(caller, 'is_authenticated', False) or caller.role == 'admin':
+            return super().partial_update(request, *args, **kwargs)
+        require(request, str(caller.pk) == str(kwargs.get('pk')), 'can only edit own account')
+        data = {k: v for k, v in request.data.items() if k in self.SELF_EDITABLE_FIELDS}
+        serializer = self.get_serializer(self.get_object(), data=data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        return Response(serializer.data)
+
     @action(detail=True, methods=['post'], url_path='reset-password')
     def reset_password(self, request, pk=None):
         user = self.get_object()
         temp_password = generate_temp_password()
-        user.password = temp_password
+        user.password = make_password(temp_password)
         user.must_change_password = True
         user.save()
         email_sent = send_temp_password_email(user, temp_password)
@@ -424,6 +480,8 @@ class UserViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='change-password')
     def change_password(self, request, pk=None):
         user = self.get_object()
+        if getattr(request.user, 'is_authenticated', False):
+            require(request, request.user.pk == user.pk, 'can only change own password')
         old_password = request.data.get('old_password') or ''
         new_password = request.data.get('password') or ''
         if not check_password(old_password, user.password):
@@ -431,7 +489,7 @@ class UserViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
         errors = validate_password_strength(new_password)
         if errors:
             return Response({'error': errors[0]}, status=status.HTTP_400_BAD_REQUEST)
-        user.password = new_password
+        user.password = make_password(new_password)
         user.must_change_password = False
         user.save()
         return Response({'status': 'password changed'})
@@ -439,8 +497,16 @@ class UserViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
     @action(detail=True, methods=['get'], url_path='session-check')
     def session_check(self, request, pk=None):
         user = self.get_object()
-        token = request.query_params.get('token')
-        valid = bool(token) and bool(user.session_token) and token == user.session_token
+        if getattr(request.user, 'is_authenticated', False):
+            valid = request.user.pk == user.pk
+        else:
+            # Older frontends send the token in the URL; accepted until enforcement.
+            token = request.query_params.get('token') or ''
+            valid = (
+                not settings.API_AUTH_ENFORCED
+                and bool(token) and bool(user.session_token)
+                and secrets.compare_digest(token.encode(), user.session_token.encode())
+            )
         return Response({'valid': valid})
 
 
@@ -466,7 +532,7 @@ class OperatorViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
                 email=email,
                 role='operator',
                 status='active',
-                password=temp_password,
+                password=make_password(temp_password),
                 must_change_password=True,
             )
             email_sent = send_temp_password_email(account, temp_password)
@@ -814,7 +880,7 @@ class NotificationViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
 
     def get_queryset(self):
         queryset = Notification.objects.all()
-        user_id = self.request.query_params.get('user_id')
+        user_id = own_user_id(self.request, self.request.query_params.get('user_id'))
         if user_id:
             queryset = queryset.filter(recipient_id=user_id)
         return queryset
@@ -828,7 +894,7 @@ class NotificationViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
 
     @action(detail=False, methods=['post'], url_path='mark-all-read')
     def mark_all_read(self, request):
-        user_id = request.data.get('user_id')
+        user_id = own_user_id(request, request.data.get('user_id'))
         Notification.objects.filter(recipient_id=user_id, is_read=False).update(is_read=True)
         return Response({'status': 'ok'})
 
@@ -924,12 +990,21 @@ class SegregationRecordViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
 class AuditLogViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
     read_roles = ADMIN
     action_roles = {'create': STAFF}
+    # Audit entries are never edited or deleted.
+    http_method_names = ['get', 'post', 'head', 'options']
     queryset = AuditLog.objects.all().order_by('-id')
     serializer_class = AuditLogSerializer
 
     def perform_create(self, serializer):
         ip = self.request.META.get('REMOTE_ADDR') or '-'
         time_str = timezone.localtime().strftime('%b %d, %Y %I:%M %p')
+        caller = self.request.user
+        if getattr(caller, 'is_authenticated', False):
+            # Don't trust the browser's claim of who did it, from where, or when.
+            serializer.save(
+                time=time_str, ip=ip, user=caller.name, role=ROLE_LABELS.get(caller.role, caller.role),
+            )
+            return
         serializer.save(
             time=serializer.validated_data.get('time') or time_str,
             ip=serializer.validated_data.get('ip') or ip,

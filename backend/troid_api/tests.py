@@ -1,10 +1,11 @@
 from unittest.mock import Mock, patch
 
 import requests
+from django.contrib.auth.hashers import check_password
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
-from .models import CollectionArea, Request, User
+from .models import AuditLog, CollectionArea, Notification, Request, User
 
 
 def make_user(role, status='active', token=None):
@@ -223,6 +224,165 @@ class PublicEndpointTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {'valid': False})
+
+
+@override_settings(API_AUTH_ENFORCED=True)
+class OwnDataTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.admin = make_user('admin')
+        self.barangay = make_user('barangay')
+        self.other = make_user('ngo')
+
+    def test_non_admins_edit_only_their_own_name_and_email(self):
+        response = self.client.patch(
+            f'/api/users/{self.other.id}/', {'name': 'Hijacked'}, format='json', **session_header(self.barangay),
+        )
+        self.assertEqual(response.status_code, 403)
+
+        response = self.client.patch(
+            f'/api/users/{self.barangay.id}/',
+            {'name': 'New Name', 'role': 'admin', 'status': 'active'},
+            format='json', **session_header(self.barangay),
+        )
+        self.assertEqual(response.status_code, 200)
+        self.barangay.refresh_from_db()
+        self.assertEqual(self.barangay.name, 'New Name')
+        self.assertEqual(self.barangay.role, 'barangay')
+
+    def test_admins_can_edit_other_accounts(self):
+        response = self.client.patch(
+            f'/api/users/{self.other.id}/', {'status': 'archived'}, format='json', **session_header(self.admin),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.other.refresh_from_db()
+        self.assertEqual(self.other.status, 'archived')
+
+    def test_password_changes_are_own_account_only_and_always_hashed(self):
+        payload = {'old_password': 'Test-password1', 'password': 'pbkdf2_Sha256$1$Ab!'}
+        response = self.client.post(
+            f'/api/users/{self.other.id}/change-password/', payload, format='json', **session_header(self.barangay),
+        )
+        self.assertEqual(response.status_code, 403)
+
+        response = self.client.post(
+            f'/api/users/{self.barangay.id}/change-password/', payload, format='json', **session_header(self.barangay),
+        )
+        self.assertEqual(response.status_code, 200)
+        self.barangay.refresh_from_db()
+        self.assertNotEqual(self.barangay.password, payload['password'])
+        self.assertTrue(check_password(payload['password'], self.barangay.password))
+
+    def test_notifications_are_scoped_to_the_signed_in_user(self):
+        mine = Notification.objects.create(recipient=self.barangay, notif_type='approved', title='Mine')
+        theirs = Notification.objects.create(recipient=self.other, notif_type='approved', title='Theirs')
+        headers = session_header(self.barangay)
+
+        listed = self.client.get(f'/api/notifications/?user_id={self.other.id}', **headers).json()
+        self.assertEqual([n['id'] for n in listed], [mine.id])
+
+        count = self.client.get(f'/api/notifications/unread-count/?user_id={self.other.id}', **headers).json()
+        self.assertEqual(count, {'unread_count': 1})
+
+        response = self.client.post(f'/api/notifications/{theirs.id}/mark_read/', **headers)
+        self.assertEqual(response.status_code, 404)
+
+        self.client.post('/api/notifications/mark-all-read/', {'user_id': self.other.id}, format='json', **headers)
+        mine.refresh_from_db()
+        theirs.refresh_from_db()
+        self.assertTrue(mine.is_read)
+        self.assertFalse(theirs.is_read)
+
+    def test_audit_logs_record_the_caller_and_cannot_be_changed(self):
+        response = self.client.post('/api/audit-logs/', {
+            'user': 'Someone Else', 'role': 'Admin', 'action': 'Test', 'details': 'Test entry', 'module': 'Test',
+        }, format='json', **session_header(self.barangay))
+        self.assertEqual(response.status_code, 201)
+        log = AuditLog.objects.get(pk=response.json()['id'])
+        self.assertEqual((log.user, log.role), (self.barangay.name, 'Barangay'))
+
+        for method in ('put', 'patch', 'delete'):
+            with self.subTest(method=method):
+                response = getattr(self.client, method)(
+                    f'/api/audit-logs/{log.id}/', {}, format='json', **session_header(self.admin),
+                )
+                self.assertEqual(response.status_code, 405)
+
+
+class AccountLifecycleTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user = make_user('barangay')
+
+    def login(self, email=None, password='Test-password1'):
+        return self.client.post(
+            '/api/login/', {'email': email or self.user.email, 'password': password}, format='json',
+        )
+
+    def test_failed_logins_are_audited_by_the_server(self):
+        response = self.login(password='wrong')
+
+        self.assertEqual(response.status_code, 401)
+        log = AuditLog.objects.get()
+        self.assertEqual((log.user, log.action, log.status), (self.user.email, 'Login failed', 'failed'))
+
+    @override_settings(API_AUTH_ENFORCED=True)
+    def test_inactive_accounts_cannot_log_in_once_enforced(self):
+        for status in ('archived', 'pending'):
+            with self.subTest(status=status):
+                self.user.status = status
+                self.user.save(update_fields=['status'])
+                response = self.login()
+                self.assertEqual(response.status_code, 403)
+                self.assertNotIn('session_token', response.json())
+
+    @override_settings(API_AUTH_ENFORCED=False)
+    def test_inactive_accounts_are_only_logged_while_report_only(self):
+        self.user.status = 'archived'
+        self.user.save(update_fields=['status'])
+
+        with self.assertLogs('troid_api.views', 'WARNING'):
+            response = self.login()
+
+        self.assertEqual(response.status_code, 200)
+
+    @override_settings(API_AUTH_ENFORCED=True)
+    def test_operators_can_log_in(self):
+        operator = make_user('operator')
+
+        self.assertEqual(self.login(email=operator.email).status_code, 200)
+
+    @override_settings(API_AUTH_ENFORCED=True)
+    def test_logout_ends_the_session_on_the_server(self):
+        token = self.login().json()['session_token']
+        headers = {'HTTP_AUTHORIZATION': f'Session {self.user.id}:{token}'}
+
+        self.assertEqual(self.client.post('/api/logout/', **headers).status_code, 204)
+        self.assertEqual(self.client.get('/api/boats/', **headers).status_code, 401)
+
+    def test_session_check_uses_the_header(self):
+        headers = session_header(self.user)
+        for enforced in (False, True):
+            with self.subTest(enforced=enforced), override_settings(API_AUTH_ENFORCED=enforced):
+                response = self.client.get(f'/api/users/{self.user.id}/session-check/', **headers)
+                self.assertEqual(response.json(), {'valid': True})
+
+    def test_session_check_accepts_a_url_token_only_until_enforced(self):
+        url = f'/api/users/{self.user.id}/session-check/?token={self.user.session_token}'
+        with override_settings(API_AUTH_ENFORCED=False):
+            self.assertEqual(self.client.get(url).json(), {'valid': True})
+        with override_settings(API_AUTH_ENFORCED=True):
+            self.assertEqual(self.client.get(url).json(), {'valid': False})
+
+    @override_settings(API_AUTH_ENFORCED=False)
+    def test_report_only_keeps_the_old_user_id_filter_for_anonymous_callers(self):
+        Notification.objects.create(recipient=self.user, notif_type='approved', title='Mine')
+
+        with self.assertLogs('troid_api.permissions', 'WARNING'):
+            response = self.client.get(f'/api/notifications/unread-count/?user_id={self.user.id}')
+
+        self.assertEqual(response.json(), {'unread_count': 1})
 
 
 class TaskStatusUpdatesTests(TestCase):
