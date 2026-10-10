@@ -1,3 +1,5 @@
+import { UNAUTHORIZED_EVENT, getAuthHeaders, hasSession } from './session';
+
 export const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000/api';
 
 function extractErrorMessage(errorJson) {
@@ -17,13 +19,21 @@ function extractErrorMessage(errorJson) {
 
 async function request(path, options = {}) {
   const url = `${API_BASE}${path}`;
+  const { headers, skipUnauthorizedEvent, ...fetchOptions } = options;
   const response = await fetch(url, {
+    ...fetchOptions,
     headers: {
       'Content-Type': 'application/json',
-      ...options.headers,
+      ...getAuthHeaders(),
+      ...headers,
     },
-    ...options,
   });
+
+  // The server no longer accepts this session (signed out, signed in
+  // elsewhere, or account deactivated): App.jsx signs the user out.
+  if (response.status === 401 && hasSession() && !skipUnauthorizedEvent) {
+    window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
+  }
 
   if (!response.ok) {
     const text = await response.text();
@@ -64,6 +74,8 @@ export const api = {
   deleteUser: (id) => api.delete(`/users/${id}/`),
   resetUserPassword: (id) => api.post(`/users/${id}/reset-password/`),
   changeUserPassword: (id, data) => api.post(`/users/${id}/change-password/`, data),
+  // The server checks the Authorization header; ?token= is only for backends
+  // deployed before header authentication and is removed once it's enforced.
   checkUserSession: (id, token) => api.get(`/users/${id}/session-check/?token=${encodeURIComponent(token)}`),
   pendingUserCount: () => api.get('/users/pending-count/'),
   pendingRequestCount: () => api.get('/requests/pending-count/'),
@@ -134,7 +146,7 @@ export const api = {
   heatmapData: () => api.get('/heatmap-data/'),
   createHeatmapData: (data) => api.post('/heatmap-data/', data),
 
-  taskStatusUpdates: (params = {}, currentUser) => {
+  taskStatusUpdates: (params = {}) => {
     const qs = new URLSearchParams();
     if (params.status) qs.set('status', params.status);
     if (params.search) qs.set('search', params.search);
@@ -142,11 +154,7 @@ export const api = {
     if (params.limit !== undefined) qs.set('limit', String(params.limit));
     if (params.offset !== undefined) qs.set('offset', String(params.offset));
     const query = qs.toString();
-    return request(`/task-status-updates/${query ? `?${query}` : ''}`, {
-      headers: {
-        Authorization: `Session ${currentUser?.id || ''}:${currentUser?.session_token || ''}`,
-      },
-    });
+    return api.get(`/task-status-updates/${query ? `?${query}` : ''}`);
   },
 
   logDetection: (data) => api.post('/log-detection/', data),
@@ -160,6 +168,7 @@ export const api = {
   },
 
   login: (data) => api.post('/login/', data),
+  logout: () => request('/logout/', { method: 'POST', skipUnauthorizedEvent: true }),
   forgotPassword: (email) => api.post('/forgot-password/', { email }),
 };
 

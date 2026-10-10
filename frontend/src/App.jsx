@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useState, useEffect, lazy, Suspense } from 'react';
 import api from './services/api';
+import { UNAUTHORIZED_EVENT, setSession } from './services/session';
 import Layout from './components/Layout';
 import { ProtectedRoute } from './components/ProtectedRoute';
 
@@ -62,6 +63,9 @@ function getStoredSession() {
   return null;
 }
 
+// A remembered session's API requests need its token from the first render.
+setSession(getStoredSession()?.currentUser);
+
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(() => getStoredSession() !== null);
   const [userType, setUserType] = useState(() => getStoredSession()?.userType || 'admin');
@@ -70,6 +74,7 @@ function App() {
   const handleLogin = async (type = 'admin', userData = null, rememberMe = false) => {
     try {
       const user = userData || await api.users().then(users => users.find(u => u.role === type) || users[0]);
+      setSession(user);
       setCurrentUser(user);
       setUserType(type);
       setIsAuthenticated(true);
@@ -86,10 +91,24 @@ function App() {
   };
 
   const handleLogout = () => {
+    // Ends the session on the server too; the request captures the token
+    // before setSession(null) below clears it.
+    api.logout().catch(() => {});
+    setSession(null);
     setIsAuthenticated(false);
     setCurrentUser(null);
     localStorage.removeItem(REMEMBER_ME_KEY);
   };
+
+  // services/api.js fires this when the server rejects the session.
+  useEffect(() => {
+    const onUnauthorized = () => {
+      handleLogout();
+      alert('Your session has ended. Please sign in again.');
+    };
+    window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
+    return () => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
+  }, []);
 
   // Only one active session per account: if this device's session token no
   // longer matches the server's record (because the account signed in
@@ -140,7 +159,7 @@ function App() {
             <Route path="/admin/heatmap" element={<HeatmapView />} />
             <Route path="/admin/reports" element={<Reports />} />
             <Route path="/admin/audit" element={<AuditLogs />} />
-            <Route path="/admin/task-status-updates" element={<TaskStatusUpdates currentUser={currentUser} />} />
+            <Route path="/admin/task-status-updates" element={<TaskStatusUpdates />} />
             <Route path="/admin/settings" element={<Settings />} />
             <Route path="/admin/utilities" element={<Utilities />} />
             <Route path="/admin/landfill" element={<LandfillTracking />} />

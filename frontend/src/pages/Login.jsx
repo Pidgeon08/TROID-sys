@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Eye, EyeOff } from 'lucide-react';
 import { logAudit } from '../services/auditLog';
-import { API_BASE } from '../services/api';
+import api, { API_BASE } from '../services/api';
+import { setSession } from '../services/session';
 import ForceChangePasswordModal from '../components/ForceChangePasswordModal';
 import ForgotPasswordModal from '../components/ForgotPasswordModal';
 import LoadingModal from '../components/LoadingModal';
@@ -40,12 +41,14 @@ const Login = ({ onLogin }) => {
       });
       const data = await res.json();
       if (!res.ok) {
+        // The server audits failed logins; the browser has no session to log them with.
         setError(data.error || 'Login failed. Please try again.');
-        logAudit({ user: email, role: '-', action: 'Login failed', module: 'Authentication', details: data.error || 'Invalid credentials', status: 'failed' });
         setLoading(false);
         return;
       }
       const role = data.role || 'admin';
+      // The audit entry below and a forced password change both need the new session.
+      setSession(data);
       logAudit({ user: data.name || email, role: ROLE_LABELS[role] || role, action: 'Login successful', module: 'Authentication', details: `Signed in as ${data.email || email}`, status: 'success' });
 
       if (data.must_change_password) {
@@ -59,14 +62,21 @@ const Login = ({ onLogin }) => {
     } catch (err) {
       console.error('Login error:', err);
       setError('Login failed. Please try again.');
-      logAudit({ user: email, role: '-', action: 'Login failed', module: 'Authentication', details: 'Login request error', status: 'failed' });
     } finally {
       setLoading(false);
     }
   };
 
-  const handlePasswordChanged = () => {
+  // Leaving the forced password change (done or cancelled) ends that session;
+  // the user signs in again with the new password.
+  const endPendingSession = () => {
+    api.logout().catch(() => {});
+    setSession(null);
     setPendingLogin(null);
+  };
+
+  const handlePasswordChanged = () => {
+    endPendingSession();
     setPassword('');
     setNotice('Password changed successfully. Please sign in again with your new password.');
   };
@@ -170,7 +180,7 @@ const Login = ({ onLogin }) => {
           user={pendingLogin}
           currentPassword={password}
           onSuccess={handlePasswordChanged}
-          onCancel={() => setPendingLogin(null)}
+          onCancel={endPendingSession}
         />
       )}
 

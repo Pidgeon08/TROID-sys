@@ -26,7 +26,7 @@ function formatPhilippineDateTime(value) {
   }).format(date);
 }
 
-export default function TaskStatusUpdates({ currentUser }) {
+export default function TaskStatusUpdates() {
   const [statusFilter, setStatusFilter] = useState('');
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
@@ -48,7 +48,7 @@ export default function TaskStatusUpdates({ currentUser }) {
         search: debouncedSearch,
         limit: PAGE_SIZE,
         offset: (page - 1) * PAGE_SIZE,
-      }, currentUser);
+      });
       if (requestId === latestRequest.current) {
         setUpdates(response.results || []);
         setCount(response.count ?? 0);
@@ -60,7 +60,7 @@ export default function TaskStatusUpdates({ currentUser }) {
     } finally {
       if (requestId === latestRequest.current) setLoading(false);
     }
-  }, [currentUser, debouncedSearch, page, statusFilter]);
+  }, [debouncedSearch, page, statusFilter]);
 
   useEffect(() => {
     let active = true;
