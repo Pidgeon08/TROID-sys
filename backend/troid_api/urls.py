@@ -10,4 +10,5 @@ urlpatterns = [
     path('users/pending-count/', views.pending_user_count, name='pending-user-count'),
     path('requests/pending-count/', views.pending_request_count, name='pending-request-count'),
     path('notifications/unread-count/', views.unread_notification_count, name='unread-notification-count'),
+    path('task-status-updates/', views.task_status_updates, name='task-status-updates'),
 ]

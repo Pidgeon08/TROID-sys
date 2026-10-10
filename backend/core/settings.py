@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 import dj_database_url
+from corsheaders.defaults import default_headers
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -21,6 +22,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Loads backend/.env if present (gitignored). Real SMTP credentials live
 # there instead of in this file so they never get committed.
 load_dotenv(BASE_DIR / '.env')
+
+SUPABASE_URL = os.environ.get('SUPABASE_URL', '').rstrip('/')
+SUPABASE_SECRET_KEY = os.environ.get('SUPABASE_SECRET_KEY', '')
 
 
 # Quick-start development settings - unsuitable for production
@@ -162,6 +166,9 @@ STORAGES = {
     },
 }
 CORS_ALLOW_ALL_ORIGINS = True
+CORS_ALLOW_HEADERS = default_headers + tuple(
+    header for header in ('authorization',) if header not in default_headers
+)
 
 
 # Email

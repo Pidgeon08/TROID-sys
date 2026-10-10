@@ -25,6 +25,7 @@ const SegregationForm = lazy(() => import('./pages/Barangay/SegregationForm'));
 const LandfillTracking = lazy(() => import('./pages/Admin/LandfillTracking'));
 const RecyclingCenter = lazy(() => import('./pages/Admin/RecyclingCenter'));
 const AuditLogs = lazy(() => import('./pages/Admin/AuditLogs'));
+const TaskStatusUpdates = lazy(() => import('./pages/Admin/TaskStatusUpdates'));
 const Utilities = lazy(() => import('./pages/Admin/Utilities'));
 const BarangayDashboard = lazy(() => import('./pages/Barangay/Dashboard'));
 const BarangayRequestForm = lazy(() => import('./pages/Barangay/RequestForm'));
@@ -139,6 +140,7 @@ function App() {
             <Route path="/admin/heatmap" element={<HeatmapView />} />
             <Route path="/admin/reports" element={<Reports />} />
             <Route path="/admin/audit" element={<AuditLogs />} />
+            <Route path="/admin/task-status-updates" element={<TaskStatusUpdates currentUser={currentUser} />} />
             <Route path="/admin/settings" element={<Settings />} />
             <Route path="/admin/utilities" element={<Utilities />} />
             <Route path="/admin/landfill" element={<LandfillTracking />} />

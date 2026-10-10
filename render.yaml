@@ -15,6 +15,10 @@ services:
       # Use the Session pooler URI (see backend/.env.example).
       - key: DATABASE_URL
         sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SECRET_KEY
+        sync: false
       - key: SECRET_KEY
         generateValue: true
       - key: DEBUG

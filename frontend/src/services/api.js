@@ -134,6 +134,21 @@ export const api = {
   heatmapData: () => api.get('/heatmap-data/'),
   createHeatmapData: (data) => api.post('/heatmap-data/', data),
 
+  taskStatusUpdates: (params = {}, currentUser) => {
+    const qs = new URLSearchParams();
+    if (params.status) qs.set('status', params.status);
+    if (params.search) qs.set('search', params.search);
+    if (params.since) qs.set('since', params.since);
+    if (params.limit !== undefined) qs.set('limit', String(params.limit));
+    if (params.offset !== undefined) qs.set('offset', String(params.offset));
+    const query = qs.toString();
+    return request(`/task-status-updates/${query ? `?${query}` : ''}`, {
+      headers: {
+        Authorization: `Session ${currentUser?.id || ''}:${currentUser?.session_token || ''}`,
+      },
+    });
+  },
+
   logDetection: (data) => api.post('/log-detection/', data),
   getHeatmap: (params = {}) => {
     const qs = new URLSearchParams();

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { createPortal } from "react-dom";
 import { NavLink, useLocation } from 'react-router-dom';
-import { Home, Map, FileText, LogOut, Shield, Users, Bot, InboxIcon, Send, CalendarClock, MapPin, UserCog, Wrench, ChevronDown, LayoutGrid } from 'lucide-react';
+import { Home, Map, FileText, LogOut, Shield, Users, Bot, InboxIcon, Send, CalendarClock, MapPin, UserCog, Wrench, ChevronDown, LayoutGrid, ClipboardList } from 'lucide-react';
 
 const navItems = {
   admin: [
@@ -17,6 +17,7 @@ const navItems = {
       ],
     },
     { to: '/admin/requests', icon: InboxIcon, label: 'Requests' },
+    { to: '/admin/task-status-updates', icon: ClipboardList, label: 'Task Status Updates' },
     { to: '/admin/collection-areas', icon: MapPin, label: 'Collection Areas' },
     { to: '/admin/deployment', icon: CalendarClock, label: 'Deployment Schedule' },
     { to: '/admin/heatmap', icon: Map, label: 'Heatmap' },

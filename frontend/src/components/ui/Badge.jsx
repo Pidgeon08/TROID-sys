@@ -7,6 +7,8 @@ const STATUS_STYLES = {
   Paused: 'bg-amber-50 text-amber-800',
   Offline: 'bg-red-50 text-red-800',
   Archived: 'bg-slate-100 text-slate-600',
+  'To Be Continued': 'bg-amber-50 text-amber-700',
+  'In Progress': 'bg-blue-50 text-blue-700',
 };
 
 export function Badge({ status, dot = false, className = '' }) {

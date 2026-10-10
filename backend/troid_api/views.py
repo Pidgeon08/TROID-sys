@@ -2,8 +2,11 @@ import re
 import secrets
 import string
 from datetime import timedelta
+from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
+import requests
+from django.utils.dateparse import parse_datetime
 from rest_framework import status, viewsets
 from rest_framework.decorators import action, api_view
 from rest_framework.response import Response
@@ -142,6 +145,109 @@ def login(request):
         })
     except User.DoesNotExist:
         return Response({"error": "Invalid email or password"}, status=status.HTTP_401_UNAUTHORIZED)
+
+
+@api_view(['GET'])
+def task_status_updates(request):
+    scheme, _, credentials = request.headers.get('Authorization', '').partition(' ')
+    user_id, separator, session_token = credentials.partition(':')
+    if scheme != 'Session' or not separator or not user_id.isdecimal() or not session_token:
+        return Response({'error': 'A valid admin session is required.'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    user = User.objects.filter(pk=user_id).only('role', 'session_token').first()
+    if not user or not secrets.compare_digest(user.session_token or '', session_token):
+        return Response({'error': 'A valid admin session is required.'}, status=status.HTTP_401_UNAUTHORIZED)
+    if user.role != 'admin':
+        return Response({'error': 'Admin access is required.'}, status=status.HTTP_403_FORBIDDEN)
+
+    try:
+        supabase_url = urlparse(settings.SUPABASE_URL)
+        supabase_configured = (
+            bool(settings.SUPABASE_SECRET_KEY)
+            and supabase_url.scheme == 'https'
+            and bool(supabase_url.netloc)
+        )
+    except ValueError:
+        supabase_configured = False
+    if not supabase_configured:
+        return Response(
+            {'error': 'Supabase task status access is not configured.'},
+            status=status.HTTP_502_BAD_GATEWAY,
+        )
+
+    query_params = request.query_params
+    status_filter = query_params.get('status', '').strip()
+    valid_statuses = {'completed', 'to_be_continued', 'in_progress'}
+    if status_filter and status_filter not in valid_statuses:
+        return Response({'error': 'Invalid task status.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        limit = int(query_params.get('limit', 50))
+        offset = int(query_params.get('offset', 0))
+    except (TypeError, ValueError):
+        return Response({'error': 'Limit and offset must be integers.'}, status=status.HTTP_400_BAD_REQUEST)
+    if limit < 1 or offset < 0:
+        return Response({'error': 'Limit must be positive and offset cannot be negative.'}, status=status.HTTP_400_BAD_REQUEST)
+    limit = min(limit, 200)
+
+    since = query_params.get('since', '').strip()
+    if since:
+        parsed_since = parse_datetime(since)
+        if parsed_since is None or timezone.is_naive(parsed_since):
+            return Response(
+                {'error': 'Since must be an ISO 8601 datetime with a timezone.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+    search = query_params.get('search', '').strip()
+    if len(search) > 200:
+        return Response({'error': 'Search must be 200 characters or fewer.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    params = {
+        'select': '*',
+        'order': 'received_at.desc',
+        'limit': limit,
+        'offset': offset,
+    }
+    if status_filter:
+        params['status'] = f'eq.{status_filter}'
+    if since:
+        params['received_at'] = f'gt.{since}'
+    if search:
+        escaped_search = search.replace('\\', '\\\\').replace('"', '\\"')
+        params['or'] = (
+            f'(notes.ilike."*{escaped_search}*",'
+            f'operator_email.ilike."*{escaped_search}*")'
+        )
+
+    try:
+        upstream = requests.get(
+            f'{settings.SUPABASE_URL}/rest/v1/task_status_updates',
+            params=params,
+            headers={
+                'apikey': settings.SUPABASE_SECRET_KEY,
+                'Prefer': 'count=exact',
+            },
+            timeout=10,
+        )
+        upstream.raise_for_status()
+        rows = upstream.json()
+        if not isinstance(rows, list):
+            raise ValueError('Supabase returned an unexpected response.')
+    except (requests.RequestException, ValueError):
+        return Response(
+            {'error': 'Unable to fetch task status updates from Supabase.'},
+            status=status.HTTP_502_BAD_GATEWAY,
+        )
+
+    content_range = upstream.headers.get('Content-Range', '')
+    total = content_range.rsplit('/', 1)[-1] if '/' in content_range else ''
+    try:
+        count = int(total)
+    except ValueError:
+        count = None
+
+    return Response({'results': rows, 'count': count})
 
 
 @api_view(['POST'])
