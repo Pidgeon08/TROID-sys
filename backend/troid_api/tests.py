@@ -4,7 +4,7 @@ import requests
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
-from .models import User
+from .models import CollectionArea, Request, User
 
 
 def make_user(role, status='active', token=None):
@@ -106,6 +106,123 @@ class SessionAuthenticationTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn('account archived', logs.output[0])
+
+
+ROLES = ('admin', 'mayorsoffice', 'barangay', 'ngo', 'operator')
+STAFF_ROLES = ('admin', 'mayorsoffice', 'barangay', 'ngo')
+REQUESTER_ROLES = ('admin', 'barangay', 'ngo')
+
+
+@override_settings(API_AUTH_ENFORCED=True)
+class EndpointRoleTests(TestCase):
+    """Every role either gets in (any status but 401/403, e.g. 400 for a
+    request in the wrong state) or is refused with 403."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.users = {role: make_user(role) for role in ROLES}
+        self.request_obj = Request.objects.create(email='requester@example.com')
+        self.area = CollectionArea.objects.create(name='Test Area')
+
+    def assert_roles(self, method, path, allowed, data=None):
+        for role, user in self.users.items():
+            with self.subTest(method=method, path=path, role=role):
+                response = getattr(self.client, method)(path, data, format='json', **session_header(user))
+                if role in allowed:
+                    self.assertNotIn(response.status_code, (401, 403))
+                else:
+                    self.assertEqual(response.status_code, 403)
+        with self.subTest(method=method, path=path, role='anonymous'):
+            response = getattr(self.client, method)(path, data, format='json')
+            self.assertEqual(response.status_code, 401)
+
+    def test_boats_and_deployment_schedules(self):
+        self.assert_roles('get', '/api/boats/', STAFF_ROLES)
+        self.assert_roles('post', '/api/boats/', ('admin',), {})
+        self.assert_roles('get', '/api/deployment-schedules/', STAFF_ROLES)
+        self.assert_roles('post', '/api/deployment-schedules/', ('admin',), {})
+
+    def test_users_and_operators_are_admin_only(self):
+        target = self.users['barangay']
+        self.assert_roles('get', '/api/users/', ('admin',))
+        self.assert_roles('get', f'/api/users/{target.id}/', ('admin',))
+        self.assert_roles('post', '/api/users/', ('admin',), {})
+        self.assert_roles('put', f'/api/users/{target.id}/', ('admin',), {})
+        self.assert_roles('post', f'/api/users/{target.id}/reset-password/', ('admin',))
+        self.assert_roles('get', '/api/operators/', ('admin',))
+        self.assert_roles('post', '/api/operators/', ('admin',), {})
+
+    def test_requests(self):
+        rid = self.request_obj.request_id
+        self.assert_roles('get', '/api/requests/', STAFF_ROLES)
+        self.assert_roles('get', f'/api/requests/{rid}/', STAFF_ROLES)
+        self.assert_roles('post', '/api/requests/', REQUESTER_ROLES, {'request_type': 'Cleanup'})
+        self.assert_roles('patch', f'/api/requests/{rid}/', ('admin',), {})
+        self.assert_roles('post', f'/api/requests/{rid}/mayor_approve/', ('mayorsoffice',))
+        self.assert_roles('post', f'/api/requests/{rid}/admin_approve/', ('admin',))
+        self.assert_roles('post', f'/api/requests/{rid}/park/', ('admin',), {})
+        self.assert_roles('post', f'/api/requests/{rid}/unpark/', ('admin', 'mayorsoffice'))
+        self.assert_roles('post', f'/api/requests/{rid}/reschedule/', ('admin',), {})
+        self.assert_roles('post', f'/api/requests/{rid}/mark_session_completed/', REQUESTER_ROLES)
+        self.assert_roles('post', f'/api/requests/{rid}/submit_trash_report/', REQUESTER_ROLES, {})
+        self.assert_roles('get', f'/api/requests/{rid}/bot_detections/', ('admin',))
+        self.assert_roles('post', f'/api/requests/{rid}/submit_verification/', ('admin',), {})
+        self.assert_roles('get', '/api/requests/post-cleanup-comparison/', ('admin',))
+        self.assert_roles('post', f'/api/requests/{rid}/restore/', ('admin',))
+        self.assert_roles('delete', f'/api/requests/{rid}/', ('admin',))
+
+    def test_collection_areas(self):
+        aid = self.area.area_id
+        self.assert_roles('get', '/api/collection-areas/', STAFF_ROLES)
+        self.assert_roles('post', '/api/collection-areas/', REQUESTER_ROLES, {})
+        self.assert_roles('patch', f'/api/collection-areas/{aid}/', REQUESTER_ROLES, {})
+        self.assert_roles('put', f'/api/collection-areas/{aid}/', ('admin',), {})
+        self.assert_roles('post', f'/api/collection-areas/{aid}/approve/', ('admin',))
+        self.assert_roles('post', f'/api/collection-areas/{aid}/decline/', ('admin',))
+        self.assert_roles('delete', f'/api/collection-areas/{aid}/', REQUESTER_ROLES)
+
+    def test_records_reports_and_logs(self):
+        for path in ('/api/priority-areas/', '/api/landfill-records/', '/api/recycling-records/',
+                     '/api/segregation-records/', '/api/heatmap-data/', '/api/audit-logs/'):
+            self.assert_roles('get', path, ('admin',))
+        self.assert_roles('post', '/api/segregation-records/', REQUESTER_ROLES, {})
+        self.assert_roles('post', '/api/heatmap-data/', ('admin',), {})
+        self.assert_roles('post', '/api/audit-logs/', STAFF_ROLES, {})
+        self.assert_roles('get', '/api/heatmap/', STAFF_ROLES)
+        self.assert_roles('post', '/api/log-detection/', ('admin',), {})
+
+    def test_notifications_are_available_to_every_signed_in_role(self):
+        self.assert_roles('get', '/api/notifications/', ROLES)
+        self.assert_roles('get', '/api/notifications/unread-count/', ROLES)
+        self.assert_roles('post', '/api/notifications/mark-all-read/', ROLES, {})
+        self.assert_roles('post', '/api/notifications/', ('admin',), {})
+
+
+@override_settings(API_AUTH_ENFORCED=True)
+class PublicEndpointTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user = make_user('barangay')
+
+    def test_login_and_forgot_password_need_no_session_and_ignore_a_stale_one(self):
+        stale = {'HTTP_AUTHORIZATION': f'Session {self.user.id}:stale-token'}
+        for headers in ({}, stale):
+            with self.subTest(headers=headers):
+                login = self.client.post(
+                    '/api/login/', {'email': self.user.email, 'password': 'Test-password1'},
+                    format='json', **headers,
+                )
+                self.assertEqual(login.status_code, 200)
+                forgot = self.client.post(
+                    '/api/forgot-password/', {'email': 'nobody@example.com'}, format='json', **headers,
+                )
+                self.assertEqual(forgot.status_code, 200)
+
+    def test_session_check_answers_without_a_session(self):
+        response = self.client.get(f'/api/users/{self.user.id}/session-check/?token=wrong')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {'valid': False})
 
 
 class TaskStatusUpdatesTests(TestCase):

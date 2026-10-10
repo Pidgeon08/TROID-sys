@@ -8,7 +8,8 @@ from zoneinfo import ZoneInfo
 import requests
 from django.utils.dateparse import parse_datetime
 from rest_framework import status, viewsets
-from rest_framework.decorators import action, api_view, permission_classes
+from rest_framework.decorators import action, api_view, authentication_classes, permission_classes
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from django.contrib.auth.hashers import check_password
 from django.core.mail import send_mail
@@ -31,7 +32,7 @@ from .serializers import (
     SegregationRecordSerializer, AuditLogSerializer, HeatmapDataSerializer, LoginSerializer,
     CollectionAreaSerializer, NotificationSerializer, PriorityAreaSerializer
 )
-from .permissions import ADMIN, HasRole
+from .permissions import ADMIN, ANY_ROLE, MAYOR, PUBLIC, REQUESTERS, STAFF, HasRole, RoleViewSetMixin
 from .priority import check_and_schedule_priority_followup
 
 SPECIAL_CHARS = '!@#$%^&*()-_=+?'
@@ -119,6 +120,8 @@ def notify_request_update(req, notif_type, title, message):
 
 
 @api_view(['POST'])
+@authentication_classes([])
+@permission_classes([AllowAny])
 def login(request):
     serializer = LoginSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
@@ -247,6 +250,8 @@ def task_status_updates(request):
 
 
 @api_view(['POST'])
+@authentication_classes([])
+@permission_classes([AllowAny])
 def forgot_password(request):
     email = (request.data.get('email') or '').strip()
     generic_response = Response({
@@ -269,6 +274,7 @@ def forgot_password(request):
 
 
 @api_view(['POST'])
+@permission_classes([HasRole(*ADMIN)])
 def log_detection(request):
     boat_id = request.data.get('boat_id')
     lat = request.data.get('latitude')
@@ -309,6 +315,7 @@ def log_detection(request):
 
 
 @api_view(['GET'])
+@permission_classes([HasRole(*STAFF)])
 def get_heatmap_data(request):
     category = request.query_params.get('category')
     time_filter = request.query_params.get('time_filter', 'today')
@@ -355,32 +362,43 @@ def get_heatmap_data(request):
 
 
 @api_view(['GET'])
+@permission_classes([HasRole(*ADMIN)])
 def pending_user_count(request):
     count = User.objects.filter(status='pending').count()
     return Response({"pending_count": count})
 
 
 @api_view(['GET'])
+@permission_classes([HasRole(*ADMIN)])
 def pending_request_count(request):
     count = Request.objects.filter(status='pending').count()
     return Response({"pending_count": count})
 
 
 @api_view(['GET'])
+@permission_classes([HasRole(*ANY_ROLE)])
 def unread_notification_count(request):
     user_id = request.query_params.get('user_id')
     count = Notification.objects.filter(recipient_id=user_id, is_read=False).count()
     return Response({"unread_count": count})
 
 
-class BoatViewSet(viewsets.ModelViewSet):
+class BoatViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
     queryset = Boat.objects.all()
     serializer_class = BoatSerializer
 
 
-class UserViewSet(viewsets.ModelViewSet):
+class UserViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
     queryset = User.objects.all()
     serializer_class = UserSerializer
+    read_roles = ADMIN
+    action_roles = {
+        # Everyone edits their own profile and password (Settings); see the own-account checks below.
+        'partial_update': ANY_ROLE,
+        'change_password': ANY_ROLE,
+        # Validates the token itself, so it answers even for a stale session.
+        'session_check': PUBLIC,
+    }
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
@@ -426,9 +444,10 @@ class UserViewSet(viewsets.ModelViewSet):
         return Response({'valid': valid})
 
 
-class OperatorViewSet(viewsets.ModelViewSet):
+class OperatorViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
     queryset = Operator.objects.all()
     serializer_class = OperatorSerializer
+    read_roles = ADMIN
 
     def create(self, request, *args, **kwargs):
         email = (request.data.get('email') or '').strip()
@@ -474,10 +493,19 @@ class OperatorViewSet(viewsets.ModelViewSet):
         return response
 
 
-class RequestViewSet(viewsets.ModelViewSet):
+class RequestViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
     queryset = Request.objects.all()
     serializer_class = RequestSerializer
     lookup_field = 'request_id'
+    action_roles = {
+        'create': ADMIN + REQUESTERS,
+        'mayor_approve': MAYOR,
+        'unpark': ADMIN + MAYOR,
+        'mark_session_completed': ADMIN + REQUESTERS,
+        'submit_trash_report': ADMIN + REQUESTERS,
+        'bot_detections': ADMIN,
+        'post_cleanup_comparison': ADMIN,
+    }
 
     def get_queryset(self):
         queryset = Request.objects.all().order_by('-date_submitted')
@@ -778,9 +806,11 @@ class RequestViewSet(viewsets.ModelViewSet):
         return Response({'status': req.status, 'archived': req.archived})
 
 
-class NotificationViewSet(viewsets.ModelViewSet):
+class NotificationViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
     queryset = Notification.objects.all()
     serializer_class = NotificationSerializer
+    read_roles = ANY_ROLE
+    action_roles = {'mark_read': ANY_ROLE, 'mark_all_read': ANY_ROLE}
 
     def get_queryset(self):
         queryset = Notification.objects.all()
@@ -803,10 +833,15 @@ class NotificationViewSet(viewsets.ModelViewSet):
         return Response({'status': 'ok'})
 
 
-class CollectionAreaViewSet(viewsets.ModelViewSet):
+class CollectionAreaViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
     queryset = CollectionArea.objects.all()
     serializer_class = CollectionAreaSerializer
     lookup_field = 'area_id'
+    action_roles = {
+        'create': ADMIN + REQUESTERS,
+        'partial_update': ADMIN + REQUESTERS,
+        'destroy': ADMIN + REQUESTERS,
+    }
 
     def get_queryset(self):
         queryset = CollectionArea.objects.all().order_by('-date_submitted')
@@ -856,32 +891,39 @@ class CollectionAreaViewSet(viewsets.ModelViewSet):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
-class DeploymentScheduleViewSet(viewsets.ModelViewSet):
+class DeploymentScheduleViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
     queryset = DeploymentSchedule.objects.all()
     serializer_class = DeploymentScheduleSerializer
 
 
-class PriorityAreaViewSet(viewsets.ReadOnlyModelViewSet):
+class PriorityAreaViewSet(RoleViewSetMixin, viewsets.ReadOnlyModelViewSet):
+    read_roles = ADMIN
     queryset = PriorityArea.objects.order_by('-identified_at')
     serializer_class = PriorityAreaSerializer
 
 
-class LandfillRecordViewSet(viewsets.ReadOnlyModelViewSet):
+class LandfillRecordViewSet(RoleViewSetMixin, viewsets.ReadOnlyModelViewSet):
+    read_roles = ADMIN
     queryset = LandfillRecord.objects.all()
     serializer_class = LandfillRecordSerializer
 
 
-class RecyclingRecordViewSet(viewsets.ReadOnlyModelViewSet):
+class RecyclingRecordViewSet(RoleViewSetMixin, viewsets.ReadOnlyModelViewSet):
+    read_roles = ADMIN
     queryset = RecyclingRecord.objects.all()
     serializer_class = RecyclingRecordSerializer
 
 
-class SegregationRecordViewSet(viewsets.ModelViewSet):
+class SegregationRecordViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
+    read_roles = ADMIN
+    action_roles = {'create': ADMIN + REQUESTERS}
     queryset = SegregationRecord.objects.all()
     serializer_class = SegregationRecordSerializer
 
 
-class AuditLogViewSet(viewsets.ModelViewSet):
+class AuditLogViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
+    read_roles = ADMIN
+    action_roles = {'create': STAFF}
     queryset = AuditLog.objects.all().order_by('-id')
     serializer_class = AuditLogSerializer
 
@@ -894,7 +936,8 @@ class AuditLogViewSet(viewsets.ModelViewSet):
         )
 
 
-class HeatmapDataViewSet(viewsets.ModelViewSet):
+class HeatmapDataViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
+    read_roles = ADMIN
     queryset = HeatmapData.objects.all()
     serializer_class = HeatmapDataSerializer
 
