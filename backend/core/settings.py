@@ -43,8 +43,13 @@ SECRET_KEY = os.environ.get(
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get('DEBUG', 'True') == 'True'
 
-# Comma-separated in production, e.g. "troid-sys.onrender.com"
+# Comma-separated in production, e.g. "troid-sys-22ps.onrender.com"
 ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
+
+# Render sets this on every web service, so its own hostname always works.
+RENDER_EXTERNAL_HOSTNAME = os.environ.get('RENDER_EXTERNAL_HOSTNAME')
+if RENDER_EXTERNAL_HOSTNAME:
+    ALLOWED_HOSTS.append(RENDER_EXTERNAL_HOSTNAME)
 
 # API is accessed by the React frontend running on another origin.
 # Keep DEBUG for development only.
