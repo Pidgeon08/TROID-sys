@@ -10,7 +10,7 @@ from .models import User
 logger = logging.getLogger(__name__)
 
 # Accounts in these states may not use the API once API_AUTH_ENFORCED is on.
-INACTIVE_STATUSES = ('archived', 'pending')
+INACTIVE_STATUSES = User.INACTIVE_STATUSES
 
 
 class SessionTokenAuthentication(BaseAuthentication):
@@ -60,3 +60,36 @@ class SessionTokenAuthentication(BaseAuthentication):
             '[auth] would deny %s %s reason=%s', request.method, request.path, message,
         )
         return None
+
+
+class CompanionTokenAuthentication(BaseAuthentication):
+    """Authenticates the TROID Companion app: `Authorization: Companion
+    <user_id>:<companion_session_token>`, the token `companion_login` issues.
+
+    Used only by the companion endpoints, and always enforced (whatever
+    API_AUTH_ENFORCED says): only active operator accounts get in.
+    """
+
+    keyword = 'Companion'
+
+    def authenticate(self, request):
+        header = request.headers.get('Authorization', '')
+        scheme, _, credentials = header.partition(' ')
+        if scheme != self.keyword:
+            return None
+
+        user_id, separator, token = credentials.partition(':')
+        if not separator or not user_id.isdecimal() or not token:
+            raise AuthenticationFailed('Malformed session header.')
+
+        user = User.objects.filter(pk=user_id).first()
+        if not user or not secrets.compare_digest(
+            (user.companion_session_token or '').encode(), token.encode()
+        ):
+            raise AuthenticationFailed('Your session has ended. Please sign in again.')
+        if user.role != 'operator' or user.status in INACTIVE_STATUSES:
+            raise AuthenticationFailed('This account can no longer use the TROID Companion app.')
+        return (user, token)
+
+    def authenticate_header(self, request):
+        return self.keyword

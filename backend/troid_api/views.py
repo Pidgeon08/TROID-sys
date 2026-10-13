@@ -9,7 +9,9 @@ from zoneinfo import ZoneInfo
 import requests
 from django.utils.dateparse import parse_datetime
 from rest_framework import status, viewsets
-from rest_framework.decorators import action, api_view, authentication_classes, permission_classes
+from rest_framework.decorators import (
+    action, api_view, authentication_classes, permission_classes, throttle_classes,
+)
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from django.contrib.auth.hashers import check_password, make_password
@@ -33,9 +35,10 @@ from .serializers import (
     SegregationRecordSerializer, AuditLogSerializer, HeatmapDataSerializer, LoginSerializer,
     CollectionAreaSerializer, NotificationSerializer, PriorityAreaSerializer
 )
-from .authentication import INACTIVE_STATUSES
+from .authentication import INACTIVE_STATUSES, CompanionTokenAuthentication
 from .permissions import ADMIN, ANY_ROLE, MAYOR, PUBLIC, REQUESTERS, STAFF, HasRole, RoleViewSetMixin, require
 from .priority import check_and_schedule_priority_followup
+from .throttles import CompanionLoginEmailThrottle, CompanionLoginIPThrottle
 
 logger = logging.getLogger(__name__)
 
@@ -190,6 +193,104 @@ def logout(request):
     if getattr(request.user, 'is_authenticated', False):
         request.user.session_token = None
         request.user.save(update_fields=['session_token'])
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# --- TROID Companion mobile app -------------------------------------------
+# Operators sign in to the app with the account an admin created for them here.
+# The app gets its own session token (User.companion_session_token), so it never
+# ends the operator's website session, and these checks are always enforced,
+# whatever API_AUTH_ENFORCED says.
+
+COMPANION_MODULE = 'Companion App'
+CompanionOperator = HasRole(
+    'operator',
+    always_enforce=True,
+    not_authenticated_message='Please sign in to the TROID Companion app.',
+)
+
+
+def companion_profile(user):
+    return {
+        "id": user.id,
+        "user_id": user.user_id,
+        "name": user.name,
+        "email": user.email,
+        "must_change_password": user.must_change_password,
+    }
+
+
+@api_view(['POST'])
+@authentication_classes([])
+@permission_classes([AllowAny])
+@throttle_classes([CompanionLoginEmailThrottle, CompanionLoginIPThrottle])
+def companion_login(request):
+    serializer = LoginSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    email = serializer.validated_data['email'].strip()
+    password = serializer.validated_data['password']
+    # Phones often capitalize the first letter, so fall back to a case-insensitive match.
+    user = User.objects.filter(email=email).first() or User.objects.filter(email__iexact=email).first()
+
+    def refuse(code, error, details, role='-'):
+        record_audit(request, user=email[:100], role=role, action='Login failed', module=COMPANION_MODULE,
+                     details=details, status='failed')
+        return Response({"error": error}, status=code)
+
+    if not user or not check_password(password, user.password):
+        return refuse(status.HTTP_401_UNAUTHORIZED, "Invalid email or password", 'Invalid email or password')
+    role = ROLE_LABELS.get(user.role, user.role)
+    if user.role != 'operator':
+        return refuse(status.HTTP_403_FORBIDDEN, "Only operator accounts can use the TROID Companion app.",
+                      'Not an operator account', role)
+    if user.status in INACTIVE_STATUSES:
+        return refuse(status.HTTP_403_FORBIDDEN, "This account is not active. Please contact CENRO.",
+                      f'Account is {user.status}', role)
+
+    # One app session per operator: a new login ends the one on any other phone.
+    session_token = secrets.token_hex(32)
+    user.companion_session_token = session_token
+    user.save(update_fields=['companion_session_token'])
+    record_audit(request, user=user.email[:100], role=role, action='Login', module=COMPANION_MODULE,
+                 details='Signed in to the TROID Companion app', status='success')
+    return Response({**companion_profile(user), "session_token": session_token})
+
+
+@api_view(['GET'])
+@authentication_classes([CompanionTokenAuthentication])
+@permission_classes([CompanionOperator])
+def companion_me(request):
+    """Lets the app re-check that its session and account are still valid."""
+    return Response(companion_profile(request.user))
+
+
+@api_view(['POST'])
+@authentication_classes([CompanionTokenAuthentication])
+@permission_classes([CompanionOperator])
+def companion_change_password(request):
+    user = request.user
+    old_password = request.data.get('old_password') or ''
+    new_password = request.data.get('password') or ''
+    if not check_password(old_password, user.password):
+        return Response({'error': 'Current password is incorrect.'}, status=status.HTTP_400_BAD_REQUEST)
+    errors = validate_password_strength(new_password)
+    if errors:
+        return Response({'error': errors[0]}, status=status.HTTP_400_BAD_REQUEST)
+    user.password = make_password(new_password)
+    user.must_change_password = False
+    user.save(update_fields=['password', 'must_change_password'])
+    record_audit(request, user=user.email[:100], role=ROLE_LABELS['operator'], action='Changed password',
+                 module=COMPANION_MODULE, details='Changed password in the TROID Companion app', status='success')
+    return Response(companion_profile(user))
+
+
+@api_view(['POST'])
+@authentication_classes([CompanionTokenAuthentication])
+@permission_classes([CompanionOperator])
+def companion_logout(request):
+    """Ends the app's session on the server, so the token stops working."""
+    request.user.companion_session_token = None
+    request.user.save(update_fields=['companion_session_token'])
     return Response(status=status.HTTP_204_NO_CONTENT)
 
 
@@ -473,6 +574,8 @@ class UserViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
         temp_password = generate_temp_password()
         user.password = make_password(temp_password)
         user.must_change_password = True
+        # Signs the account out of the Companion app; it must log in with the new password.
+        user.companion_session_token = None
         user.save()
         email_sent = send_temp_password_email(user, temp_password)
         return Response({'status': 'password reset', 'email_sent': email_sent})

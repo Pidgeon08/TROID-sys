@@ -59,6 +59,11 @@ REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': ['troid_api.authentication.SessionTokenAuthentication'],
     'DEFAULT_PERMISSION_CLASSES': ['troid_api.permissions.RolePermission'],
     'EXCEPTION_HANDLER': 'troid_api.exceptions.api_exception_handler',
+    # Used by the TROID Companion app's login (troid_api/throttles.py).
+    'DEFAULT_THROTTLE_RATES': {
+        'companion_login_email': '5/min',
+        'companion_login_ip': '30/min',
+    },
 }
 
 # While False, API permission failures are only logged ("[auth] would deny ...")

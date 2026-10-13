@@ -2,10 +2,11 @@ from unittest.mock import Mock, patch
 
 import requests
 from django.contrib.auth.hashers import check_password
+from django.core.cache import cache
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
-from .models import AuditLog, CollectionArea, Notification, Request, User
+from .models import AuditLog, CollectionArea, Notification, Operator, Request, User
 
 
 def make_user(role, status='active', token=None):
@@ -507,3 +508,172 @@ class TaskStatusUpdatesTests(TestCase):
 
         self.assertEqual(response.status_code, 502)
         self.assertIn('Unable to fetch', response.json()['error'])
+
+
+class CompanionAppTests(TestCase):
+    """The TROID Companion mobile app: only active operator accounts may sign in,
+    always (not just once API_AUTH_ENFORCED is on), with a session of their own."""
+
+    def setUp(self):
+        cache.clear()  # Login throttle counts live in the cache.
+        self.client = APIClient()
+        self.operator = make_user('operator')
+
+    def login(self, email=None, password='Test-password1'):
+        return self.client.post(
+            '/api/companion/login/', {'email': email or self.operator.email, 'password': password}, format='json',
+        )
+
+    def signed_in_headers(self):
+        token = self.login().json()['session_token']
+        return {'HTTP_AUTHORIZATION': f'Companion {self.operator.id}:{token}'}
+
+    def me(self, headers):
+        return self.client.get('/api/companion/me/', **headers)
+
+    def test_operator_signs_in_and_the_session_works(self):
+        response = self.login()
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body['email'], self.operator.email)
+        self.assertNotIn('password', body)
+        me = self.me({'HTTP_AUTHORIZATION': f'Companion {self.operator.id}:{body["session_token"]}'})
+        self.assertEqual(me.status_code, 200)
+        self.assertEqual(me.json()['id'], self.operator.id)
+
+    def test_email_is_case_insensitive(self):
+        self.assertEqual(self.login(email=self.operator.email.upper()).status_code, 200)
+
+    def test_wrong_password_and_unknown_email_are_refused_and_audited(self):
+        for email, password in ((None, 'wrong'), ('nobody@example.com', 'Test-password1')):
+            with self.subTest(email=email):
+                response = self.login(email=email, password=password)
+                self.assertEqual(response.status_code, 401)
+                self.assertEqual(response.json(), {'error': 'Invalid email or password'})
+        self.assertEqual(AuditLog.objects.filter(module='Companion App', status='failed').count(), 2)
+
+    @override_settings(API_AUTH_ENFORCED=False)
+    def test_other_roles_are_refused_even_while_report_only(self):
+        for role in ('admin', 'mayorsoffice', 'barangay', 'ngo'):
+            with self.subTest(role=role):
+                user = make_user(role)
+                response = self.login(email=user.email)
+                self.assertEqual(response.status_code, 403)
+                self.assertNotIn('session_token', response.json())
+                user.refresh_from_db()
+                self.assertIsNone(user.companion_session_token)
+
+    @override_settings(API_AUTH_ENFORCED=False)
+    def test_inactive_operators_are_refused_even_while_report_only(self):
+        for status in ('archived', 'pending'):
+            with self.subTest(status=status):
+                self.operator.status = status
+                self.operator.save(update_fields=['status'])
+                response = self.login()
+                self.assertEqual(response.status_code, 403)
+                self.assertNotIn('session_token', response.json())
+
+    def test_app_and_website_sessions_are_independent(self):
+        website_token = self.client.post(
+            '/api/login/', {'email': self.operator.email, 'password': 'Test-password1'}, format='json',
+        ).json()['session_token']
+        app_token = self.login().json()['session_token']
+
+        self.operator.refresh_from_db()
+        self.assertEqual(self.operator.session_token, website_token)
+        self.assertEqual(self.operator.companion_session_token, app_token)
+
+    @override_settings(API_AUTH_ENFORCED=True)
+    def test_tokens_only_work_where_they_belong(self):
+        app_headers = self.signed_in_headers()
+        self.operator.refresh_from_db()
+
+        self.assertEqual(self.me(session_header(self.operator)).status_code, 401)
+        self.assertEqual(self.client.get('/api/notifications/unread-count/', **app_headers).status_code, 401)
+
+    def test_bad_app_tokens_are_rejected(self):
+        self.login()
+        for header in (
+            f'Companion {self.operator.id}:wrong-token',
+            'Companion 999999:anything',
+            f'Companion {self.operator.id}',
+            '',
+        ):
+            with self.subTest(header=header):
+                self.assertEqual(self.me({'HTTP_AUTHORIZATION': header}).status_code, 401)
+
+    def test_logout_ends_the_app_session(self):
+        headers = self.signed_in_headers()
+
+        self.assertEqual(self.client.post('/api/companion/logout/', **headers).status_code, 204)
+        self.assertEqual(self.me(headers).status_code, 401)
+
+    def test_password_reset_by_an_admin_ends_the_app_session(self):
+        headers = self.signed_in_headers()
+
+        self.client.post(f'/api/users/{self.operator.id}/reset-password/', **session_header(make_user('admin')))
+
+        self.assertEqual(self.me(headers).status_code, 401)
+
+    def test_archiving_or_changing_role_ends_the_app_session(self):
+        admin = make_user('admin')
+        for change in ({'status': 'archived'}, {'status': 'pending'}, {'role': 'barangay'}):
+            with self.subTest(change=change):
+                User.objects.filter(pk=self.operator.pk).update(status='active', role='operator')
+                headers = self.signed_in_headers()
+
+                self.client.patch(f'/api/users/{self.operator.id}/', change, format='json', **session_header(admin))
+
+                self.assertEqual(self.me(headers).status_code, 401)
+                self.operator.refresh_from_db()
+                self.assertIsNone(self.operator.companion_session_token)
+
+    def test_archiving_the_operator_profile_ends_the_app_session(self):
+        profile = Operator.objects.create(name='Op', user=self.operator)
+        headers = self.signed_in_headers()
+
+        self.client.patch(
+            f'/api/operators/{profile.id}/', {'archived': True}, format='json', **session_header(make_user('admin')),
+        )
+
+        self.assertEqual(self.me(headers).status_code, 401)
+
+    def test_temporary_password_is_changed_in_the_app(self):
+        self.operator.must_change_password = True
+        self.operator.save(update_fields=['must_change_password'])
+        body = self.login().json()
+        self.assertTrue(body['must_change_password'])
+        headers = {'HTTP_AUTHORIZATION': f'Companion {self.operator.id}:{body["session_token"]}'}
+
+        def change(old, new):
+            return self.client.post(
+                '/api/companion/change-password/', {'old_password': old, 'password': new}, format='json', **headers,
+            )
+
+        self.assertEqual(change('nope', 'New-password1!').status_code, 400)
+        self.assertEqual(change('Test-password1', 'short').status_code, 400)
+        response = change('Test-password1', 'New-password1!')
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()['must_change_password'])
+        self.assertEqual(self.me(headers).status_code, 200)  # The app stays signed in.
+        self.assertEqual(self.login(password='New-password1!').status_code, 200)
+
+    def test_change_password_requires_an_app_session(self):
+        response = self.client.post(
+            '/api/companion/change-password/', {'old_password': 'Test-password1', 'password': 'New-password1!'},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 401)
+        self.operator.refresh_from_db()
+        self.assertTrue(check_password('Test-password1', self.operator.password))
+
+    def test_password_guessing_is_throttled_per_account(self):
+        for _ in range(5):
+            self.assertEqual(self.login(password='wrong').status_code, 401)
+
+        response = self.login(email=self.operator.email.upper())
+
+        self.assertEqual(response.status_code, 429)
+        self.assertIn('error', response.json())

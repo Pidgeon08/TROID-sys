@@ -52,6 +52,12 @@ class User(models.Model):
     date_created = models.DateTimeField(auto_now_add=True)
     must_change_password = models.BooleanField(default=False)
     session_token = models.CharField(max_length=64, blank=True, null=True, default=None)
+    # The TROID Companion mobile app's session, separate from the website's so
+    # signing in on the phone doesn't end the operator's website session.
+    companion_session_token = models.CharField(max_length=64, blank=True, null=True, default=None)
+
+    # Accounts in these states may not sign in.
+    INACTIVE_STATUSES = ('archived', 'pending')
 
     TYPE_CODE_MAP = {
         'admin': '03',
@@ -71,6 +77,11 @@ class User(models.Model):
             self.user_id = f'{type_code}{year_code}{nth}'
         if self.password and not self.password.startswith('pbkdf2_'):
             self.password = make_password(self.password)
+        # Archiving an account or changing it away from operator ends its mobile-app session.
+        if self.companion_session_token and (self.role != 'operator' or self.status in self.INACTIVE_STATUSES):
+            self.companion_session_token = None
+            if kwargs.get('update_fields') is not None:
+                kwargs['update_fields'] = {*kwargs['update_fields'], 'companion_session_token'}
         super().save(*args, **kwargs)
 
     # A User loaded by SessionTokenAuthentication is always a signed-in user;
