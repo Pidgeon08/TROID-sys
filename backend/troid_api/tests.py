@@ -677,3 +677,91 @@ class CompanionAppTests(TestCase):
 
         self.assertEqual(response.status_code, 429)
         self.assertIn('error', response.json())
+
+
+@override_settings(SUPABASE_URL='https://example.supabase.co', SUPABASE_SECRET_KEY='test-secret')
+class CompanionTaskStatusTests(TestCase):
+    """Task status updates from the app go through the backend, which stamps the
+    signed-in operator's email and writes to Supabase with the secret key."""
+
+    URL = '/api/companion/task-status/'
+
+    def setUp(self):
+        cache.clear()
+        self.client = APIClient()
+        self.operator = make_user('operator')
+        self.operator.companion_session_token = 'app-session'
+        self.operator.save(update_fields=['companion_session_token'])
+        self.headers = {'HTTP_AUTHORIZATION': f'Companion {self.operator.id}:app-session'}
+        self.update = {
+            'id': '3f1c2a4b-5d6e-4f70-8a9b-0c1d2e3f4a5b',
+            'status': 'to_be_continued',
+            'notes': '  Net 70% full  ',
+            'created_at': '2026-10-10T01:41:07.000Z',
+            'operator_email': 'someone-else@example.com',  # Ignored.
+        }
+
+    def post(self, body=None, **headers):
+        return self.client.post(self.URL, body or self.update, format='json', **(headers or self.headers))
+
+    @patch('troid_api.views.requests.post')
+    def test_stores_the_update_under_the_signed_in_operator(self, post):
+        post.return_value = Mock(ok=True, status_code=201)
+
+        response = self.post()
+
+        self.assertEqual(response.status_code, 201)
+        url = post.call_args.args[0]
+        kwargs = post.call_args.kwargs
+        self.assertEqual(url, 'https://example.supabase.co/rest/v1/task_status_updates')
+        self.assertEqual(kwargs['headers']['apikey'], 'test-secret')
+        self.assertEqual(kwargs['json'], {
+            'id': self.update['id'],
+            'status': 'to_be_continued',
+            'notes': 'Net 70% full',
+            'operator_email': self.operator.email,
+            'created_at': '2026-10-10T01:41:07+00:00',
+        })
+
+    @patch('troid_api.views.requests.post')
+    def test_a_retry_of_a_stored_update_counts_as_delivered(self, post):
+        post.return_value = Mock(ok=False, status_code=409, json=Mock(return_value={'code': '23505'}))
+
+        self.assertEqual(self.post().status_code, 200)
+
+    @patch('troid_api.views.requests.post')
+    def test_supabase_failures_are_reported_as_bad_gateway(self, post):
+        post.return_value = Mock(ok=False, status_code=500, text='boom', json=Mock(side_effect=ValueError))
+        with self.assertLogs('troid_api.views', 'ERROR'):
+            self.assertEqual(self.post().status_code, 502)
+
+        post.side_effect = requests.ConnectionError('offline')
+        self.assertEqual(self.post().status_code, 502)
+
+    @patch('troid_api.views.requests.post')
+    def test_invalid_updates_are_rejected_before_reaching_supabase(self, post):
+        for change in (
+            {'id': 'not-a-uuid'},
+            {'status': 'done'},
+            {'notes': 5},
+            {'notes': 'x' * 2001},
+            {'created_at': '2026-10-10T01:41:07'},
+            {'created_at': 'yesterday'},
+        ):
+            with self.subTest(change=change):
+                self.assertEqual(self.post({**self.update, **change}).status_code, 400)
+        post.assert_not_called()
+
+    @override_settings(API_AUTH_ENFORCED=False)
+    @patch('troid_api.views.requests.post')
+    def test_requires_an_active_operator_app_session(self, post):
+        self.assertEqual(self.client.post(self.URL, self.update, format='json').status_code, 401)
+        self.assertEqual(self.post(**session_header(self.operator)).status_code, 401)
+        self.operator.status = 'archived'
+        self.operator.save(update_fields=['status'])
+        self.assertEqual(self.post().status_code, 401)
+        post.assert_not_called()
+
+    @override_settings(SUPABASE_URL='', SUPABASE_SECRET_KEY='')
+    def test_reports_missing_supabase_configuration(self):
+        self.assertEqual(self.post().status_code, 502)

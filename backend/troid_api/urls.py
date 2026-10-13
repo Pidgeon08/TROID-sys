@@ -11,6 +11,7 @@ urlpatterns = [
     path('companion/me/', views.companion_me, name='companion-me'),
     path('companion/change-password/', views.companion_change_password, name='companion-change-password'),
     path('companion/logout/', views.companion_logout, name='companion-logout'),
+    path('companion/task-status/', views.companion_task_status, name='companion-task-status'),
     path('', include(views.router.urls)),
     path('login/', views.login, name='login'),
     path('logout/', views.logout, name='logout'),
