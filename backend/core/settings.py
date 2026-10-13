@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
 import os
+import sys
 from pathlib import Path
 from dotenv import load_dotenv
 import dj_database_url
@@ -70,6 +71,12 @@ REST_FRAMEWORK = {
 # and the request is allowed, so the rollout can surface gaps before enforcing.
 API_AUTH_ENFORCED = os.environ.get('API_AUTH_ENFORCED', 'False') == 'True'
 
+# The MQTT client and bot offline-checker (troid_api/apps.py) write bot data to
+# the database. Only the deployed server should run them: set
+# BACKGROUND_WORKERS=False on a computer that shares the live database, or every
+# detection would be stored twice. Never run during tests.
+BACKGROUND_WORKERS = os.environ.get('BACKGROUND_WORKERS', 'True') == 'True' and not RUNNING_TESTS
+
 
 # Application definition
 
@@ -124,10 +131,14 @@ WSGI_APPLICATION = 'core.wsgi.application'
 # Set DATABASE_URL (in backend/.env) to point at a shared/hosted Postgres
 # instance, e.g. postgres://user:pass@host:5432/dbname
 # With no DATABASE_URL, falls back to the local db.sqlite3 for solo dev.
+#
+# Tests always use SQLite, so `manage.py test` never creates a test database
+# on the live Postgres server when DATABASE_URL points at it.
 
+RUNNING_TESTS = sys.argv[1:2] == ['test']
 DATABASE_URL = os.environ.get('DATABASE_URL')
 
-if DATABASE_URL:
+if DATABASE_URL and not RUNNING_TESTS:
     DATABASES = {
         'default': dj_database_url.parse(DATABASE_URL, conn_max_age=600)
     }
