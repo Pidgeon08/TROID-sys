@@ -183,7 +183,7 @@ def start_offline_checker():
     def check():
         while True:
             try:
-                threshold = timezone.now() - timezone.timedelta(seconds=15)
+                threshold = timezone.now() - Boat.OFFLINE_AFTER
                 offline_bots = list(Boat.objects.filter(last_seen__lt=threshold, is_online=True))
                 if offline_bots:
                     Boat.objects.filter(id__in=[b.id for b in offline_bots]).update(is_online=False)

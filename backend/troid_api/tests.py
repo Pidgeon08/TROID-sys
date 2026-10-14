@@ -11,6 +11,7 @@ from django.conf import settings
 from django.contrib.auth.hashers import check_password
 from django.core.cache import cache
 from django.test import TestCase, override_settings
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 from . import bot_auth, mqtt_client
@@ -26,6 +27,11 @@ def make_user(role, status='active', token=None):
         status=status,
         session_token=token or f'{role}-{status}-session',
     )
+
+
+def assign_operator(user, boat=None):
+    """Sets the account up as an admin would in Operator Management, so it may use the app."""
+    return Operator.objects.create(name=user.name, user=user, assigned_bot=boat or Boat.objects.create(name='Bot'))
 
 
 def session_header(user):
@@ -526,6 +532,7 @@ class CompanionAppTests(TestCase):
         cache.clear()  # Login throttle counts live in the cache.
         self.client = APIClient()
         self.operator = make_user('operator')
+        self.profile = assign_operator(self.operator)
 
     def login(self, email=None, password='Test-password1'):
         return self.client.post(
@@ -549,6 +556,26 @@ class CompanionAppTests(TestCase):
         me = self.me({'HTTP_AUTHORIZATION': f'Companion {self.operator.id}:{body["session_token"]}'})
         self.assertEqual(me.status_code, 200)
         self.assertEqual(me.json()['id'], self.operator.id)
+
+    def test_only_operators_assigned_by_an_admin_can_sign_in(self):
+        self.profile.assigned_bot = None
+        self.profile.save()
+        response = self.login()
+        self.assertEqual(response.status_code, 403)
+        self.assertIn('assigned', response.json()['error'])
+
+        self.profile.delete()
+        self.assertEqual(self.login().status_code, 403)
+
+    def test_unassigning_the_bot_ends_the_app_session(self):
+        headers = self.signed_in_headers()
+
+        self.client.patch(
+            f'/api/operators/{self.profile.id}/', {'assigned_bot': None}, format='json',
+            **session_header(make_user('admin')),
+        )
+
+        self.assertEqual(self.me(headers).status_code, 401)
 
     def test_email_is_case_insensitive(self):
         self.assertEqual(self.login(email=self.operator.email.upper()).status_code, 200)
@@ -638,11 +665,10 @@ class CompanionAppTests(TestCase):
                 self.assertIsNone(self.operator.companion_session_token)
 
     def test_archiving_the_operator_profile_ends_the_app_session(self):
-        profile = Operator.objects.create(name='Op', user=self.operator)
         headers = self.signed_in_headers()
 
         self.client.patch(
-            f'/api/operators/{profile.id}/', {'archived': True}, format='json', **session_header(make_user('admin')),
+            f'/api/operators/{self.profile.id}/', {'archived': True}, format='json', **session_header(make_user('admin')),
         )
 
         self.assertEqual(self.me(headers).status_code, 401)
@@ -698,6 +724,7 @@ class CompanionTaskStatusTests(TestCase):
         cache.clear()
         self.client = APIClient()
         self.operator = make_user('operator')
+        assign_operator(self.operator)
         self.operator.companion_session_token = 'app-session'
         self.operator.save(update_fields=['companion_session_token'])
         self.headers = {'HTTP_AUTHORIZATION': f'Companion {self.operator.id}:app-session'}
@@ -918,6 +945,15 @@ class DeviceKeyEndpointTests(TestCase):
         with self.assertLogs('troid_api.bot_auth', 'WARNING'):
             self.assertIsNone(bot_auth.verify_bot_message(*signed_message(self.boat, 'heartbeat', {}, key=first)))
 
+    def test_bot_without_recent_heartbeat_lists_as_offline(self):
+        # is_online is still True: the offline checker never ran (BACKGROUND_WORKERS=False).
+        Boat.objects.filter(id=self.boat.id).update(is_online=True, last_seen=timezone.now())
+        listing = lambda: {b['id']: b for b in self.client.get('/api/boats/', **session_header(self.admin)).json()}
+        self.assertTrue(listing()[self.boat.id]['is_online'])
+
+        Boat.objects.filter(id=self.boat.id).update(last_seen=timezone.now() - Boat.OFFLINE_AFTER)
+        self.assertFalse(listing()[self.boat.id]['is_online'])
+
     @override_settings(API_AUTH_ENFORCED=False)
     def test_only_admins_even_while_report_only(self):
         self.assertEqual(self.client.post(self.url).status_code, 401)
@@ -927,6 +963,42 @@ class DeviceKeyEndpointTests(TestCase):
                 self.assertEqual(response.status_code, 403)
         self.boat.refresh_from_db()
         self.assertIsNone(self.boat.device_key)
+
+
+class OperatorAccountCreationTests(TestCase):
+    """Operator logins come only from an admin adding them in Operator Management."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.admin = make_user('admin')
+
+    @override_settings(API_AUTH_ENFORCED=False)
+    @patch('troid_api.views.send_temp_password_email', return_value=True)
+    def test_only_admins_add_operators_even_while_report_only(self, _send):
+        data = {'name': 'New Op', 'email': 'new-op@example.com'}
+        self.assertEqual(self.client.post('/api/operators/', data, format='json').status_code, 401)
+        for role in ('mayorsoffice', 'barangay', 'ngo', 'operator'):
+            with self.subTest(role=role):
+                response = self.client.post('/api/operators/', data, format='json', **session_header(make_user(role)))
+                self.assertEqual(response.status_code, 403)
+        self.assertFalse(User.objects.filter(email='new-op@example.com').exists())
+
+        response = self.client.post('/api/operators/', data, format='json', **session_header(self.admin))
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(User.objects.get(email='new-op@example.com').role, 'operator')
+
+    @patch('troid_api.views.send_temp_password_email', return_value=True)
+    def test_user_management_cannot_make_operator_accounts(self, _send):
+        response = self.client.post(
+            '/api/users/', {'name': 'X', 'email': 'x@example.com', 'role': 'operator'}, format='json',
+            **session_header(self.admin),
+        )
+        self.assertEqual(response.status_code, 400)
+
+        staff = make_user('ngo')
+        self.client.patch(f'/api/users/{staff.id}/', {'role': 'operator'}, format='json', **session_header(self.admin))
+        staff.refresh_from_db()
+        self.assertEqual(staff.role, 'ngo')
 
 
 class CompanionBotTests(TestCase):
@@ -953,13 +1025,14 @@ class CompanionBotTests(TestCase):
         self.assertEqual(bot['battery_level'], 64)
         self.assertNotIn('device_key', bot)
 
-    def test_no_bot_when_unassigned_or_assigned_to_someone_else(self):
-        self.assertEqual(self.get().json(), {'bot': None})
+    def test_unassigned_operators_are_refused(self):
+        self.assertEqual(self.get().status_code, 401)
 
+        # Someone else's bot doesn't count.
         Operator.objects.create(name='Me', user=self.operator)
         other = make_user('operator', status='pending')
         Operator.objects.create(name='Other', user=other, assigned_bot=self.boat)
-        self.assertEqual(self.get().json(), {'bot': None})
+        self.assertEqual(self.get().status_code, 401)
 
     def test_requires_an_app_session(self):
         self.assertEqual(self.client.get('/api/companion/bot/').status_code, 401)

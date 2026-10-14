@@ -5,12 +5,25 @@ from django.conf import settings
 from rest_framework.authentication import BaseAuthentication
 from rest_framework.exceptions import AuthenticationFailed
 
-from .models import User
+from .models import Operator, User
 
 logger = logging.getLogger(__name__)
 
 # Accounts in these states may not use the API once API_AUTH_ENFORCED is on.
 INACTIVE_STATUSES = User.INACTIVE_STATUSES
+
+
+def is_app_operator(user):
+    """Only operators an admin has set up may use the TROID Companion app: an
+    active operator account, linked to an operator in Operator Management who
+    isn't archived and has a bot (not archived) assigned."""
+    return (
+        user.role == 'operator'
+        and user.status not in INACTIVE_STATUSES
+        and Operator.objects.filter(
+            user=user, archived=False, assigned_bot__isnull=False, assigned_bot__archived=False,
+        ).exists()
+    )
 
 
 class SessionTokenAuthentication(BaseAuthentication):
@@ -87,7 +100,7 @@ class CompanionTokenAuthentication(BaseAuthentication):
             (user.companion_session_token or '').encode(), token.encode()
         ):
             raise AuthenticationFailed('Your session has ended. Please sign in again.')
-        if user.role != 'operator' or user.status in INACTIVE_STATUSES:
+        if not is_app_operator(user):
             raise AuthenticationFailed('This account can no longer use the TROID Companion app.')
         return (user, token)
 

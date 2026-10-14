@@ -36,7 +36,7 @@ from .serializers import (
     SegregationRecordSerializer, AuditLogSerializer, HeatmapDataSerializer, LoginSerializer,
     CollectionAreaSerializer, NotificationSerializer, PriorityAreaSerializer
 )
-from .authentication import INACTIVE_STATUSES, CompanionTokenAuthentication
+from .authentication import INACTIVE_STATUSES, CompanionTokenAuthentication, is_app_operator
 from .permissions import ADMIN, ANY_ROLE, MAYOR, PUBLIC, REQUESTERS, STAFF, HasRole, RoleViewSetMixin, require
 from .priority import check_and_schedule_priority_followup
 from .throttles import CompanionLoginEmailThrottle, CompanionLoginIPThrottle
@@ -259,6 +259,10 @@ def companion_login(request):
     if user.status in INACTIVE_STATUSES:
         return refuse(status.HTTP_403_FORBIDDEN, "This account is not active. Please contact CENRO.",
                       f'Account is {user.status}', role)
+    if not is_app_operator(user):
+        return refuse(status.HTTP_403_FORBIDDEN,
+                      "You haven't been assigned to a bot yet. Please ask a CENRO admin to assign you in Operator Management.",
+                      'Not an assigned operator in Operator Management', role)
 
     # One app session per operator: a new login ends the one on any other phone.
     session_token = secrets.token_hex(32)
@@ -321,7 +325,7 @@ def companion_bot(request):
         'id': boat.id,
         'label': boat.label,
         'name': boat.name,
-        'is_online': boat.is_online,
+        'is_online': boat.is_connected,
         'is_active': boat.is_active,
         'battery_level': boat.battery_level,
         'last_seen': boat.last_seen,
@@ -726,6 +730,18 @@ class OperatorViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
     queryset = Operator.objects.all()
     serializer_class = OperatorSerializer
     read_roles = ADMIN
+
+    def get_permissions(self):
+        # Adding an operator creates a Companion app login, so only an admin may,
+        # even while API_AUTH_ENFORCED is off.
+        if self.action == 'create':
+            return [HasRole(
+                *ADMIN,
+                always_enforce=True,
+                not_authenticated_message='A valid admin session is required.',
+                message='Only an admin can add operators.',
+            )()]
+        return super().get_permissions()
 
     def create(self, request, *args, **kwargs):
         email = (request.data.get('email') or '').strip()

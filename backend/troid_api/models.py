@@ -1,4 +1,7 @@
+from datetime import timedelta
+
 from django.db import models
+from django.utils import timezone
 from django.contrib.auth.hashers import make_password
 
 class Boat(models.Model):
@@ -13,6 +16,17 @@ class Boat(models.Model):
     # Secret the robot signs its MQTT messages with (troid_api/bot_auth.py). Never
     # sent over MQTT or returned by the API, except once when an admin creates it.
     device_key = models.CharField(max_length=64, blank=True, null=True, default=None)
+
+    # The robot sends a heartbeat every 5 s; this long without one means it's off.
+    OFFLINE_AFTER = timedelta(seconds=15)
+
+    @property
+    def is_connected(self):
+        """Online only while heartbeats keep arriving. Worked out on every read so a
+        robot that was switched off shows Offline even if the offline checker
+        (mqtt_client.start_offline_checker) isn't running to clear is_online."""
+        return bool(self.is_online and self.last_seen
+                    and timezone.now() - self.last_seen < self.OFFLINE_AFTER)
 
     @property
     def label(self):

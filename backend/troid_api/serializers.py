@@ -7,6 +7,8 @@ class DetectionEventSerializer(serializers.ModelSerializer):
         fields = ['id', 'boat', 'timestamp', 'latitude', 'longitude', 'trash_count', 'categories', 'confidence', 'is_verified']
 
 class BoatSerializer(serializers.ModelSerializer):
+    is_online = serializers.BooleanField(source='is_connected', read_only=True)
+
     class Meta:
         model = Boat
         fields = ['id', 'name', 'is_active', 'is_online', 'archived', 'last_latitude', 'last_longitude', 'battery_level', 'last_seen']
@@ -15,6 +17,13 @@ class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = ['id', 'user_id', 'name', 'email', 'role', 'status', 'location', 'date_created', 'must_change_password']
+
+    def validate_role(self, value):
+        # Operator logins come only from Operator Management (OperatorViewSet.create),
+        # which links them to an operator record so they can use the Companion app.
+        if value == 'operator' and getattr(self.instance, 'role', None) != 'operator':
+            raise serializers.ValidationError('Add operators in Operator Management.')
+        return value
 
 
 class LoginSerializer(serializers.Serializer):

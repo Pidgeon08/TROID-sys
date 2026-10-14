@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, useMemo } from 'react';
+import { useCallback, useEffect, useRef, useState, useMemo } from 'react';
 import { useOutletContext, useNavigate } from 'react-router-dom';
 import api from '../../services/api';
 import { logAudit } from '../../services/auditLog';
@@ -42,20 +42,34 @@ export default function ManageBots() {
         }, [])
     );
 
+    // Last good response per endpoint. A refresh that fails or comes back
+    // malformed (e.g. while a robot drops offline) reuses these, so the fleet
+    // table keeps showing every bot instead of going empty.
+    const lastGood = useRef({ boats: null, operators: [], schedules: [], requests: [] });
+
     useEffect(() => {
         const fetchData = async () => {
             try {
-                const [boatsRes, operatorsRes, schedulesRes, requestsRes] = await Promise.all([
+                const results = await Promise.allSettled([
                     api.boats(),
                     api.operators(),
                     api.deploymentSchedules(),
                     api.requests(),
                 ]);
+                const keys = ['boats', 'operators', 'schedules', 'requests'];
+                results.forEach((r, i) => {
+                    if (r.status === 'fulfilled' && Array.isArray(r.value)) {
+                        lastGood.current[keys[i]] = r.value;
+                    } else if (r.status === 'rejected') {
+                        console.error(`Failed to refresh ${keys[i]}:`, r.reason);
+                    }
+                });
 
-                const schedules = Array.isArray(schedulesRes) ? schedulesRes : [];
-                const requests = Array.isArray(requestsRes) ? requestsRes : [];
+                const { boats: boatsRes, operators: operatorsRes, schedules, requests } = lastGood.current;
+                // No bot list has loaded yet: keep whatever is on screen.
+                if (!boatsRes) return;
 
-                const mappedBots = Array.isArray(boatsRes) ? boatsRes.map((b) => {
+                const mappedBots = boatsRes.map((b) => {
                     const op = operatorsRes.find(o => o.assigned_bot === b.id);
 
                     // Most recently created schedule entry for this bot stands in as its current assignment.
@@ -84,16 +98,16 @@ export default function ManageBots() {
                         totalTrash: `${totalTrashBags} bags`,
                         archived: b.archived,
                     };
-                }) : [];
+                });
 
-                const mappedOperators = Array.isArray(operatorsRes) ? operatorsRes.map((o) => ({
+                const mappedOperators = operatorsRes.map((o) => ({
                     backendId: o.id,
                     id: o.operator_id,
                     name: o.name,
                     archived: o.archived,
                     assignedBot: o.assigned_bot ? `TRD-${String(o.assigned_bot).padStart(3, '0')}` : null,
                     availability: (o.availability || 'available').charAt(0).toUpperCase() + (o.availability || 'available').slice(1),
-                })) : [];
+                }));
 
                 setBots(mappedBots);
                 setOperators(mappedOperators);
