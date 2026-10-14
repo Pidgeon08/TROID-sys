@@ -24,6 +24,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # there instead of in this file so they never get committed.
 load_dotenv(BASE_DIR / '.env')
 
+# `manage.py test`: used below to keep tests off the live database and MQTT.
+RUNNING_TESTS = sys.argv[1:2] == ['test']
+
 SUPABASE_URL = os.environ.get('SUPABASE_URL', '').rstrip('/')
 SUPABASE_SECRET_KEY = os.environ.get('SUPABASE_SECRET_KEY', '')
 
@@ -135,7 +138,6 @@ WSGI_APPLICATION = 'core.wsgi.application'
 # Tests always use SQLite, so `manage.py test` never creates a test database
 # on the live Postgres server when DATABASE_URL points at it.
 
-RUNNING_TESTS = sys.argv[1:2] == ['test']
 DATABASE_URL = os.environ.get('DATABASE_URL')
 
 if DATABASE_URL and not RUNNING_TESTS:
