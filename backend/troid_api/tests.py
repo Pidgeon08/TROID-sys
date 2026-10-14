@@ -1,12 +1,20 @@
+import importlib.util
+import json
+import os
+import time
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import requests
+from django.conf import settings
 from django.contrib.auth.hashers import check_password
 from django.core.cache import cache
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
-from .models import AuditLog, CollectionArea, Notification, Operator, Request, User
+from . import bot_auth, mqtt_client
+from .models import AuditLog, Boat, CollectionArea, DetectionEvent, Notification, Operator, Request, User
 
 
 def make_user(role, status='active', token=None):
@@ -765,3 +773,193 @@ class CompanionTaskStatusTests(TestCase):
     @override_settings(SUPABASE_URL='', SUPABASE_SECRET_KEY='')
     def test_reports_missing_supabase_configuration(self):
         self.assertEqual(self.post().status_code, 502)
+
+
+def signed_message(boat, topic_kind, data, key=None, ts=None):
+    """Builds an MQTT message the way bot/troid_monitor.py does."""
+    topic = f'troid/bot/{boat.id}/{topic_kind}'
+    payload = {'ts': time.time() if ts is None else ts, **data}
+    payload['sig'] = bot_auth.sign(key or boat.device_key, topic, payload)
+    return topic, json.dumps(payload).encode()
+
+
+class BotMessageVerificationTests(TestCase):
+    """Only messages signed with a bot's device key are accepted from the public broker."""
+
+    def setUp(self):
+        bot_auth._last_ts.clear()
+        self.boat = Boat.objects.create(name='Real robot', device_key='a' * 64)
+
+    def verify(self, topic, raw):
+        with self.assertNoLogs('troid_api.bot_auth', 'WARNING'):
+            return bot_auth.verify_bot_message(topic, raw)
+
+    def assert_rejected(self, topic, raw):
+        with self.assertLogs('troid_api.bot_auth', 'WARNING'):
+            self.assertIsNone(bot_auth.verify_bot_message(topic, raw))
+
+    def test_a_correctly_signed_message_is_accepted(self):
+        boat, payload = self.verify(*signed_message(self.boat, 'heartbeat', {'battery': 80}))
+
+        self.assertEqual(boat, self.boat)
+        self.assertEqual(payload['battery'], 80)
+        self.assertNotIn('sig', payload)
+
+    def test_wrong_key_unknown_or_unkeyed_bots_are_rejected(self):
+        self.assert_rejected(*signed_message(self.boat, 'heartbeat', {}, key='b' * 64))
+
+        no_key = Boat.objects.create(name='No key')
+        self.assert_rejected(*signed_message(no_key, 'heartbeat', {}, key='a' * 64))
+
+        archived = Boat.objects.create(name='Old', device_key='c' * 64, archived=True)
+        self.assert_rejected(*signed_message(archived, 'heartbeat', {}))
+
+        topic, raw = signed_message(self.boat, 'heartbeat', {})
+        self.assert_rejected(topic.replace(f'/{self.boat.id}/', '/999999/'), raw)
+
+    def test_old_and_replayed_messages_are_rejected(self):
+        self.assert_rejected(*signed_message(self.boat, 'heartbeat', {}, ts=time.time() - 600))
+
+        message = signed_message(self.boat, 'heartbeat', {})
+        self.verify(*message)
+        self.assert_rejected(*message)
+
+    def test_a_heartbeat_cannot_be_reused_as_a_detection(self):
+        topic, raw = signed_message(self.boat, 'heartbeat', {'trash_count': 50, 'is_verified': True})
+
+        self.assert_rejected(topic.replace('/heartbeat', '/detection'), raw)
+
+    def test_messages_from_the_robot_monitor_script_are_accepted(self):
+        """bot/troid_monitor.py (runs on the Pi) must sign exactly as bot_auth checks."""
+        script = Path(settings.BASE_DIR).parent / 'bot' / 'troid_monitor.py'
+        env = {'TROID_BOT_ID': str(self.boat.id), 'TROID_BOT_KEY': self.boat.device_key}
+        with patch.dict(os.environ, env):
+            spec = importlib.util.spec_from_file_location('troid_monitor', script)
+            monitor = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(monitor)
+
+        topic, text = monitor.build_message('heartbeat', {'is_active': True, 'battery': 81.5})
+        boat, payload = self.verify(topic, text.encode())
+
+        self.assertEqual(boat, self.boat)
+        self.assertEqual(payload['battery'], 81.5)
+
+    def test_tampered_and_malformed_messages_are_rejected(self):
+        topic, raw = signed_message(self.boat, 'heartbeat', {'battery': 80})
+        tampered = json.loads(raw)
+        tampered['battery'] = 5
+        self.assert_rejected(topic, json.dumps(tampered).encode())
+
+        for raw in (b'not json', b'[]', json.dumps({'ts': time.time()}).encode(),
+                    json.dumps({'ts': True, 'sig': 'x'}).encode()):
+            with self.subTest(raw=raw):
+                self.assert_rejected(topic, raw)
+        self.assert_rejected('troid/bot/abc/heartbeat', raw)
+
+
+@patch('troid_api.mqtt_client.broadcast')
+class MqttHandlerTests(TestCase):
+    def setUp(self):
+        bot_auth._last_ts.clear()
+        self.boat = Boat.objects.create(name='Real robot', device_key='a' * 64)
+
+    def receive(self, topic, raw):
+        mqtt_client._on_message(None, None, SimpleNamespace(topic=topic, payload=raw))
+        self.boat.refresh_from_db()
+
+    def test_signed_heartbeat_marks_the_bot_online(self, broadcast):
+        self.receive(*signed_message(self.boat, 'heartbeat', {'is_active': True, 'battery': 76}))
+
+        self.assertTrue(self.boat.is_online)
+        self.assertTrue(self.boat.is_active)
+        self.assertEqual(self.boat.battery_level, 76)
+        broadcast.assert_called_once()
+
+    def test_unsigned_messages_change_nothing(self, broadcast):
+        topic = f'troid/bot/{self.boat.id}/'
+        with self.assertLogs('troid_api.bot_auth', 'WARNING'):
+            self.receive(topic + 'heartbeat', json.dumps({'is_active': True, 'battery': 99}).encode())
+            self.receive(topic + 'detection', json.dumps({'is_verified': True, 'trash_count': 9}).encode())
+
+        self.assertFalse(self.boat.is_online)
+        self.assertEqual(DetectionEvent.objects.count(), 0)
+        broadcast.assert_not_called()
+
+
+class DeviceKeyEndpointTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.admin = make_user('admin')
+        self.boat = Boat.objects.create(name='Real robot')
+        self.url = f'/api/boats/{self.boat.id}/device-key/'
+
+    def test_admin_gets_a_new_key_once(self):
+        response = self.client.post(self.url, **session_header(self.admin))
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.boat.refresh_from_db()
+        self.assertEqual(body['device_key'], self.boat.device_key)
+        self.assertEqual(len(body['device_key']), 64)
+        self.assertEqual(body['label'], f'TRD-{self.boat.id:03d}')
+        self.assertEqual(body['topic_prefix'], f'troid/bot/{self.boat.id}/')
+        self.assertTrue(AuditLog.objects.filter(action='Created robot device key').exists())
+
+        listing = self.client.get('/api/boats/', **session_header(self.admin))
+        self.assertNotIn('device_key', json.dumps(listing.json()))
+        self.assertNotIn(self.boat.device_key, json.dumps(listing.json()))
+
+    def test_a_new_key_replaces_the_old_one(self):
+        first = self.client.post(self.url, **session_header(self.admin)).json()['device_key']
+        second = self.client.post(self.url, **session_header(self.admin)).json()['device_key']
+
+        self.assertNotEqual(first, second)
+        bot_auth._last_ts.clear()
+        with self.assertLogs('troid_api.bot_auth', 'WARNING'):
+            self.assertIsNone(bot_auth.verify_bot_message(*signed_message(self.boat, 'heartbeat', {}, key=first)))
+
+    @override_settings(API_AUTH_ENFORCED=False)
+    def test_only_admins_even_while_report_only(self):
+        self.assertEqual(self.client.post(self.url).status_code, 401)
+        for role in ('mayorsoffice', 'barangay', 'ngo', 'operator'):
+            with self.subTest(role=role):
+                response = self.client.post(self.url, **session_header(make_user(role)))
+                self.assertEqual(response.status_code, 403)
+        self.boat.refresh_from_db()
+        self.assertIsNone(self.boat.device_key)
+
+
+class CompanionBotTests(TestCase):
+    """The app shows the condition of the robot assigned to the signed-in operator."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.operator = make_user('operator')
+        self.operator.companion_session_token = 'app-session'
+        self.operator.save(update_fields=['companion_session_token'])
+        self.headers = {'HTTP_AUTHORIZATION': f'Companion {self.operator.id}:app-session'}
+        self.boat = Boat.objects.create(name='Real robot', is_online=True, battery_level=64, device_key='a' * 64)
+
+    def get(self):
+        return self.client.get('/api/companion/bot/', **self.headers)
+
+    def test_shows_the_assigned_bot(self):
+        Operator.objects.create(name='Op', user=self.operator, assigned_bot=self.boat)
+
+        bot = self.get().json()['bot']
+
+        self.assertEqual(bot['label'], f'TRD-{self.boat.id:03d}')
+        self.assertTrue(bot['is_online'])
+        self.assertEqual(bot['battery_level'], 64)
+        self.assertNotIn('device_key', bot)
+
+    def test_no_bot_when_unassigned_or_assigned_to_someone_else(self):
+        self.assertEqual(self.get().json(), {'bot': None})
+
+        Operator.objects.create(name='Me', user=self.operator)
+        other = make_user('operator', status='pending')
+        Operator.objects.create(name='Other', user=other, assigned_bot=self.boat)
+        self.assertEqual(self.get().json(), {'bot': None})
+
+    def test_requires_an_app_session(self):
+        self.assertEqual(self.client.get('/api/companion/bot/').status_code, 401)

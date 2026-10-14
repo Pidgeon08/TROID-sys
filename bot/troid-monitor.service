@@ -1,0 +1,17 @@
+[Unit]
+Description=TROID robot monitor (heartbeats to the TROID system)
+Wants=network-online.target time-sync.target
+After=network-online.target time-sync.target
+
+[Service]
+# TROID_BOT_ID and TROID_BOT_KEY; root-only (chmod 600). See bot/README.md.
+EnvironmentFile=/etc/troid/monitor.env
+ExecStart=/usr/bin/python3 /opt/troid/troid_monitor.py
+Restart=always
+RestartSec=5
+# Runs as a throwaway unprivileged user; it only needs the network.
+DynamicUser=yes
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

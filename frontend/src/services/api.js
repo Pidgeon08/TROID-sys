@@ -66,6 +66,8 @@ export const api = {
   createBoat: (data) => api.post('/boats/', data),
   updateBoat: (id, data) => api.put(`/boats/${id}/`, data),
   deleteBoat: (id) => api.delete(`/boats/${id}/`),
+  // Creates the robot's device key (replacing any old one); the response is the only time it is shown.
+  createBoatDeviceKey: (id) => api.post(`/boats/${id}/device-key/`),
 
   users: () => api.get('/users/'),
   userDetail: (id) => api.get(`/users/${id}/`),

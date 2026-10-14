@@ -1,9 +1,9 @@
-import json
 import threading
 import time
 import uuid
 import paho.mqtt.client as mqtt
 from django.utils import timezone
+from .bot_auth import verify_bot_message
 from .models import Boat, DetectionEvent
 from .realtime import broadcast
 
@@ -35,9 +35,12 @@ def _on_connect(client, userdata, flags, rc):
 
 def _on_message(client, userdata, msg):
     try:
-        topic_parts = msg.topic.split('/')
-        bot_id = topic_parts[2]
-        payload = json.loads(msg.payload.decode('utf-8'))
+        # The broker is public, so only messages signed with the bot's device key count.
+        verified = verify_bot_message(msg.topic, msg.payload)
+        if verified is None:
+            return
+        boat, payload = verified
+        bot_id = str(boat.id)
 
         print(f"[MQTT] Received on {msg.topic}: {payload}")
 

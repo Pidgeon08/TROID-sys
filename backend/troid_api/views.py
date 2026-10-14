@@ -307,6 +307,27 @@ def companion_logout(request):
     return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+@api_view(['GET'])
+@authentication_classes([CompanionTokenAuthentication])
+@permission_classes([CompanionOperator])
+def companion_bot(request):
+    """The robot assigned to this operator (Operator Management), with its live
+    condition from the robot's heartbeats."""
+    profile = Operator.objects.filter(user=request.user, archived=False).select_related('assigned_bot').first()
+    boat = profile.assigned_bot if profile else None
+    if not boat or boat.archived:
+        return Response({'bot': None})
+    return Response({'bot': {
+        'id': boat.id,
+        'label': boat.label,
+        'name': boat.name,
+        'is_online': boat.is_online,
+        'is_active': boat.is_active,
+        'battery_level': boat.battery_level,
+        'last_seen': boat.last_seen,
+    }})
+
+
 @api_view(['POST'])
 @authentication_classes([CompanionTokenAuthentication])
 @permission_classes([CompanionOperator])
@@ -593,6 +614,30 @@ def unread_notification_count(request):
 class BoatViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
     queryset = Boat.objects.all()
     serializer_class = BoatSerializer
+    action_roles = {'device_key': ADMIN}
+
+    # Always enforced (even while API_AUTH_ENFORCED is off): the answer is a secret.
+    @action(detail=True, methods=['post'], url_path='device-key', permission_classes=[HasRole(
+        *ADMIN,
+        always_enforce=True,
+        not_authenticated_message='A valid admin session is required.',
+        message='Admin access is required.',
+    )])
+    def device_key(self, request, pk=None):
+        """Creates the key the robot signs its messages with (troid_api/bot_auth.py),
+        replacing any previous one. It is shown only in this response."""
+        boat = self.get_object()
+        boat.device_key = secrets.token_hex(32)
+        boat.save(update_fields=['device_key'])
+        record_audit(request, user=request.user.email[:100], role=ROLE_LABELS.get(request.user.role, request.user.role),
+                     action='Created robot device key', module='Bot Management',
+                     details=f'{boat.label} ({boat.name})', status='success')
+        return Response({
+            'bot_id': boat.id,
+            'label': boat.label,
+            'device_key': boat.device_key,
+            'topic_prefix': f'troid/bot/{boat.id}/',
+        })
 
 
 class UserViewSet(RoleViewSetMixin, viewsets.ModelViewSet):

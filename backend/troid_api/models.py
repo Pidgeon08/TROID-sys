@@ -10,6 +10,14 @@ class Boat(models.Model):
     last_longitude = models.FloatField(null=True, blank=True)
     battery_level = models.FloatField(null=True, blank=True)
     last_seen = models.DateTimeField(auto_now=True)
+    # Secret the robot signs its MQTT messages with (troid_api/bot_auth.py). Never
+    # sent over MQTT or returned by the API, except once when an admin creates it.
+    device_key = models.CharField(max_length=64, blank=True, null=True, default=None)
+
+    @property
+    def label(self):
+        """How the website shows the bot, e.g. "TRD-004"."""
+        return f'TRD-{self.id:03d}'
 
     def __str__(self):
         return self.name

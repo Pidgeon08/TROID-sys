@@ -4,7 +4,7 @@ import api from '../../services/api';
 import { logAudit } from '../../services/auditLog';
 import { useRealtime } from '../../hooks/useRealtime';
 import { formatTime12h } from '../../constants/requests';
-import { Plus, Ship, Zap, WifiOff, Ban, Battery, BatteryCharging, X } from 'lucide-react';
+import { Plus, Ship, Zap, WifiOff, Ban, Battery, BatteryCharging, X, Copy, Check } from 'lucide-react';
 import { Card } from '../../components/ui/Card';
 import { SearchBar } from '../../components/ui/SearchBar';
 import { EmptyState } from '../../components/ui/EmptyState';
@@ -117,6 +117,11 @@ export default function ManageBots() {
     const [isAddBotOpen, setIsAddBotOpen] = useState(false);
     const [isMaintenanceOpen, setIsMaintenanceOpen] = useState(false);
     const [isArchiveConfirmOpen, setIsArchiveConfirmOpen] = useState(false);
+    // Connecting the physical robot: confirm, then show its device key once.
+    const [isConnectConfirmOpen, setIsConnectConfirmOpen] = useState(false);
+    const [isCreatingKey, setIsCreatingKey] = useState(false);
+    const [deviceKey, setDeviceKey] = useState(null);
+    const [keyCopied, setKeyCopied] = useState(false);
     const [maintenanceDetails, setMaintenanceDetails] = useState({ type: 'Routine Maintenance', date: '', notes: '' });
 
     const [search, setSearch] = useState('');
@@ -203,6 +208,8 @@ export default function ManageBots() {
             setNewBot({ id: '', assignedOperator: 'Not Assigned' });
             setIsAddBotOpen(false);
             setSelectedBotId(botToAdd.id);
+            // Next step for a real robot: give it a device key.
+            setIsConnectConfirmOpen(true);
 
             logAudit({
                 currentUser,
@@ -213,6 +220,34 @@ export default function ManageBots() {
         } catch (err) {
             console.error('Failed to add bot:', err);
             alert('Failed to add bot. Please try again.');
+        }
+    };
+
+    const handleCreateDeviceKey = async () => {
+        if (!selectedBot) return;
+        setIsCreatingKey(true);
+        try {
+            setDeviceKey(await api.createBoatDeviceKey(selectedBot.backendId));
+            setKeyCopied(false);
+            setIsConnectConfirmOpen(false);
+        } catch (err) {
+            console.error('Failed to create device key:', err);
+            alert(err.message || 'Failed to create the device key. Please try again.');
+        } finally {
+            setIsCreatingKey(false);
+        }
+    };
+
+    const deviceKeySettings = deviceKey
+        ? `TROID_BOT_ID=${deviceKey.bot_id}\nTROID_BOT_KEY=${deviceKey.device_key}`
+        : '';
+
+    const handleCopyDeviceKey = async () => {
+        try {
+            await navigator.clipboard.writeText(deviceKeySettings);
+            setKeyCopied(true);
+        } catch {
+            alert('Copy failed. Select the text and copy it manually.');
         }
     };
 
@@ -527,6 +562,13 @@ export default function ManageBots() {
                     <Card title="Quick action">
                         <div className="space-y-2">
                             <button
+                                onClick={() => setIsConnectConfirmOpen(true)}
+                                disabled={!selectedBot}
+                                className="w-full rounded-lg border border-blue-200 py-2 text-sm font-medium text-blue-700 transition-colors hover:border-blue-400 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                                Connect robot
+                            </button>
+                            <button
                                 onClick={() => setIsMaintenanceOpen(true)}
                                 disabled={!selectedBot}
                                 className="w-full rounded-lg border border-slate-200 py-2 text-sm text-slate-600 transition-colors hover:border-blue-400 hover:bg-blue-50 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
@@ -656,6 +698,78 @@ export default function ManageBots() {
                                 </button>
                             </div>
                         </form>
+                    </div>
+                </div>
+            )}
+
+            {isConnectConfirmOpen && selectedBot && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
+                    <div className="w-full max-w-sm rounded-xl bg-white p-6 border border-slate-200">
+                        <div className="mb-4 flex items-center justify-between">
+                            <h3 className="text-sm font-semibold text-slate-800">Connect robot</h3>
+                            <button onClick={() => setIsConnectConfirmOpen(false)} className="text-slate-400 hover:text-slate-600" aria-label="Close">
+                                <X size={18} />
+                            </button>
+                        </div>
+                        <p className="text-sm text-slate-600 mb-2">
+                            Create a device key for <strong>{selectedBot.id}</strong>? The robot's Raspberry Pi uses it to report its condition (online, battery) to the TROID system.
+                        </p>
+                        <p className="text-sm text-slate-600 mb-4">
+                            If this robot already has a key, the old one stops working and the robot must be updated with the new one.
+                        </p>
+                        <div className="flex justify-end gap-2">
+                            <button
+                                onClick={() => setIsConnectConfirmOpen(false)}
+                                className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
+                            >
+                                Not now
+                            </button>
+                            <button
+                                onClick={handleCreateDeviceKey}
+                                disabled={isCreatingKey}
+                                className="rounded-lg bg-[#1b4de4] px-4 py-2 text-sm font-medium text-white hover:bg-[#153eb8] disabled:opacity-60"
+                            >
+                                {isCreatingKey ? 'Creating...' : 'Create key'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {deviceKey && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
+                    <div className="w-full max-w-lg rounded-xl bg-white p-6 border border-slate-200">
+                        <div className="mb-4 flex items-center justify-between">
+                            <h3 className="text-sm font-semibold text-slate-800">Device key for {deviceKey.label}</h3>
+                            <button onClick={() => setDeviceKey(null)} className="text-slate-400 hover:text-slate-600" aria-label="Close">
+                                <X size={18} />
+                            </button>
+                        </div>
+                        <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                            This key is shown only once. Copy it now and keep it private: anyone with it can report as this robot.
+                        </p>
+                        <p className="mb-2 text-sm text-slate-600">
+                            On the robot's Raspberry Pi, put these two lines in <code className="rounded bg-slate-100 px-1">/etc/troid/monitor.env</code>:
+                        </p>
+                        <pre className="mb-3 overflow-x-auto whitespace-pre-wrap break-all rounded-lg border border-slate-200 bg-slate-50 p-3 font-mono text-xs text-slate-800">{deviceKeySettings}</pre>
+                        <p className="mb-4 text-xs text-slate-500">
+                            Then run <code className="rounded bg-slate-100 px-1">sudo systemctl restart troid-monitor</code>. Setup steps: <code className="rounded bg-slate-100 px-1">bot/README.md</code> in the TROID-sys repository.
+                        </p>
+                        <div className="flex justify-end gap-2">
+                            <button
+                                onClick={handleCopyDeviceKey}
+                                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
+                            >
+                                {keyCopied ? <Check size={15} /> : <Copy size={15} />}
+                                {keyCopied ? 'Copied' : 'Copy'}
+                            </button>
+                            <button
+                                onClick={() => setDeviceKey(null)}
+                                className="rounded-lg bg-[#1b4de4] px-4 py-2 text-sm font-medium text-white hover:bg-[#153eb8]"
+                            >
+                                Done
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}
