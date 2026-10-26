@@ -13,6 +13,7 @@ urlpatterns = [
     path('companion/logout/', views.companion_logout, name='companion-logout'),
     path('companion/task-status/', views.companion_task_status, name='companion-task-status'),
     path('companion/bot/', views.companion_bot, name='companion-bot'),
+    path('companion/bot/presence/', views.companion_bot_presence, name='companion-bot-presence'),
     path('', include(views.router.urls)),
     path('login/', views.login, name='login'),
     path('logout/', views.logout, name='logout'),

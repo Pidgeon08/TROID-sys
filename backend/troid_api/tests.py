@@ -1036,3 +1036,90 @@ class CompanionBotTests(TestCase):
 
     def test_requires_an_app_session(self):
         self.assertEqual(self.client.get('/api/companion/bot/').status_code, 401)
+
+
+class RobotPresenceTests(TestCase):
+    """The website shows which operator is using a robot: the app reports while the
+    operator's phone can reach their assigned robot's Pi."""
+
+    URL = '/api/companion/bot/presence/'
+
+    def setUp(self):
+        self.client = APIClient()
+        self.admin = make_user('admin')
+        self.boat = Boat.objects.create(name='Real robot')
+        self.first = self.app_operator('first', 'Op A')
+        self.second = self.app_operator('second', 'Op B')
+
+    def app_operator(self, slug, name):
+        user = User.objects.create(name=name, email=f'{slug}@example.com', password='Test-password1',
+                                   role='operator', companion_session_token=f'{slug}-session')
+        Operator.objects.create(name=name, user=user, assigned_bot=self.boat)
+        return {'HTTP_AUTHORIZATION': f'Companion {user.id}:{slug}-session'}
+
+    def report(self, headers, in_use):
+        return self.client.post(self.URL, {'in_use': in_use}, format='json', **headers)
+
+    def shown_on_website(self):
+        bots = self.client.get('/api/boats/', **session_header(self.admin)).json()
+        return next(b for b in bots if b['id'] == self.boat.id)
+
+    def audits(self, action):
+        return AuditLog.objects.filter(action=action).count()
+
+    def test_start_refresh_and_stop(self):
+        response = self.report(self.first, True)
+        self.assertEqual(response.json(), {'bot': self.boat.label, 'in_use': True})
+        bot = self.shown_on_website()
+        self.assertEqual(bot['in_use_by_name'], 'Op A')
+        self.assertIsNotNone(bot['in_use_since'])
+
+        self.report(self.first, True)  # The 10-second refresh logs nothing new.
+        self.assertEqual(self.audits('Started using robot'), 1)
+
+        self.report(self.first, False)
+        self.assertIsNone(self.shown_on_website()['in_use_by_name'])
+        self.assertEqual(self.audits('Stopped using robot'), 1)
+
+    def test_presence_expires_when_reports_stop(self):
+        self.report(self.first, True)
+        Boat.objects.filter(pk=self.boat.pk).update(in_use_seen_at=timezone.now() - Boat.IN_USE_EXPIRES_AFTER)
+
+        bot = self.shown_on_website()
+        self.assertIsNone(bot['in_use_by_name'])
+        self.assertIsNone(bot['in_use_since'])
+
+    def test_another_operator_waits_until_the_robot_is_free(self):
+        self.report(self.first, True)
+
+        response = self.report(self.second, True)
+        self.assertEqual(response.json(), {'bot': self.boat.label, 'in_use': False, 'in_use_by': 'Op A'})
+        self.report(self.second, False)  # Not theirs to release.
+        self.assertEqual(self.shown_on_website()['in_use_by_name'], 'Op A')
+
+        Boat.objects.filter(pk=self.boat.pk).update(in_use_seen_at=timezone.now() - Boat.IN_USE_EXPIRES_AFTER)
+        self.assertTrue(self.report(self.second, True).json()['in_use'])
+        self.assertEqual(self.shown_on_website()['in_use_by_name'], 'Op B')
+
+    def test_presence_never_makes_a_switched_off_robot_look_online(self):
+        long_ago = timezone.now() - Boat.OFFLINE_AFTER * 4
+        Boat.objects.filter(pk=self.boat.pk).update(is_online=True, last_seen=long_ago)
+
+        self.report(self.first, True)
+        self.report(self.first, False)
+
+        self.boat.refresh_from_db()
+        self.assertEqual(self.boat.last_seen, long_ago)
+        self.assertFalse(self.shown_on_website()['is_online'])
+
+    def test_logging_out_frees_the_robot(self):
+        self.report(self.first, True)
+
+        self.assertEqual(self.client.post('/api/companion/logout/', **self.first).status_code, 204)
+
+        self.assertIsNone(self.shown_on_website()['in_use_by_name'])
+        self.assertEqual(self.audits('Stopped using robot'), 1)
+
+    def test_rejects_bad_input_and_missing_sessions(self):
+        self.assertEqual(self.client.post(self.URL, {'in_use': 'yes'}, format='json', **self.first).status_code, 400)
+        self.assertEqual(self.client.post(self.URL, {'in_use': True}, format='json').status_code, 401)

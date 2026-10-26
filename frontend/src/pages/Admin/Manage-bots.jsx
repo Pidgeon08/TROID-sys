@@ -92,6 +92,11 @@ export default function ManageBots() {
                         lastActive: b.last_seen
                             ? new Date(b.last_seen).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                             : '—',
+                        // The operator whose Companion app is connected to this robot right now.
+                        inUseBy: b.in_use_by_name || null,
+                        inUseSince: b.in_use_since
+                            ? new Date(b.in_use_since).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                            : null,
                         scheduledCleanup: latestSchedule
                             ? `${latestSchedule.day} @ ${formatTime12h(latestSchedule.label)}`
                             : 'None',
@@ -459,6 +464,9 @@ export default function ManageBots() {
                                                 <span className={`inline-block rounded-full px-2.5 py-1 text-xs font-medium ${STATUS_STYLES[bot.status] || 'bg-slate-100 text-slate-600'}`}>
                                                     {bot.status}
                                                 </span>
+                                                {bot.inUseBy && (
+                                                    <div className="mt-1 text-xs text-blue-700">In use by {bot.inUseBy}</div>
+                                                )}
                                             </td>
                                             <td className="px-4 py-2.5 text-slate-500">
                                                 {bot.battery !== null && bot.battery !== undefined ? (
@@ -547,6 +555,12 @@ export default function ManageBots() {
                                         <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_STYLES[selectedBot.status] || 'bg-slate-100 text-slate-600'}`}>
                                             {selectedBot.status}
                                         </span>
+                                    </p>
+                                    <p className="text-slate-600">
+                                        <span className="text-slate-400">In use by: </span>
+                                        {selectedBot.inUseBy
+                                            ? `${selectedBot.inUseBy} (since ${selectedBot.inUseSince})`
+                                            : 'No one'}
                                     </p>
                                     <p className="text-slate-600">
                                         <span className="text-slate-400">Battery: </span>

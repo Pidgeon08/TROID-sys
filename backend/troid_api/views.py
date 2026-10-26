@@ -305,9 +305,16 @@ def companion_change_password(request):
 @authentication_classes([CompanionTokenAuthentication])
 @permission_classes([CompanionOperator])
 def companion_logout(request):
-    """Ends the app's session on the server, so the token stops working."""
+    """Ends the app's session on the server, so the token stops working, and frees
+    any robot this operator was using (the app's own "stopped" report could arrive
+    after the session is gone)."""
     request.user.companion_session_token = None
     request.user.save(update_fields=['companion_session_token'])
+    for boat in Boat.objects.filter(in_use_by__user=request.user):
+        Boat.objects.filter(pk=boat.pk).update(in_use_by=None, in_use_since=None, in_use_seen_at=None)
+        record_audit(request, user=request.user.email[:100], role=ROLE_LABELS['operator'], action='Stopped using robot',
+                     module='Bot Management', details=f'{request.user.name} on {boat.label} (logged out)',
+                     status='success')
     return Response(status=status.HTTP_204_NO_CONTENT)
 
 
@@ -330,6 +337,49 @@ def companion_bot(request):
         'battery_level': boat.battery_level,
         'last_seen': boat.last_seen,
     }})
+
+
+@api_view(['POST'])
+@authentication_classes([CompanionTokenAuthentication])
+@permission_classes([CompanionOperator])
+def companion_bot_presence(request):
+    """The app reports, every 10 s, whether this operator's phone can reach their
+    assigned robot's Pi ({"in_use": true}) or has left it ({"in_use": false}), so
+    the website can show who is using each robot (Boat.current_operator).
+
+    Only the caller's own assigned robot is affected. While another operator is
+    using it, the robot stays theirs until they leave or their reports stop.
+    """
+    in_use = request.data.get('in_use')
+    if not isinstance(in_use, bool):
+        return Response({'error': '"in_use" must be true or false.'}, status=status.HTTP_400_BAD_REQUEST)
+    profile = Operator.objects.filter(user=request.user, archived=False).select_related('assigned_bot').first()
+    boat = profile.assigned_bot if profile else None
+    if not boat or boat.archived:
+        return Response({'error': 'No robot is assigned to you.'}, status=status.HTTP_404_NOT_FOUND)
+
+    holder = boat.current_operator
+    # .update(), not save(): save() would touch last_seen (auto_now), which is the
+    # robot's own heartbeat time and decides whether it shows Online.
+    boats = Boat.objects.filter(pk=boat.pk)
+    now = timezone.now()
+
+    def audit(action):
+        record_audit(request, user=request.user.email[:100], role=ROLE_LABELS['operator'], action=action,
+                     module='Bot Management', details=f'{profile.name} on {boat.label}', status='success')
+
+    if in_use:
+        if holder and holder.pk != profile.pk:
+            return Response({'bot': boat.label, 'in_use': False, 'in_use_by': holder.name})
+        if holder is None:
+            boats.update(in_use_by=profile, in_use_since=now, in_use_seen_at=now)
+            audit('Started using robot')
+        else:
+            boats.update(in_use_seen_at=now)
+    elif holder and holder.pk == profile.pk:
+        boats.update(in_use_by=None, in_use_since=None, in_use_seen_at=None)
+        audit('Stopped using robot')
+    return Response({'bot': boat.label, 'in_use': in_use})
 
 
 @api_view(['POST'])
@@ -616,7 +666,7 @@ def unread_notification_count(request):
 
 
 class BoatViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
-    queryset = Boat.objects.all()
+    queryset = Boat.objects.select_related('in_use_by')
     serializer_class = BoatSerializer
     action_roles = {'device_key': ADMIN}
 

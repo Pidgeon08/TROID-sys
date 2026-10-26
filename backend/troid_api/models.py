@@ -16,9 +16,18 @@ class Boat(models.Model):
     # Secret the robot signs its MQTT messages with (troid_api/bot_auth.py). Never
     # sent over MQTT or returned by the API, except once when an admin creates it.
     device_key = models.CharField(max_length=64, blank=True, null=True, default=None)
+    # The operator whose Companion app is connected to this robot (its Pi reachable
+    # from their phone), refreshed every 10 s by the app (companion_bot_presence).
+    # Written with queryset .update(), never save(), so last_seen (auto_now, which
+    # is_connected reads) only ever moves on the robot's own heartbeats.
+    in_use_by = models.ForeignKey('Operator', on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
+    in_use_since = models.DateTimeField(null=True, blank=True)
+    in_use_seen_at = models.DateTimeField(null=True, blank=True)
 
     # The robot sends a heartbeat every 5 s; this long without one means it's off.
     OFFLINE_AFTER = timedelta(seconds=15)
+    # The app reports presence every 10 s; this long without one means it left.
+    IN_USE_EXPIRES_AFTER = timedelta(seconds=30)
 
     @property
     def is_connected(self):
@@ -27,6 +36,16 @@ class Boat(models.Model):
         (mqtt_client.start_offline_checker) isn't running to clear is_online."""
         return bool(self.is_online and self.last_seen
                     and timezone.now() - self.last_seen < self.OFFLINE_AFTER)
+
+    @property
+    def current_operator(self):
+        """The operator using this robot right now, or None. Worked out on every read
+        (like is_connected) so a phone that leaves stops counting without a cleanup job."""
+        if not (self.in_use_by_id and self.in_use_seen_at):
+            return None
+        if timezone.now() - self.in_use_seen_at >= self.IN_USE_EXPIRES_AFTER:
+            return None
+        return self.in_use_by
 
     @property
     def label(self):

@@ -8,10 +8,21 @@ class DetectionEventSerializer(serializers.ModelSerializer):
 
 class BoatSerializer(serializers.ModelSerializer):
     is_online = serializers.BooleanField(source='is_connected', read_only=True)
+    # Who is using the robot right now through the Companion app (Boat.current_operator).
+    in_use_by_name = serializers.SerializerMethodField()
+    in_use_since = serializers.SerializerMethodField()
 
     class Meta:
         model = Boat
-        fields = ['id', 'name', 'is_active', 'is_online', 'archived', 'last_latitude', 'last_longitude', 'battery_level', 'last_seen']
+        fields = ['id', 'name', 'is_active', 'is_online', 'archived', 'last_latitude', 'last_longitude', 'battery_level',
+                  'last_seen', 'in_use_by_name', 'in_use_since']
+
+    def get_in_use_by_name(self, boat):
+        operator = boat.current_operator
+        return operator.name if operator else None
+
+    def get_in_use_since(self, boat):
+        return boat.in_use_since if boat.current_operator else None
 
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
