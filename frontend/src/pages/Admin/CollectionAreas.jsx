@@ -22,12 +22,14 @@ const DEFAULT_CENTER = [16.6195, 120.314];
 const DEFAULT_ZOOM = 14;
 const AREA_COLOR = "#1b4de4";
 
-const TABS = ["All", "Pending", "Approved", "Declined"];
+// "Archived" is how CENRO sees the declined status (still stored as "declined").
+const TABS = ["All", "Pending", "Approved", "Archived"];
+const TAB_STATUS = { Pending: "pending", Approved: "approved", Archived: "declined" };
 
 const STATUS_META = {
   pending: { label: "Pending Approval", cls: "bg-amber-50 text-amber-700", icon: Clock },
   approved: { label: "Approved", cls: "bg-emerald-50 text-emerald-700", icon: CheckCircle2 },
-  declined: { label: "Declined", cls: "bg-red-50 text-red-700", icon: XCircle },
+  declined: { label: "Archived", cls: "bg-red-50 text-red-700", icon: XCircle },
 };
 
 function mapArea(raw) {
@@ -94,7 +96,7 @@ export default function CollectionAreas() {
 
   const filtered = useMemo(() => {
     if (activeTab === "All") return areas;
-    return areas.filter((a) => a.status === activeTab.toLowerCase());
+    return areas.filter((a) => a.status === TAB_STATUS[activeTab]);
   }, [areas, activeTab]);
 
   const focusArea = (a) => {
@@ -145,16 +147,16 @@ export default function CollectionAreas() {
       setAreas((prev) => prev.map((a) => (a.id === declineTarget.id ? mapArea(updated) : a)));
       logAudit({
         currentUser,
-        action: "Collection area declined",
+        action: "Collection area archived",
         module: "Collection Areas",
-        details: `${declineTarget.name} (${declineTarget.id}) declined: ${declineReason.trim()}`,
+        details: `${declineTarget.name} (${declineTarget.id}) archived: ${declineReason.trim()}`,
         status: "warning",
       });
       setDeclineTarget(null);
       setDeclineReason("");
     } catch (err) {
-      console.error("Failed to decline collection area:", err);
-      alert("Failed to decline area. Please try again.");
+      console.error("Failed to archive collection area:", err);
+      alert("Failed to archive area. Please try again.");
     } finally {
       setBusyId(null);
     }
@@ -181,7 +183,7 @@ export default function CollectionAreas() {
         <SummaryCard icon={Layers} label="Total Areas" value={counts.total} sub="All submissions" />
         <SummaryCard icon={Clock} label="Pending" value={counts.pending} sub="Awaiting your approval" />
         <SummaryCard icon={CheckCircle2} label="Approved" value={counts.approved} sub="Active collection zones" />
-        <SummaryCard icon={XCircle} label="Declined" value={counts.declined} sub="Declined submissions" />
+        <SummaryCard icon={XCircle} label="Archived" value={counts.declined} sub="Archived submissions" />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-[380px_1fr] gap-6">
@@ -235,7 +237,7 @@ export default function CollectionAreas() {
                         className="flex items-center gap-1.5 rounded-lg border-2 border-red-200 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50 transition-colors disabled:opacity-50"
                       >
                         <XCircle size={14} />
-                        Decline
+                        Archive
                       </button>
                       <button
                         type="button"
@@ -343,9 +345,9 @@ export default function CollectionAreas() {
           <div className="w-full max-w-sm bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden">
             <div className="p-6 border-b border-slate-100 flex items-start justify-between gap-3">
               <div>
-                <h3 className="text-lg font-bold text-slate-900">Decline Area</h3>
+                <h3 className="text-lg font-bold text-slate-900">Archive Area</h3>
                 <p className="text-xs text-slate-500 mt-1">
-                  {declineTarget.name} will be declined and the barangay will be notified with your remarks.
+                  {declineTarget.name} will be archived and the barangay will be notified with your remarks.
                 </p>
               </div>
               <button onClick={() => setDeclineTarget(null)} className="text-slate-400 hover:text-slate-600" aria-label="Close">
@@ -354,13 +356,13 @@ export default function CollectionAreas() {
             </div>
             <div className="px-6 pt-4">
               <label className="mb-1.5 block text-xs font-semibold text-slate-500">
-                Reason for declining <span className="text-red-500">*</span>
+                Reason for archiving <span className="text-red-500">*</span>
               </label>
               <textarea
                 value={declineReason}
                 onChange={(e) => setDeclineReason(e.target.value)}
                 rows={3}
-                placeholder="Explain why this area is being declined..."
+                placeholder="Explain why this area is being archived..."
                 className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-red-400 focus:ring-2 focus:ring-red-500/20"
               />
             </div>
@@ -376,7 +378,7 @@ export default function CollectionAreas() {
                 onClick={submitDecline}
                 className="flex-1 rounded-lg bg-red-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {busyId === declineTarget.id ? "Declining..." : "Decline"}
+                {busyId === declineTarget.id ? "Archiving..." : "Archive"}
               </button>
             </div>
           </div>

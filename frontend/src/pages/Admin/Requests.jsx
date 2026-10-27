@@ -1,6 +1,6 @@
 import { useMemo, useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Eye, Trash2, Plus, FileText, Clock, CheckCircle2, XCircle, Signature, Archive } from "lucide-react";
+import { Eye, Trash2, Plus, FileText, Clock, CheckCircle2, Signature, Archive } from "lucide-react";
 import { TABS, mapRequest, matchesRequestQuery } from "../../constants/requests";
 import { useRequests } from "../../hooks/useRequests";
 import { Badge } from "../../components/ui/Badge";
@@ -20,12 +20,11 @@ export default function Requests({ userRole = "admin" }) {
   const [archivingId, setArchivingId] = useState(null);
   const [showArchived, setShowArchived] = useState(false);
   const [archivedRequests, setArchivedRequests] = useState([]);
-  const [loadingArchived, setLoadingArchived] = useState(false);
+  const [loadingArchived, setLoadingArchived] = useState(true);
 
+  // Loaded up front too, for the Archived summary card; refreshed when the list is opened.
   useEffect(() => {
-    if (!showArchived) return;
     let cancelled = false;
-    setLoadingArchived(true);
     api.requestsArchived()
       .then((res) => { if (!cancelled) setArchivedRequests(Array.isArray(res) ? res.map(mapRequest) : []); })
       .catch((err) => console.error('Failed to load archived requests:', err))
@@ -49,6 +48,7 @@ export default function Requests({ userRole = "admin" }) {
     try {
       await api.deleteRequest(req.id);
       setRequests(prev => prev.filter(r => r.id !== req.id));
+      setArchivedRequests(prev => [req, ...prev]);
     } catch (err) {
       console.error('Failed to archive request:', err);
       alert('Failed to archive request. Please try again.');
@@ -95,7 +95,7 @@ export default function Requests({ userRole = "admin" }) {
             Send Request
           </button>
           <button
-            onClick={() => { setShowArchived((v) => !v); setCurrentPage(1); }}
+            onClick={() => { setLoadingArchived(true); setShowArchived((v) => !v); setCurrentPage(1); }}
             className={`flex items-center gap-2 rounded-lg border px-3.5 py-2 text-sm font-medium transition-colors ${showArchived ? 'border-blue-300 bg-blue-50 text-blue-700' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}
           >
             <Archive size={15} />
@@ -114,7 +114,7 @@ export default function Requests({ userRole = "admin" }) {
         <SummaryCard icon={FileText} label="Total Requests" value={counts.total} sub="All time" />
         <SummaryCard icon={Clock} label="Pending Admin" value={counts.pending} sub="Awaiting your approval" />
         <SummaryCard icon={CheckCircle2} label="Approved" value={counts.approved} sub="Ready for deployment" />
-        <SummaryCard icon={XCircle} label="Declined" value={counts.declined} sub="Declined requests" />
+        <SummaryCard icon={Archive} label="Archived" value={archivedRequests.length} sub="Archived requests" />
       </div>
 
       <Card>
