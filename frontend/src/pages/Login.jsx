@@ -58,7 +58,7 @@ const Login = ({ onLogin }) => {
       }
 
       await onLogin(role, data, rememberMe);
-      navigate(`/${role === 'mayorsoffice' ? 'mayorsoffice/dashboard' : (role === 'barangay' || role === 'ngo') ? 'barangay/dashboard' : 'admin/requests'}`);
+      navigate(`/${role === 'mayorsoffice' ? 'mayorsoffice/dashboard' : (role === 'barangay' || role === 'ngo') ? 'barangay/dashboard' : 'admin/dashboard'}`);
     } catch (err) {
       console.error('Login error:', err);
       setError('Login failed. Please try again.');

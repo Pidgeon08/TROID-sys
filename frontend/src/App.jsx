@@ -142,7 +142,7 @@ function App() {
         <Route element={<Layout isAuthenticated={isAuthenticated} onLogout={handleLogout} userType={userType} currentUser={currentUser} />}>
 
           {/* Root redirect: Send user to their specific dashboard on login */}
-          <Route path="/" element={<Navigate to={`/${userType === 'mayorsoffice' ? 'mayorsoffice/dashboard' : (userType === 'barangay' || userType === 'ngo') ? 'barangay/dashboard' : 'admin/requests'}`} replace />} />
+          <Route path="/" element={<Navigate to={`/${userType === 'mayorsoffice' ? 'mayorsoffice/dashboard' : (userType === 'barangay' || userType === 'ngo') ? 'barangay/dashboard' : 'admin/dashboard'}`} replace />} />
 
           {/* ADMIN (CENRO) ROUTES */}
           <Route element={<ProtectedRoute isAuthenticated={isAuthenticated} userRole={userType} allowedRoles={['admin']} />}>
