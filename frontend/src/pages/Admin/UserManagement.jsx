@@ -9,7 +9,7 @@ import { EmptyState } from "../../components/ui/EmptyState";
 
 const ROLE_STYLES = {
   Admin: "bg-blue-50 text-blue-700",
-  Mayor: "bg-amber-50 text-amber-800",
+  "City Admin": "bg-amber-50 text-amber-800",
   Barangay: "bg-emerald-50 text-emerald-700",
   NGO: "bg-purple-50 text-purple-700",
 };
@@ -86,7 +86,7 @@ export default function UserManagement({ currentUser }) {
       const payload = {
         name: updated.name,
         email: updated.email,
-        role: updated.role === 'Admin' ? 'admin' : updated.role === 'Mayor' ? 'mayorsoffice' : updated.role === 'Barangay' ? 'barangay' : updated.role === 'NGO' ? 'ngo' : updated.role,
+        role: updated.role === 'Admin' ? 'admin' : updated.role === 'City Admin' ? 'mayorsoffice' : updated.role === 'Barangay' ? 'barangay' : updated.role === 'NGO' ? 'ngo' : updated.role,
         status: updated.status === 'Active' ? 'active' : updated.status === 'Pending' ? 'pending' : updated.status === 'Offline' ? 'offline' : updated.status === 'Archived' ? 'archived' : updated.status,
         location: updated.location,
       };
@@ -110,7 +110,7 @@ export default function UserManagement({ currentUser }) {
       const payload = {
         name: form.name,
         email: form.email,
-        role: form.role === 'Admin' ? 'admin' : form.role === 'Mayor' ? 'mayorsoffice' : form.role === 'Barangay' ? 'barangay' : form.role === 'NGO' ? 'ngo' : form.role,
+        role: form.role === 'Admin' ? 'admin' : form.role === 'City Admin' ? 'mayorsoffice' : form.role === 'Barangay' ? 'barangay' : form.role === 'NGO' ? 'ngo' : form.role,
         status: form.status === 'Active' ? 'active' : form.status === 'Pending' ? 'pending' : form.status === 'Offline' ? 'offline' : 'active',
         location: form.location || '',
       };
@@ -119,7 +119,7 @@ export default function UserManagement({ currentUser }) {
         id: created.id,
         name: created.name,
         email: created.email,
-        role: created.role.replace('mayorsoffice', "Mayor").replace('barangay', 'Barangay').replace('ngo', 'NGO').replace('admin', 'Admin'),
+        role: created.role.replace('mayorsoffice', "City Admin").replace('barangay', 'Barangay').replace('ngo', 'NGO').replace('admin', 'Admin'),
         status: created.status === 'active' ? 'Active' : created.status === 'pending' ? 'Pending' : created.status === 'offline' ? 'Offline' : created.status === 'archived' ? 'Archived' : created.status,
         location: created.location || '—',
         date: new Date().toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' }),
@@ -227,7 +227,7 @@ export default function UserManagement({ currentUser }) {
               >
                 <option>All roles</option>
                 <option>Admin</option>
-                <option>Mayor</option>
+                <option>City Admin</option>
                 <option>Barangay</option>
                 <option>NGO</option>
               </select>
@@ -583,7 +583,7 @@ function AddUserModal({ onCancel, onSave }) {
               className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
             >
               <option>Admin</option>
-              <option>Mayor</option>
+              <option>City Admin</option>
               <option>Barangay</option>
               <option>NGO</option>
             </select>
@@ -622,7 +622,7 @@ function AddUserModal({ onCancel, onSave }) {
 }
 
 function EditUserConfirmModal({ form, onCancel, onConfirm }) {
-  const roleLabel = form.role === 'admin' ? 'Admin' : form.role === 'mayorsoffice' ? 'Mayor' : form.role === 'barangay' ? 'Barangay' : form.role === 'ngo' ? 'NGO' : form.role;
+  const roleLabel = form.role === 'admin' ? 'Admin' : form.role === 'mayorsoffice' ? 'City Admin' : form.role === 'barangay' ? 'Barangay' : form.role === 'ngo' ? 'NGO' : form.role;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
       <div className="w-full max-w-sm rounded-xl bg-white p-6 border border-slate-200">

@@ -42,12 +42,12 @@ export function useRequests(userRole = 'admin') {
   const filteredByTab = useMemo(() => {
     if (activeTab === 'All Requests') return filteredRequests;
     const statusMap = {
-      'Pending Mayor': 'Pending Mayor Approval',
+      'Pending City Admin': 'Pending City Admin Approval',
       'Pending Admin': 'Pending Admin Approval',
       'Approved': 'Approved',
       'Declined': 'Declined',
       'Parked': 'Parked',
-      'Pending': 'Pending Mayor Approval',
+      'Pending': 'Pending City Admin Approval',
       'Deployed': 'Approved',
       'Completed': 'Completed',
       'Segregated': 'Segregated',
@@ -63,7 +63,7 @@ export function useRequests(userRole = 'admin') {
     if (userRole === 'mayorsoffice') {
       return {
         total: requests.length,
-        pending: requests.filter((r) => r.status === 'Pending Mayor Approval').length,
+        pending: requests.filter((r) => r.status === 'Pending City Admin Approval').length,
         approved: requests.filter((r) => r.status === 'Approved' || r.status === 'Pending Admin Approval').length,
         declined: requests.filter((r) => r.status === 'Declined').length,
         parked: requests.filter((r) => r.status === 'Parked').length,

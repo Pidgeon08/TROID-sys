@@ -72,7 +72,7 @@ class DetectionEvent(models.Model):
 class User(models.Model):
     ROLE_CHOICES = [
         ('admin', 'Admin'),
-        ('mayorsoffice', "Mayor's Office"),
+        ('mayorsoffice', 'City Admin'),
         ('barangay', 'Barangay'),
         ('ngo', 'NGO'),
         ('operator', 'Operator'),
@@ -170,7 +170,7 @@ class Operator(models.Model):
 
 class Request(models.Model):
     STATUS_CHOICES = [
-        ('pending_mayor_approval', 'Pending Mayor Approval'),
+        ('pending_mayor_approval', 'Pending City Admin Approval'),
         ('pending_admin_approval', 'Pending Admin Approval'),
         ('approved', 'Approved'),
         ('declined', 'Declined'),

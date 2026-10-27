@@ -17,7 +17,7 @@ import {
 import api from "../../services/api";
 import { Card } from "../../components/ui/Card";
 import NotificationBell from "../../components/NotificationBell";
-import { REQUEST_STATUS_STYLES, mapRequest, getDeploymentStatus, formatTime12h } from "../../constants/requests";
+import { REQUEST_STATUS_STYLES, mapRequest, getDeploymentStatus, formatTime12h, toStatusLabel } from "../../constants/requests";
 
 const Field = ({ label, value }) => (
   <div className="flex items-center justify-between py-2 text-sm">
@@ -76,7 +76,7 @@ export default function CityHallViewRequest() {
     setSubmitting(true);
     try {
       const res = await api.unparkRequest(request.id);
-      const restoredStatus = (res.status || '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+      const restoredStatus = toStatusLabel(res.status);
       setRequest(prev => ({ ...prev, status: restoredStatus, declineReason: '' }));
     } catch (err) {
       console.error('Failed to unpark request:', err);
@@ -367,7 +367,7 @@ export default function CityHallViewRequest() {
                     </div>
                    </Card>
 
-                   {request.status === "Pending Mayor Approval" && (
+                   {request.status === "Pending City Admin Approval" && (
                    <Card title="Decision">
                      <div className="flex flex-col gap-4">
                        <p className="text-xs text-slate-500">

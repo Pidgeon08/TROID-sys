@@ -46,7 +46,7 @@ logger = logging.getLogger(__name__)
 SPECIAL_CHARS = '!@#$%^&*()-_=+?'
 
 # Matches the role labels the frontend writes into audit logs.
-ROLE_LABELS = {'admin': 'Admin', 'mayorsoffice': 'Mayor', 'barangay': 'Barangay', 'ngo': 'NGO', 'operator': 'Operator'}
+ROLE_LABELS = {'admin': 'Admin', 'mayorsoffice': 'City Admin', 'barangay': 'Barangay', 'ngo': 'NGO', 'operator': 'Operator'}
 
 # DeploymentSchedule.day is a local calendar date chosen in the browser (San Fernando, La Union,
 # Philippines); TIME_ZONE is UTC, so comparisons against it must be converted to local time first.
@@ -877,15 +877,15 @@ class RequestViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
     def mayor_approve(self, request, request_id=None):
         req = self.get_object()
         if req.status != 'pending_mayor_approval':
-            return Response({'error': 'Request is not pending mayor approval'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'error': 'Request is not pending City Admin approval'}, status=status.HTTP_400_BAD_REQUEST)
         req.status = 'pending_admin_approval'
         req.save()
         StatusHistory.objects.create(
             request=req,
-            label='Approved by Mayor',
+            label='Approved by City Admin',
             date=timezone.now(),
-            actor=request.user.name if hasattr(request, 'user') and hasattr(request.user, 'name') else 'Mayor',
-            role='Mayor',
+            actor=request.user.name if hasattr(request, 'user') and hasattr(request.user, 'name') else 'City Admin',
+            role='City Admin',
             state='current'
         )
         return Response({'status': req.status})

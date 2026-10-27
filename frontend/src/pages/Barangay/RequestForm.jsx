@@ -587,7 +587,7 @@ function RequestForm({ currentUser }) {
               </li>
               <li className="flex gap-3">
                 <span className="w-5 h-5 rounded-full bg-[#1b4de4] text-white text-xs font-bold flex items-center justify-center shrink-0">2</span>
-                <span className="text-slate-600">The Mayor's Office reviews and approves or declines your request</span>
+                <span className="text-slate-600">The City Admin reviews and approves or declines your request</span>
               </li>
               <li className="flex gap-3">
                 <span className="w-5 h-5 rounded-full bg-[#1b4de4] text-white text-xs font-bold flex items-center justify-center shrink-0">3</span>

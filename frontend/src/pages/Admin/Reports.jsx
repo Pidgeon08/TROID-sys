@@ -19,9 +19,7 @@ import jsPDF from 'jspdf';
 import * as XLSX from 'xlsx-js-style';
 import api from '../../services/api';
 import { logAudit } from '../../services/auditLog';
-import { TRASH_CATEGORIES, REQUEST_STATUS_STYLES } from '../../constants/requests';
-
-const toStatusLabel = (raw) => (raw || '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+import { TRASH_CATEGORIES, REQUEST_STATUS_STYLES, toStatusLabel } from '../../constants/requests';
 
 // Distinct color per trash category, so the waste-type donut segments are visually
 // distinguishable instead of every slice sharing one color.
@@ -451,7 +449,7 @@ const Reports = () => {
       Approved: [5, 150, 105], Verified: [100, 116, 139], Completed: [5, 150, 105],
       Segregated: [147, 51, 234], Declined: [220, 38, 38], Parked: [147, 51, 234],
       Processing: [2, 132, 199], 'Pending Verification': [234, 88, 12],
-      'Pending Mayor Approval': [217, 119, 6], 'Pending Admin Approval': [37, 99, 235],
+      'Pending City Admin Approval': [217, 119, 6], 'Pending Admin Approval': [37, 99, 235],
       Pending: [217, 119, 6],
     };
 

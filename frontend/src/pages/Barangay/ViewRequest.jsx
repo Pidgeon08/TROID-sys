@@ -20,7 +20,7 @@ import api from "../../services/api";
 import { logAudit } from "../../services/auditLog";
 import { Card } from "../../components/ui/Card";
 import NotificationBell from "../../components/NotificationBell";
-import { REQUEST_STATUS_STYLES, TRASH_CATEGORIES, mapRequest, getDeploymentStatus, formatTime12h } from "../../constants/requests";
+import { REQUEST_STATUS_STYLES, TRASH_CATEGORIES, mapRequest, getDeploymentStatus, formatTime12h, toStatusLabel } from "../../constants/requests";
 
 function emptyCategoryValues() {
   return TRASH_CATEGORIES.reduce((acc, cat) => ({ ...acc, [cat]: "" }), {});
@@ -120,7 +120,7 @@ export default function BarangayViewRequest() {
         trash_categories: trashCategoriesPayload,
         notes: trashNotes.trim(),
       });
-      const newStatus = (res.status || '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+      const newStatus = toStatusLabel(res.status);
       setRequest((prev) => ({
         ...prev,
         status: newStatus,

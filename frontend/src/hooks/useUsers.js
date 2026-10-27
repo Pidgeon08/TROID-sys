@@ -19,7 +19,7 @@ export function useUsers() {
           name: u.name,
           email: u.email,
           role: u.role
-            .replace('mayorsoffice', 'Mayor')
+            .replace('mayorsoffice', 'City Admin')
             .replace('spearhead', 'Spearhead')
             .replace('barangay', 'Barangay')
             .replace('ngo', 'NGO')

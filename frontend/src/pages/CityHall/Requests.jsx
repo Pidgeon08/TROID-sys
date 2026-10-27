@@ -24,7 +24,7 @@ const STATUS_STYLES = {
   Approved: "bg-emerald-50 text-emerald-700",
   Declined: "bg-red-50 text-red-700",
   Parked: "bg-purple-50 text-purple-700",
-  "Pending Mayor Approval": "bg-amber-50 text-amber-700",
+  "Pending City Admin Approval": "bg-amber-50 text-amber-700",
   "Pending Admin Approval": "bg-blue-50 text-blue-700",
   Processing: "bg-sky-50 text-sky-700",
   Completed: "bg-emerald-50 text-emerald-700",
@@ -38,7 +38,7 @@ const STATUS_DOT = {
   Approved: "bg-emerald-500",
   Declined: "bg-red-500",
   Parked: "bg-purple-500",
-  "Pending Mayor Approval": "bg-amber-500",
+  "Pending City Admin Approval": "bg-amber-500",
   "Pending Admin Approval": "bg-blue-500",
   Processing: "bg-sky-500",
   Completed: "bg-emerald-500",
@@ -115,7 +115,7 @@ export default function Requests() {
 
       <div className="mb-6 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
         <SummaryCard icon={FileText} label="Total Requests" value={requests.length} sub="All time" />
-        <SummaryCard icon={Clock} label="Pending Approval" value={requests.filter((r) => r.status === "Pending Mayor Approval").length} sub="Awaiting your decision" />
+        <SummaryCard icon={Clock} label="Pending Approval" value={requests.filter((r) => r.status === "Pending City Admin Approval").length} sub="Awaiting your decision" />
         <SummaryCard icon={CheckCircle2} label="Approved" value={requests.filter((r) => r.status === "Approved" || r.status === "Pending Admin Approval").length} sub="Sent to CENRO" />
         <SummaryCard icon={XCircle} label="Declined" value={requests.filter((r) => r.status === "Declined").length} sub="Declined requests" />
       </div>
@@ -169,7 +169,7 @@ export default function Requests() {
                   </td>
                    <td className="px-5 py-3.5">
                      <div className="flex items-center justify-end gap-2">
-                       {req.status === "Pending Mayor Approval" ? (
+                       {req.status === "Pending City Admin Approval" ? (
                          <button
                            onClick={() => navigate(`/mayorsoffice/requests/${req.id}`)}
                            className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-[#1b4de4] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#153eb8]"

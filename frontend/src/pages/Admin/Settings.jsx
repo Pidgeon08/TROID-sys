@@ -8,7 +8,7 @@ import { passwordRuleResults } from '../../utils/passwordRules';
 
 const ROLE_LABELS = {
   admin: "Admin",
-  mayorsoffice: "Mayor",
+  mayorsoffice: "City Admin",
   barangay: "Barangay",
   ngo: "NGO",
   viewer: "Viewer",

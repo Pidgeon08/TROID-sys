@@ -2,7 +2,7 @@ import api from './api';
 
 const ROLE_LABELS = {
   admin: 'Admin',
-  mayorsoffice: 'Mayor',
+  mayorsoffice: 'City Admin',
   barangay: 'Barangay',
   ngo: 'NGO',
 };

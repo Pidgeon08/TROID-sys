@@ -13,7 +13,7 @@ const BCOL_STATUS_STYLES = {
   Processing: "bg-blue-50 text-blue-700",
   Completed: "bg-emerald-50 text-emerald-700",
   Segregated: "bg-purple-50 text-purple-700",
-  "Pending Mayor Approval": "bg-amber-50 text-amber-700",
+  "Pending City Admin Approval": "bg-amber-50 text-amber-700",
   "Pending Admin Approval": "bg-blue-50 text-blue-700",
   "Pending Verification": "bg-orange-50 text-orange-700",
   Verified: "bg-slate-100 text-slate-600",
@@ -27,7 +27,7 @@ const BCOL_STATUS_DOT = {
   Processing: "bg-blue-500",
   Completed: "bg-emerald-500",
   Segregated: "bg-purple-500",
-  "Pending Mayor Approval": "bg-amber-500",
+  "Pending City Admin Approval": "bg-amber-500",
   "Pending Admin Approval": "bg-blue-500",
   "Pending Verification": "bg-orange-500",
   Verified: "bg-slate-400",
@@ -68,7 +68,7 @@ export default function BarangayRequests({ currentUser }) {
     if (activeTab === "All") return true;
     if (activeTab === "Deployed") return r.status === "Approved" && r.deploymentDate;
     if (activeTab === "Completed") return r.status === "Completed" || r.status === "Segregated";
-    if (activeTab === "Pending") return r.status === "Pending Mayor Approval" || r.status === "Pending";
+    if (activeTab === "Pending") return r.status === "Pending City Admin Approval" || r.status === "Pending";
     if (activeTab === "Approved") return r.status === "Approved" || r.status === "Pending Admin Approval";
     return r.status === activeTab;
   }).filter((r) => matchesRequestQuery(r, searchQuery) || (r.notes || '').toLowerCase().includes(searchQuery.toLowerCase()));
@@ -103,7 +103,7 @@ export default function BarangayRequests({ currentUser }) {
       {/* Stat cards */}
       <div className="mb-6 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
         <SummaryCard icon={FileText} label="Total Requests" value={requests.length} sub="All submitted" />
-        <SummaryCard icon={Clock} label="Pending" value={requests.filter((r) => r.status === "Pending Mayor Approval" || r.status === "Pending").length} sub="Awaiting approval" />
+        <SummaryCard icon={Clock} label="Pending" value={requests.filter((r) => r.status === "Pending City Admin Approval" || r.status === "Pending").length} sub="Awaiting approval" />
         <SummaryCard icon={CheckCircle2} label="Approved" value={requests.filter((r) => r.status === "Approved" || r.status === "Pending Admin Approval").length} sub="Ready for deployment" />
         <SummaryCard icon={Recycle} label="Completed" value={requests.filter((r) => r.status === "Completed" || r.status === "Segregated").length} sub="Including segregation" />
       </div>
@@ -139,7 +139,7 @@ export default function BarangayRequests({ currentUser }) {
             </thead>
              <tbody>
                 {filtered.map((req) => {
-                  const isPendingMayor = req.status === "Pending Mayor Approval";
+                  const isPendingMayor = req.status === "Pending City Admin Approval";
                   return (
                   <tr key={req.id} className="border-t border-slate-50 transition-colors hover:bg-slate-50/60">
                     <td className="px-5 py-3.5 font-semibold text-slate-800">{req.id}</td>
@@ -161,7 +161,7 @@ export default function BarangayRequests({ currentUser }) {
                         <button
                           onClick={() => navigate(`/barangay/requests/${req.id}`)}
                           className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-blue-600 hover:bg-blue-50"
-                          title={isPendingMayor ? "Awaiting Mayor approval" : "View request"}
+                          title={isPendingMayor ? "Awaiting City Admin approval" : "View request"}
                         >
                          <Eye size={13} />
                          View

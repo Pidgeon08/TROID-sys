@@ -10,7 +10,7 @@ import LoadingModal from '../components/LoadingModal';
 
 const ROLE_LABELS = {
   admin: 'Admin',
-  mayorsoffice: 'Mayor',
+  mayorsoffice: 'City Admin',
   barangay: 'Barangay',
   ngo: 'NGO',
 };

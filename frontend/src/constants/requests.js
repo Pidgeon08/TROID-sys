@@ -1,11 +1,11 @@
-export const TABS = ["All Requests", "Pending Mayor", "Pending Admin", "Approved", "Unscheduled", "Pending Verification", "Verified", "Parked"];
+export const TABS = ["All Requests", "Pending City Admin", "Pending Admin", "Approved", "Unscheduled", "Pending Verification", "Verified", "Parked"];
 
 export const REQUEST_STATUS_STYLES = {
   Pending: "bg-amber-50 text-amber-700",
   Approved: "bg-emerald-50 text-emerald-700",
   Declined: "bg-red-50 text-red-700",
   Parked: "bg-purple-50 text-purple-700",
-  "Pending Mayor Approval": "bg-amber-50 text-amber-700",
+  "Pending City Admin Approval": "bg-amber-50 text-amber-700",
   "Pending Admin Approval": "bg-blue-50 text-blue-700",
   Processing: "bg-sky-50 text-sky-700",
   Completed: "bg-emerald-50 text-emerald-700",
@@ -47,10 +47,19 @@ export function getDeploymentStatus(schedule) {
   return { label: 'Scheduled', cls: 'bg-blue-50 text-blue-700' };
 }
 
+// The Mayor's Office role is shown as "City Admin". Stored codes (pending_mayor_approval,
+// mayorsoffice) and older history entries still say "mayor", so they are reworded for display.
+export function cityAdminWording(text) {
+  return (text || '').replace(/\bMayor's Office\b/g, 'City Admin').replace(/\bMayor\b/g, 'City Admin');
+}
+
+// "pending_mayor_approval" -> "Pending City Admin Approval".
+export function toStatusLabel(raw) {
+  return cityAdminWording((raw || '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()));
+}
+
 export function mapRequest(raw) {
-  const status = raw.status
-    .replace(/_/g, ' ')
-    .replace(/\b\w/g, (c) => c.toUpperCase());
+  const status = toStatusLabel(raw.status);
   
   return {
     id: raw.request_id,
@@ -86,12 +95,12 @@ export function mapRequest(raw) {
       image_data: p.image_data || '',
     })),
     statusHistory: (raw.status_history || []).map((sh) => ({
-      label: sh.label || '',
+      label: cityAdminWording(sh.label),
       date: sh.date
         ? new Date(sh.date).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })
         : sh.date,
-      actor: sh.actor || '',
-      role: sh.role || '',
+      actor: cityAdminWording(sh.actor),
+      role: cityAdminWording(sh.role),
       state: sh.state || 'done',
       details: sh.details || '',
     })),

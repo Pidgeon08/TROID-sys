@@ -117,7 +117,7 @@ const Dashboard = ({ currentUser }) => {
         });
 
         const totalRequests = barangayRequests.length;
-        const pendingRequests = barangayRequests.filter((r) => r.status === "Pending" || r.status === "Pending Mayor Approval" || r.status === "Pending Admin Approval").length;
+        const pendingRequests = barangayRequests.filter((r) => r.status === "Pending" || r.status === "Pending City Admin Approval" || r.status === "Pending Admin Approval").length;
         const approvedRequests = barangayRequests.filter((r) => r.status === "Approved").length;
         const completedCleanups = barangayRequests.filter((r) => r.status === "Completed" || r.status === "Segregated").length;
         const activeBots = boatsRes.filter(b => b.is_active).length;

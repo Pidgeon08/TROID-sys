@@ -57,7 +57,7 @@ export default function UserManual() {
           <p className="text-xs text-slate-500">
             {search.trim()
               ? `${filtered.length} matching topic${filtered.length === 1 ? '' : 's'}`
-              : `How to use every feature available to your ${currentUser?.role === 'mayorsoffice' ? "Mayor's Office" : currentUser?.role || ''} account.`}
+              : `How to use every feature available to your ${currentUser?.role === 'mayorsoffice' ? "City Admin" : currentUser?.role || ''} account.`}
           </p>
         </div>
       </div>

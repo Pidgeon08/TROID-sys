@@ -24,11 +24,7 @@ import api from "../../services/api";
 import { logAudit } from "../../services/auditLog";
 import { Card } from "../../components/ui/Card";
 import NotificationBell from "../../components/NotificationBell";
-import { REQUEST_STATUS_STYLES, TRASH_CATEGORIES, mapRequest, getDeploymentStatus, formatTime12h } from "../../constants/requests";
-
-function toStatusLabel(rawStatus) {
-  return (rawStatus || '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-}
+import { REQUEST_STATUS_STYLES, TRASH_CATEGORIES, mapRequest, getDeploymentStatus, formatTime12h, toStatusLabel } from "../../constants/requests";
 
 function emptyCategoryValues() {
   return TRASH_CATEGORIES.reduce((acc, cat) => ({ ...acc, [cat]: "" }), {});
@@ -191,7 +187,7 @@ export default function ViewRequest({ id: propId, onClose }) {
         });
       } else {
         const res = await api.unparkRequest(request.id);
-        const restoredStatus = (res.status || '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+        const restoredStatus = toStatusLabel(res.status);
         setRequest(prev => ({ ...prev, status: restoredStatus, declineReason: '' }));
         logAudit({
           currentUser,

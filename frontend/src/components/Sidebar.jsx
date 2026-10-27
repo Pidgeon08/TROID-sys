@@ -49,7 +49,7 @@ const navItems = {
 
   const roleLabel = {
     admin: 'CENRO',
-    mayorsoffice: 'Mayor\'s Office',
+    mayorsoffice: 'City Admin',
     barangay: 'Barangay',
     ngo: 'NGO',
   };
