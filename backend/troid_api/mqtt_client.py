@@ -2,10 +2,13 @@ import json
 import threading
 import time
 import uuid
+from zoneinfo import ZoneInfo
 import paho.mqtt.client as mqtt
 from django.utils import timezone
-from .models import Boat, DetectionEvent
+from .models import Boat, DeploymentSchedule, DetectionEvent, Request
 from .realtime import broadcast
+
+APP_TIMEZONE = ZoneInfo('Asia/Manila')   # same as views.py
 
 # ==================== CONFIGURATION ====================
 MQTT_BROKER = "broker.emqx.io"
@@ -82,10 +85,27 @@ def _handle_detection(bot_id, payload):
             print(f"[MQTT] Skipping unverified detection for Boat {bot_id}")
             return
 
+        lat, lng = payload.get('latitude'), payload.get('longitude')
+        if lat is None or lng is None:
+            print(f"[MQTT] Skipping detection without a location for Boat {bot_id}")
+            return
+
+        # Same as the log_detection view: keep the boat's last position and link
+        # the detection to today's deployment request (the barangay heatmap filters on it).
+        boat.last_latitude = lat
+        boat.last_longitude = lng
+        boat.save()
+        linked_request = None
+        today = timezone.now().astimezone(APP_TIMEZONE).strftime('%Y-%m-%d')
+        schedule = DeploymentSchedule.objects.filter(bot=boat, day=today).order_by('-id').first()
+        if schedule and schedule.request_id:
+            linked_request = Request.objects.filter(request_id=schedule.request_id).first()
+
         detection = DetectionEvent.objects.create(
             boat=boat,
-            latitude=payload.get('latitude', 0.0),
-            longitude=payload.get('longitude', 0.0),
+            request=linked_request,
+            latitude=lat,
+            longitude=lng,
             trash_count=payload.get('trash_count', 1),
             categories=payload.get('categories', {}),
             confidence=confidence,
