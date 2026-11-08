@@ -17,7 +17,8 @@ import {
   Layers,
 } from "lucide-react";
 import api from "../../services/api";
-import { formatTime12h } from "../../constants/requests";
+import { formatFileSize, formatTime12h } from "../../constants/requests";
+import LetterDropzone from "../../components/LetterDropzone";
 
 const REQUEST_TYPE = "Cleanup";
 
@@ -209,7 +210,6 @@ function RequestForm({ currentUser }) {
     collectionAreaId: "",
     date: "",
     time: "",
-    notes: "",
   });
   const [collectionAreas, setCollectionAreas] = useState([]);
   const [collectionAreasLoading, setCollectionAreasLoading] = useState(true);
@@ -217,7 +217,7 @@ function RequestForm({ currentUser }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showOverview, setShowOverview] = useState(false);
   const [viewPhoto, setViewPhoto] = useState(false);
-  const [showFullLetter, setShowFullLetter] = useState(false);
+  const [letterFile, setLetterFile] = useState(null);
   const [selectedPhotoIndex, setSelectedPhotoIndex] = useState(0);
   const [showTimeTable, setShowTimeTable] = useState(false);
   const [bots, setBots] = useState([]);
@@ -231,7 +231,6 @@ function RequestForm({ currentUser }) {
   const BOTS_PER_PAGE = 6;
   const totalBotPages = Math.max(1, Math.ceil(bots.length / BOTS_PER_PAGE));
   const pagedBots = bots.slice(ttBotPage * BOTS_PER_PAGE, (ttBotPage + 1) * BOTS_PER_PAGE);
-  const LETTER_TRUNCATE_LENGTH = 200;
   const minSelectableDate = new Date();
   minSelectableDate.setHours(0, 0, 0, 0);
   minSelectableDate.setDate(minSelectableDate.getDate() + 7);
@@ -335,6 +334,10 @@ function RequestForm({ currentUser }) {
       alert("Please fill in all required fields.");
       return;
     }
+    if (!letterFile) {
+      alert("Please attach the letter of request (PDF or Word).");
+      return;
+    }
     setShowOverview(true);
   };
 
@@ -363,7 +366,7 @@ function RequestForm({ currentUser }) {
         province: "",
         preferred_date: formData.date,
         preferred_time: formData.time,
-        notes: formData.notes,
+        letter: { name: letterFile.name, data: letterFile.data },
         photos: photosPayload,
       };
       await api.createRequest(payload);
@@ -515,15 +518,8 @@ function RequestForm({ currentUser }) {
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-500 mb-1.5">Letter Contents</label>
-              <textarea
-                name="notes"
-                value={formData.notes}
-                onChange={handleChange}
-                placeholder="Enter the letter content for the request..."
-                rows={4}
-                className="w-full rounded-lg border border-slate-200 bg-white py-2.5 px-3 text-sm text-slate-700 placeholder:text-slate-400 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30 resize-none"
-              />
+              <p className="block text-xs font-semibold text-slate-500 mb-1.5">Letter of Request</p>
+              <LetterDropzone value={letterFile} onChange={setLetterFile} />
             </div>
 
             <div>
@@ -694,26 +690,8 @@ function RequestForm({ currentUser }) {
                 )}
               </div>
               <div className="py-2 text-sm">
-                <span className="text-slate-500 block mb-1">Letter Contents</span>
-                {formData.notes ? (
-                  <>
-                    <p className="text-slate-800 bg-slate-50 rounded-lg p-3 text-xs leading-relaxed">
-                      {!showFullLetter && formData.notes.length > LETTER_TRUNCATE_LENGTH
-                        ? `${formData.notes.slice(0, LETTER_TRUNCATE_LENGTH)}...`
-                        : formData.notes}
-                    </p>
-                    {formData.notes.length > LETTER_TRUNCATE_LENGTH && (
-                      <button
-                        onClick={() => setShowFullLetter(!showFullLetter)}
-                        className="mt-1.5 text-xs font-medium text-blue-600 hover:text-blue-700"
-                      >
-                        {showFullLetter ? 'View less' : `View more (${formData.notes.length - LETTER_TRUNCATE_LENGTH} characters remaining)`}
-                      </button>
-                    )}
-                  </>
-                ) : (
-                  <p className="text-slate-400 text-xs">—</p>
-                )}
+                <span className="text-slate-500 block mb-1">Letter of Request</span>
+                <p className="text-slate-800 text-xs">{letterFile?.name} ({formatFileSize(letterFile?.size || 0)})</p>
               </div>
             </div>
 

@@ -55,6 +55,15 @@ export default {
 
     return new Response("Not found", { status: 404 });
   },
+
+  // Cron (wrangler.toml): regular pings stop Render's free instance going to sleep.
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(
+      fetch(`${env.BACKEND_URL}/api/health/`, { signal: AbortSignal.timeout(30000) }).catch((err) =>
+        console.error("Keep-awake ping failed:", err)
+      )
+    );
+  },
 };
 
 /**

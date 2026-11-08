@@ -10,6 +10,13 @@ class_name = "Broadcaster"
 tag = "v1"
 new_sqlite_classes = ["Broadcaster"]
 
+# Pings the backend so Render's free instance doesn't go to sleep (scheduled() in src/index.js).
+[triggers]
+crons = ["*/10 * * * *"]
+
+[vars]
+BACKEND_URL = "https://troid-sys-22ps.onrender.com"
+
 # SHARED_SECRET must match REALTIME_WORKER_SECRET in backend/.env.
 # Local dev: put it in .dev.vars (gitignored).
 # Production: `wrangler secret put SHARED_SECRET`.

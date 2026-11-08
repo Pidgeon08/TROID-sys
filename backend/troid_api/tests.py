@@ -1,3 +1,4 @@
+import base64
 import importlib.util
 import json
 import os
@@ -15,7 +16,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from . import bot_auth, mqtt_client
-from .models import AuditLog, Boat, CollectionArea, DetectionEvent, Notification, Operator, Request, User
+from .models import AuditLog, Boat, CollectionArea, DetectionEvent, LetterFile, Notification, Operator, Request, User
 
 
 def make_user(role, status='active', token=None):
@@ -122,6 +123,102 @@ class SessionAuthenticationTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn('account archived', logs.output[0])
+
+
+@override_settings(API_AUTH_ENFORCED=True)
+class LetterUploadTests(TestCase):
+    PDF = base64.b64encode(b'%PDF-1.7 a letter').decode()
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user = make_user('barangay')
+
+    def create(self, letter=None):
+        data = {'request_type': 'Cleanup', 'request_id': 'REQ-TEST'}
+        if letter:
+            data['letter'] = letter
+        return self.client.post('/api/requests/', data, format='json', **session_header(self.user))
+
+    def test_a_pdf_is_stored_and_can_be_read_back(self):
+        response = self.create({'name': 'letter.PDF', 'data': f'data:application/pdf;base64,{self.PDF}'})
+
+        self.assertEqual(response.status_code, 201)
+        body = response.json()
+        self.assertEqual(body['letter_file_name'], 'letter.pdf')
+        self.assertEqual(body['letter_content_type'], 'application/pdf')
+        self.assertEqual(body['letter_size'], '1 KB')
+        self.assertNotIn('letter', body)
+
+        letter = self.client.get('/api/requests/REQ-TEST/letter/', **session_header(self.user))
+        self.assertEqual(letter.status_code, 200)
+        self.assertEqual(letter.json(), {'file_name': 'letter.pdf', 'content_type': 'application/pdf', 'data': self.PDF})
+
+    def test_word_files_are_accepted(self):
+        for name, content, content_type in (
+            ('letter.docx', b'PK\x03\x04word', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'),
+            ('letter.doc', b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1word', 'application/msword'),
+        ):
+            with self.subTest(name=name):
+                Request.objects.all().delete()
+                response = self.create({'name': name, 'data': base64.b64encode(content).decode()})
+
+                self.assertEqual(response.status_code, 201)
+                self.assertEqual(response.json()['letter_content_type'], content_type)
+
+    def test_a_letter_is_required(self):
+        response = self.create()
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(Request.objects.exists())
+
+    def test_bad_files_are_rejected_and_nothing_is_saved(self):
+        too_big = base64.b64encode(b'%PDF-' + b'x' * (5 * 1024 * 1024)).decode()
+        for letter in (
+            {'name': 'letter.txt', 'data': self.PDF},
+            {'name': 'letter.exe', 'data': self.PDF},
+            {'name': 'fake.pdf', 'data': base64.b64encode(b'not a pdf').decode()},
+            {'name': 'fake.docx', 'data': self.PDF},
+            {'name': 'letter.pdf', 'data': 'not base64!'},
+            {'name': 'big.pdf', 'data': too_big},
+            {'name': 'letter.pdf'},
+        ):
+            with self.subTest(name=letter['name']):
+                self.assertEqual(self.create(letter).status_code, 400)
+                self.assertFalse(Request.objects.exists())
+                self.assertFalse(LetterFile.objects.exists())
+
+    def test_clients_cannot_claim_a_letter_they_did_not_upload(self):
+        data = {
+            'request_id': 'REQ-TEST',
+            'letter_file_name': 'claimed.docx',
+            'letter_size': '9 MB',
+            'letter_content_type': 'application/msword',
+            'letter': {'name': 'real.pdf', 'data': self.PDF},
+        }
+
+        response = self.client.post('/api/requests/', data, format='json', **session_header(self.user))
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()['letter_file_name'], 'real.pdf')
+        self.assertEqual(response.json()['letter_size'], '1 KB')
+        self.assertEqual(response.json()['letter_content_type'], 'application/pdf')
+
+    def test_listing_requests_does_not_include_the_file(self):
+        self.create({'name': 'letter.pdf', 'data': self.PDF})
+
+        listing = self.client.get('/api/requests/', **session_header(self.user))
+
+        self.assertNotIn(self.PDF, listing.content.decode())
+
+
+class HealthCheckTests(TestCase):
+    @override_settings(API_AUTH_ENFORCED=True)
+    def test_answers_without_a_session_or_the_database(self):
+        with self.assertNumQueries(0):
+            response = APIClient().get('/api/health/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {'status': 'ok'})
 
 
 @override_settings(API_AUTH_ENFORCED=True)
@@ -273,6 +370,7 @@ class EndpointRoleTests(TestCase):
         self.assert_roles('post', f'/api/requests/{rid}/unpark/', ('admin', 'mayorsoffice'))
         self.assert_roles('post', f'/api/requests/{rid}/reschedule/', ('admin',), {})
         self.assert_roles('post', f'/api/requests/{rid}/submit_trash_report/', REQUESTER_ROLES, {})
+        self.assert_roles('get', f'/api/requests/{rid}/letter/', STAFF_ROLES)
         self.assert_roles('get', f'/api/requests/{rid}/bot_detections/', ('admin',))
         self.assert_roles('post', f'/api/requests/{rid}/submit_verification/', ('admin',), {})
         self.assert_roles('get', '/api/requests/post-cleanup-comparison/', ('admin',))

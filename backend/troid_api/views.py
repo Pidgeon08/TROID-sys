@@ -28,13 +28,13 @@ except ImportError:
 from .models import (
     Boat, DetectionEvent, User, Operator, Request, DeploymentSchedule, PriorityArea,
     LandfillRecord, RecyclingRecord, SegregationRecord,
-    AuditLog, HeatmapData, Photo, StatusHistory, CollectionArea, Notification
+    AuditLog, HeatmapData, Photo, StatusHistory, CollectionArea, Notification, LetterFile
 )
 from .serializers import (
     BoatSerializer, UserSerializer, OperatorSerializer, RequestSerializer,
     DeploymentScheduleSerializer, LandfillRecordSerializer, RecyclingRecordSerializer,
     SegregationRecordSerializer, AuditLogSerializer, HeatmapDataSerializer, LoginSerializer,
-    CollectionAreaSerializer, NotificationSerializer, PriorityAreaSerializer, TrashReportSerializer
+    CollectionAreaSerializer, NotificationSerializer, PriorityAreaSerializer, TrashReportSerializer, LetterUploadSerializer
 )
 from .authentication import INACTIVE_STATUSES, CompanionTokenAuthentication, is_app_operator
 from .permissions import ADMIN, ANY_ROLE, MAYOR, PUBLIC, REQUESTERS, STAFF, HasRole, RoleViewSetMixin, require
@@ -145,6 +145,15 @@ def notify_request_update(req, notif_type, title, message):
             )
         except Exception as exc:
             print(f'[email] Failed to send {notif_type} notification to {req.email}: {exc}')
+
+
+@api_view(['GET'])
+@authentication_classes([])
+@permission_classes([AllowAny])
+def health(request):
+    """Is the web process answering? Skips the database on purpose, so Render's
+    health check doesn't restart the server over a database problem."""
+    return Response({"status": "ok"})
 
 
 @api_view(['POST'])
@@ -858,9 +867,19 @@ class RequestViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
 
     def create(self, request, *args, **kwargs):
         photos_data = request.data.get('photos', [])
+        if not request.data.get('letter'):
+            return Response({'error': 'A letter of request (PDF or Word) is required.'}, status=status.HTTP_400_BAD_REQUEST)
+        letter_serializer = LetterUploadSerializer(data=request.data['letter'])
+        letter_serializer.is_valid(raise_exception=True)
+        letter = letter_serializer.validated_data
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        request_obj = serializer.save()
+        request_obj = serializer.save(
+            letter_file_name=letter['file_name'],
+            letter_size=letter['size'],
+            letter_content_type=letter['content_type'],
+        )
+        LetterFile.objects.create(request=request_obj, data=letter['data'])
         if isinstance(photos_data, list):
             for idx, photo in enumerate(photos_data):
                 Photo.objects.create(
@@ -871,6 +890,18 @@ class RequestViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
                     image_data=photo.get('image_data') or '',
                 )
         return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['get'])
+    def letter(self, request, request_id=None):
+        req = self.get_object()
+        letter_file = LetterFile.objects.filter(request=req).first()
+        if not letter_file:
+            return Response({'error': 'This request has no letter file'}, status=status.HTTP_404_NOT_FOUND)
+        return Response({
+            'file_name': req.letter_file_name,
+            'content_type': req.letter_content_type,
+            'data': letter_file.data,
+        })
 
     @action(detail=True, methods=['post'])
     def mayor_approve(self, request, request_id=None):

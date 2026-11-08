@@ -29,6 +29,11 @@ export function matchesRequestQuery(req, query) {
   );
 }
 
+export function formatFileSize(bytes) {
+  const megabytes = bytes / (1024 * 1024);
+  return megabytes >= 1 ? `${megabytes.toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
 export function formatTime12h(time) {
   if (!time) return time;
   const [hourStr, minuteStr = "00"] = time.split(":");
@@ -86,7 +91,7 @@ export function mapRequest(raw) {
     notes: raw.notes || '',
     declineReason: raw.decline_reason || '',
     letter: raw.letter_file_name
-      ? { fileName: raw.letter_file_name, size: raw.letter_size }
+      ? { fileName: raw.letter_file_name, size: raw.letter_size, contentType: raw.letter_content_type || '' }
       : null,
     photos: (raw.photos || []).map((p) => ({
       id: p.photo_id || p.id,

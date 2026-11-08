@@ -1,5 +1,50 @@
+import base64
+import binascii
+import os
+
 from rest_framework import serializers
 from .models import Boat, DetectionEvent, User, Operator, Request, StatusHistory, Photo, DeploymentSchedule, PriorityArea, LandfillRecord, RecyclingRecord, SegregationRecord, AuditLog, HeatmapData, CollectionArea, Notification
+
+LETTER_MAX_BYTES = 5 * 1024 * 1024
+# Extension -> (content type, the bytes a real file of that type starts with).
+LETTER_TYPES = {
+    '.pdf': ('application/pdf', b'%PDF-'),
+    '.doc': ('application/msword', b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1'),
+    '.docx': ('application/vnd.openxmlformats-officedocument.wordprocessingml.document', b'PK\x03\x04'),
+}
+
+class LetterUploadSerializer(serializers.Serializer):
+    """A request's letter: a PDF or Word file sent as base64 (a data URL is fine)."""
+    name = serializers.CharField(max_length=255)
+    data = serializers.CharField(max_length=LETTER_MAX_BYTES * 2)
+
+    def validate(self, attrs):
+        name = attrs['name'].replace('\\', '/').rsplit('/', 1)[-1]
+        stem, extension = os.path.splitext(name)
+        extension = extension.lower()
+        if extension not in LETTER_TYPES:
+            raise serializers.ValidationError('Only PDF or Word files can be attached.')
+        content_type, signature = LETTER_TYPES[extension]
+
+        encoded = attrs['data']
+        if encoded.startswith('data:'):
+            encoded = encoded.split(',', 1)[-1]
+        try:
+            content = base64.b64decode(encoded, validate=True)
+        except (binascii.Error, ValueError):
+            raise serializers.ValidationError('The file could not be read.')
+        if len(content) > LETTER_MAX_BYTES:
+            raise serializers.ValidationError('The file is too large. The limit is 5 MB.')
+        if not content.startswith(signature):
+            raise serializers.ValidationError('The file is not a valid PDF or Word document.')
+
+        megabytes = len(content) / (1024 * 1024)
+        return {
+            'file_name': f'{stem[:100 - len(extension)]}{extension}',
+            'size': f'{megabytes:.1f} MB' if megabytes >= 1 else f'{max(1, round(len(content) / 1024))} KB',
+            'content_type': content_type,
+            'data': encoded,
+        }
 
 class TrashReportSerializer(serializers.Serializer):
     """The collected-garbage figures required to finish a cleanup. 0 is a valid answer."""
@@ -97,9 +142,12 @@ class RequestSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Request
-        fields = ['id', 'request_id', 'request_type', 'status', 'date_submitted', 'requested_by_name', 'requested_by_role', 'requested_by_barangay', 'contact', 'email', 'location_name', 'barangay', 'municipality', 'province', 'preferred_date', 'preferred_time', 'notes', 'decline_reason', 'parked_from_status', 'letter_file_name', 'letter_size', 'bot_id', 'operator', 'collection_area', 'collection_area_detail', 'bags', 'weight_kg', 'non_usable_kg', 'recyclable_kg', 'session_completed_at', 'trash_categories', 'verified_categories', 'verification_notes', 'verified_at', 'archived', 'status_history', 'photos']
+        fields = ['id', 'request_id', 'request_type', 'status', 'date_submitted', 'requested_by_name', 'requested_by_role', 'requested_by_barangay', 'contact', 'email', 'location_name', 'barangay', 'municipality', 'province', 'preferred_date', 'preferred_time', 'notes', 'decline_reason', 'parked_from_status', 'letter_file_name', 'letter_size', 'letter_content_type', 'bot_id', 'operator', 'collection_area', 'collection_area_detail', 'bags', 'weight_kg', 'non_usable_kg', 'recyclable_kg', 'session_completed_at', 'trash_categories', 'verified_categories', 'verification_notes', 'verified_at', 'archived', 'status_history', 'photos']
         extra_kwargs = {
             'request_id': {'required': False, 'allow_blank': True},
+            'letter_file_name': {'read_only': True},
+            'letter_size': {'read_only': True},
+            'letter_content_type': {'read_only': True},
             'decline_reason': {'required': False, 'allow_blank': True},
             'email': {'required': False, 'allow_blank': True},
             'requested_by_name': {'required': False, 'allow_blank': True},

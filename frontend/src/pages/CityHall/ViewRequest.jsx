@@ -4,10 +4,8 @@ import { createPortal } from "react-dom";
 import {
   ChevronLeft,
   FileText,
-  Download,
   User,
   MapPin,
-  Eye,
   X,
   ChevronLeftIcon,
   ChevronRightIcon,
@@ -15,6 +13,7 @@ import {
   RotateCcw,
 } from "lucide-react";
 import api from "../../services/api";
+import LetterAttachment from "../../components/LetterAttachment";
 import { Card } from "../../components/ui/Card";
 import NotificationBell from "../../components/NotificationBell";
 import { REQUEST_STATUS_STYLES, mapRequest, getDeploymentStatus, formatTime12h, toStatusLabel } from "../../constants/requests";
@@ -187,63 +186,45 @@ export default function CityHallViewRequest() {
                 </div>
 
                 <Card title="Letter of Request" className="lg:sticky lg:top-5">
-                  <div className="flex items-center justify-between rounded-lg border border-slate-100 bg-slate-50 px-3 py-2.5 mb-4">
-                    <div className="flex items-center gap-2.5">
-                      <FileText size={18} className="text-blue-600" />
-                      <div className="text-sm">
-                        <p className="font-medium text-slate-800 leading-tight">{request.letter?.fileName || 'Letter of Request'}</p>
-                        <p className="text-slate-400 text-xs">PDF • {request.letter?.size || '—'}</p>
+                  <LetterAttachment request={request}>
+                    <div className="rounded-lg border border-slate-100 bg-slate-100 p-6 min-h-[560px] flex flex-col">
+                      <div className="bg-white rounded shadow-sm p-8 flex-1 text-sm text-slate-700 leading-relaxed break-words">
+                        <div className="flex items-start gap-3 mb-4">
+                          <div className="w-12 h-12 rounded-full border-2 border-blue-800 flex items-center justify-center text-[9px] text-center text-blue-800 font-semibold leading-tight shrink-0">
+                            SEAL
+                          </div>
+                          <div className="text-xs text-slate-500 leading-snug">
+                            Republic of the Philippines
+                            <br />
+                            Province of La Union
+                            <br />
+                            City of San Fernando
+                            <br />
+                            <span className="font-bold text-slate-800 text-sm">{request.location?.barangay?.toUpperCase()}</span>
+                          </div>
+                        </div>
+                        <p className="text-right text-xs text-slate-500 mb-4">{request.dateSubmitted}</p>
+                        <p className="mb-3 text-xs text-slate-600">
+                          The Community Environment and
+                          <br />
+                          Natural Resources Office (CENRO)
+                          <br />
+                          San Fernando, La Union
+                        </p>
+                        <p className="font-semibold text-slate-800 mb-3 text-xs">Subject: Request for Assistance – {request.type}</p>
+                        <p className="mb-3 text-xs">Dear Sir/Madam,</p>
+                        <p className="mb-3 text-xs">{request.notes}</p>
+                        <p className="mb-6 text-xs">Thank you very much for your immediate attention and support.</p>
+                        <p className="text-xs">Respectfully yours,</p>
+                        <p className="font-semibold text-slate-800 mt-6 text-xs">{request.requestedBy?.name}</p>
+                        <p className="text-xs text-slate-500">
+                          {request.requestedBy?.role}
+                          <br />
+                          {request.requestedBy?.barangay}
+                        </p>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <button className="flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50">
-                        <Eye size={13} />
-                        Preview
-                      </button>
-                      <button className="flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50">
-                        <Download size={13} />
-                        Download
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="rounded-lg border border-slate-100 bg-slate-100 p-6 min-h-[560px] flex flex-col">
-                    <div className="bg-white rounded shadow-sm p-8 flex-1 text-sm text-slate-700 leading-relaxed break-words">
-                      <div className="flex items-start gap-3 mb-4">
-                        <div className="w-12 h-12 rounded-full border-2 border-blue-800 flex items-center justify-center text-[9px] text-center text-blue-800 font-semibold leading-tight shrink-0">
-                          SEAL
-                        </div>
-                        <div className="text-xs text-slate-500 leading-snug">
-                          Republic of the Philippines
-                          <br />
-                          Province of La Union
-                          <br />
-                          City of San Fernando
-                          <br />
-                          <span className="font-bold text-slate-800 text-sm">{request.location?.barangay?.toUpperCase()}</span>
-                        </div>
-                      </div>
-                      <p className="text-right text-xs text-slate-500 mb-4">{request.dateSubmitted}</p>
-                      <p className="mb-3 text-xs text-slate-600">
-                        The Community Environment and
-                        <br />
-                        Natural Resources Office (CENRO)
-                        <br />
-                        San Fernando, La Union
-                      </p>
-                      <p className="font-semibold text-slate-800 mb-3 text-xs">Subject: Request for Assistance – {request.type}</p>
-                      <p className="mb-3 text-xs">Dear Sir/Madam,</p>
-                      <p className="mb-3 text-xs">{request.notes}</p>
-                      <p className="mb-6 text-xs">Thank you very much for your immediate attention and support.</p>
-                      <p className="text-xs">Respectfully yours,</p>
-                      <p className="font-semibold text-slate-800 mt-6 text-xs">{request.requestedBy?.name}</p>
-                      <p className="text-xs text-slate-500">
-                        {request.requestedBy?.role}
-                        <br />
-                        {request.requestedBy?.barangay}
-                      </p>
-                    </div>
-                  </div>
+                  </LetterAttachment>
                 </Card>
 
                 <div className="flex flex-col gap-5">

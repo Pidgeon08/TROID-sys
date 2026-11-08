@@ -202,6 +202,7 @@ class Request(models.Model):
     parked_from_status = models.CharField(max_length=30, blank=True, default="")
     letter_file_name = models.CharField(max_length=100, blank=True)
     letter_size = models.CharField(max_length=20, blank=True)
+    letter_content_type = models.CharField(max_length=100, blank=True, default="")
     bot_id = models.ForeignKey(Boat, on_delete=models.SET_NULL, null=True, blank=True, related_name='requests', db_column='bot_id')
     operator = models.ForeignKey(Operator, on_delete=models.SET_NULL, null=True, blank=True, related_name='requests')
     collection_area = models.ForeignKey('CollectionArea', on_delete=models.SET_NULL, null=True, blank=True, related_name='requests')
@@ -224,6 +225,14 @@ class Request(models.Model):
 
     def __str__(self):
         return self.request_id
+
+class LetterFile(models.Model):
+    """The uploaded letter, in its own table so listing requests doesn't load it."""
+    request = models.OneToOneField(Request, on_delete=models.CASCADE, related_name='letter_file')
+    data = models.TextField()  # base64
+
+    def __str__(self):
+        return f"Letter for {self.request.request_id}"
 
 class StatusHistory(models.Model):
     request = models.ForeignKey(Request, on_delete=models.CASCADE, related_name='status_history')

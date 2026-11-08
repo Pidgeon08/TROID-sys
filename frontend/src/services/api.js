@@ -101,6 +101,7 @@ export const api = {
   unparkRequest: (id) => api.post(`/requests/${id}/unpark/`),
   rescheduleRequest: (id, data) => api.post(`/requests/${id}/reschedule/`, data),
   submitTrashReport: (id, data) => api.post(`/requests/${id}/submit_trash_report/`, data),
+  requestLetter: (id) => api.get(`/requests/${id}/letter/`),
   botDetections: (id) => api.get(`/requests/${id}/bot_detections/`),
   submitVerification: (id, data) => api.post(`/requests/${id}/submit_verification/`, data),
   postCleanupComparison: () => api.get('/requests/post-cleanup-comparison/'),
