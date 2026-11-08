@@ -47,7 +47,6 @@ export default function BarangayViewRequest() {
   const [showPhotoViewer, setShowPhotoViewer] = useState(false);
   const [schedule, setSchedule] = useState(null);
   const [reasonStep, setReasonStep] = useState(null);
-  const [markingCompleted, setMarkingCompleted] = useState(false);
   const [showTrashReport, setShowTrashReport] = useState(false);
   const [trashCategoryValues, setTrashCategoryValues] = useState(emptyCategoryValues);
   const [trashBags, setTrashBags] = useState("");
@@ -76,25 +75,6 @@ export default function BarangayViewRequest() {
     fetchRequest();
     return () => { cancelled = true; };
   }, [id]);
-
-  const handleMarkSessionCompleted = async () => {
-    setMarkingCompleted(true);
-    try {
-      await api.markSessionCompleted(request.id);
-      setRequest((prev) => ({ ...prev, status: "Processing" }));
-      logAudit({
-        currentUser,
-        action: "Session marked completed",
-        module: "Requests",
-        details: `${request.id} (${request.location?.barangay || "unknown zone"}) marked as session completed`,
-      });
-    } catch (err) {
-      console.error("Failed to mark session completed:", err);
-      alert("Failed to mark session completed. Please try again.");
-    } finally {
-      setMarkingCompleted(false);
-    }
-  };
 
   const openTrashReport = () => {
     setTrashCategoryValues(emptyCategoryValues());
@@ -179,12 +159,11 @@ export default function BarangayViewRequest() {
           </button>
           {request.status === "Approved" && (
             <button
-              onClick={handleMarkSessionCompleted}
-              disabled={markingCompleted}
-              className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-white px-3.5 py-2 text-sm font-medium text-emerald-600 hover:bg-emerald-50 disabled:opacity-50"
+              onClick={openTrashReport}
+              className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-white px-3.5 py-2 text-sm font-medium text-emerald-600 hover:bg-emerald-50"
             >
               <ClipboardCheck size={15} />
-              {markingCompleted ? "Marking..." : "Mark as Finished"}
+              Mark as Finished
             </button>
           )}
         </div>
@@ -495,6 +474,9 @@ export default function BarangayViewRequest() {
                   ? "This cleanup is TROID-supported — the counts you enter here stand in as TROID's detected output until CENRO reviews and verifies them."
                   : "This cleanup is unsupported by TROID — record what was actually collected manually."}
               </p>
+              <p className="text-xs font-medium text-slate-700 mt-2">
+                All fields except notes are required to finish this cleanup. Enter 0 for anything not collected.
+              </p>
             </div>
             <div className="px-6 pt-4 space-y-4 overflow-y-auto">
               <div>
@@ -535,6 +517,7 @@ export default function BarangayViewRequest() {
                   <input
                     type="number"
                     min="0"
+                    step="0.1"
                     required
                     value={trashWeightKg}
                     onChange={(e) => setTrashWeightKg(stripLeadingZero(e.target.value))}
@@ -546,6 +529,7 @@ export default function BarangayViewRequest() {
                   <input
                     type="number"
                     min="0"
+                    step="0.1"
                     required
                     value={trashNonUsableKg}
                     onChange={(e) => setTrashNonUsableKg(stripLeadingZero(e.target.value))}
@@ -557,6 +541,7 @@ export default function BarangayViewRequest() {
                   <input
                     type="number"
                     min="0"
+                    step="0.1"
                     required
                     value={trashRecyclableKg}
                     onChange={(e) => setTrashRecyclableKg(stripLeadingZero(e.target.value))}

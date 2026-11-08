@@ -124,6 +124,99 @@ class SessionAuthenticationTests(TestCase):
         self.assertIn('account archived', logs.output[0])
 
 
+@override_settings(API_AUTH_ENFORCED=True)
+class TrashReportTests(TestCase):
+    """Barangay and CENRO can't finish a cleanup without the collected-garbage figures."""
+
+    REPORT = {
+        'bags': 4,
+        'weight_kg': 12.5,
+        'non_usable_kg': 5.5,
+        'recyclable_kg': 7,
+        'trash_categories': {'Plastic': 3, 'Metal': 1},
+        'notes': ' Near the bridge ',
+    }
+
+    def setUp(self):
+        self.client = APIClient()
+        self.barangay = make_user('barangay')
+        self.req = Request.objects.create(email='requester@example.com', status='approved')
+
+    def submit(self, data, user=None, req=None):
+        req = req or self.req
+        return self.client.post(
+            f'/api/requests/{req.request_id}/submit_trash_report/', data, format='json',
+            **session_header(user or self.barangay),
+        )
+
+    def test_barangay_and_cenro_can_finish_a_cleanup_with_the_report(self):
+        for role in ('barangay', 'admin'):
+            with self.subTest(role=role):
+                user = self.barangay if role == 'barangay' else make_user('admin')
+                req = Request.objects.create(email=f'{role}@example.com', status='approved')
+
+                response = self.submit(self.REPORT, user=user, req=req)
+
+                self.assertEqual(response.status_code, 200)
+                req.refresh_from_db()
+                self.assertEqual(req.status, 'completed')
+                self.assertIsNotNone(req.session_completed_at)
+                self.assertEqual((req.bags, req.weight_kg, req.non_usable_kg, req.recyclable_kg), (4, 12.5, 5.5, 7))
+                self.assertEqual(req.trash_categories, {'Plastic': 3, 'Metal': 1})
+                self.assertEqual(
+                    list(req.status_history.order_by('id').values_list('label', 'details')),
+                    [('Session Completed by CENRO', ''), ('Trash Report Filed by CENRO', 'Near the bridge')],
+                )
+
+    def test_each_figure_is_mandatory(self):
+        for field in ('bags', 'weight_kg', 'non_usable_kg', 'recyclable_kg', 'trash_categories'):
+            with self.subTest(field=field):
+                data = {k: v for k, v in self.REPORT.items() if k != field}
+
+                response = self.submit(data)
+
+                self.assertEqual(response.status_code, 400)
+                self.assertIn(field, response.json())
+                self.req.refresh_from_db()
+                self.assertEqual(self.req.status, 'approved')
+                self.assertIsNone(self.req.session_completed_at)
+
+    def test_invalid_figures_are_rejected(self):
+        for field, value in (
+            ('bags', -1), ('weight_kg', -0.1), ('weight_kg', ''), ('recyclable_kg', None),
+            ('trash_categories', {}), ('trash_categories', {'Plastic': 'many'}),
+        ):
+            with self.subTest(field=field, value=value):
+                response = self.submit({**self.REPORT, field: value})
+
+                self.assertEqual(response.status_code, 400)
+
+    def test_zero_is_a_valid_answer(self):
+        response = self.submit({
+            'bags': 0, 'weight_kg': 0, 'non_usable_kg': 0, 'recyclable_kg': 0,
+            'trash_categories': {'Plastic': 0},
+        })
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_sessions_finished_before_this_rule_can_still_file_their_report(self):
+        finished_at = timezone.now()
+        req = Request.objects.create(email='older@example.com', status='processing', session_completed_at=finished_at)
+
+        response = self.submit(self.REPORT, req=req)
+
+        self.assertEqual(response.status_code, 200)
+        req.refresh_from_db()
+        self.assertEqual(req.status, 'completed')
+        self.assertEqual(req.session_completed_at, finished_at)
+        self.assertEqual(list(req.status_history.values_list('label', flat=True)), ['Trash Report Filed by CENRO'])
+
+    def test_a_cleanup_cannot_be_reported_twice(self):
+        self.assertEqual(self.submit(self.REPORT).status_code, 200)
+
+        self.assertEqual(self.submit(self.REPORT).status_code, 400)
+
+
 ROLES = ('admin', 'mayorsoffice', 'barangay', 'ngo', 'operator')
 STAFF_ROLES = ('admin', 'mayorsoffice', 'barangay', 'ngo')
 REQUESTER_ROLES = ('admin', 'barangay', 'ngo')
@@ -179,7 +272,6 @@ class EndpointRoleTests(TestCase):
         self.assert_roles('post', f'/api/requests/{rid}/park/', ('admin',), {})
         self.assert_roles('post', f'/api/requests/{rid}/unpark/', ('admin', 'mayorsoffice'))
         self.assert_roles('post', f'/api/requests/{rid}/reschedule/', ('admin',), {})
-        self.assert_roles('post', f'/api/requests/{rid}/mark_session_completed/', REQUESTER_ROLES)
         self.assert_roles('post', f'/api/requests/{rid}/submit_trash_report/', REQUESTER_ROLES, {})
         self.assert_roles('get', f'/api/requests/{rid}/bot_detections/', ('admin',))
         self.assert_roles('post', f'/api/requests/{rid}/submit_verification/', ('admin',), {})

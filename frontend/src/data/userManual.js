@@ -62,7 +62,7 @@ export const USER_MANUALS = {
       keywords: ['cleanup request', 'approve', 'verify', 'trash report', 'pending'],
       steps: [
         'Use the tabs to filter by status — Pending Admin, Approved, Unscheduled, Pending Verification, Verified, Parked.',
-        'Open a request to review it: approve/decline, and once a bot has run its session, file the Trash Collection Report with per-category counts.',
+        'Open a request to review it: approve/decline, and once a bot has run its session, click "Mark Session Completed" and fill in the required Trash Collection Report (per-category counts, bags, and weights).',
         'For TROID-supported cleanups, the filed report doubles as TROID\'s detected output until CENRO verifies it in the Verify Bot Detection step.',
         'Filing enough reports for one barangay may automatically flag it as a Priority Area — check the Dashboard.',
       ],
@@ -188,6 +188,7 @@ export const USER_MANUALS = {
       steps: [
         'Use the tabs to filter by status — Pending, Approved, Deployed, Completed.',
         'Click "View" on any request to see its full timeline, including the trash collection report once CENRO files it.',
+        'When an approved cleanup is done, click "Mark as Finished" and fill in the required Trash Collection Report. The cleanup stays open until the report is filed.',
       ],
     },
     {

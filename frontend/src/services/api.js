@@ -100,7 +100,6 @@ export const api = {
   parkRequest: (id, data) => api.post(`/requests/${id}/park/`, data),
   unparkRequest: (id) => api.post(`/requests/${id}/unpark/`),
   rescheduleRequest: (id, data) => api.post(`/requests/${id}/reschedule/`, data),
-  markSessionCompleted: (id) => api.post(`/requests/${id}/mark_session_completed/`),
   submitTrashReport: (id, data) => api.post(`/requests/${id}/submit_trash_report/`, data),
   botDetections: (id) => api.get(`/requests/${id}/bot_detections/`),
   submitVerification: (id, data) => api.post(`/requests/${id}/submit_verification/`, data),

@@ -34,7 +34,7 @@ from .serializers import (
     BoatSerializer, UserSerializer, OperatorSerializer, RequestSerializer,
     DeploymentScheduleSerializer, LandfillRecordSerializer, RecyclingRecordSerializer,
     SegregationRecordSerializer, AuditLogSerializer, HeatmapDataSerializer, LoginSerializer,
-    CollectionAreaSerializer, NotificationSerializer, PriorityAreaSerializer
+    CollectionAreaSerializer, NotificationSerializer, PriorityAreaSerializer, TrashReportSerializer
 )
 from .authentication import INACTIVE_STATUSES, CompanionTokenAuthentication, is_app_operator
 from .permissions import ADMIN, ANY_ROLE, MAYOR, PUBLIC, REQUESTERS, STAFF, HasRole, RoleViewSetMixin, require
@@ -845,7 +845,6 @@ class RequestViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
         'create': ADMIN + REQUESTERS,
         'mayor_approve': MAYOR,
         'unpark': ADMIN + MAYOR,
-        'mark_session_completed': ADMIN + REQUESTERS,
         'submit_trash_report': ADMIN + REQUESTERS,
         'bot_detections': ADMIN,
         'post_cleanup_comparison': ADMIN,
@@ -984,48 +983,49 @@ class RequestViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
         return Response({'status': req.status})
 
     @action(detail=True, methods=['post'])
-    def mark_session_completed(self, request, request_id=None):
-        req = self.get_object()
-        if req.status != 'approved':
-            return Response({'error': 'Request is not approved'}, status=status.HTTP_400_BAD_REQUEST)
-        req.status = 'processing'
-        req.session_completed_at = timezone.now()
-        req.save()
-        StatusHistory.objects.create(
-            request=req,
-            label='Session Completed by CENRO',
-            date=timezone.now(),
-            actor=request.user.name if hasattr(request, 'user') and hasattr(request.user, 'name') else 'Admin',
-            role='Admin',
-            state='current',
-        )
-        return Response({'status': req.status, 'session_completed_at': req.session_completed_at})
-
-    @action(detail=True, methods=['post'])
     def submit_trash_report(self, request, request_id=None):
+        """Finishes a cleanup session. The collected-garbage figures are mandatory, so a
+        session can't be marked finished without them. 'processing' only remains for
+        sessions that were finished before the figures were required."""
         req = self.get_object()
-        if req.status != 'processing':
+        if req.status not in ('approved', 'processing'):
             return Response({'error': 'Request is not awaiting a trash report'}, status=status.HTTP_400_BAD_REQUEST)
-        req.bags = request.data.get('bags')
-        req.weight_kg = request.data.get('weight_kg')
-        req.non_usable_kg = request.data.get('non_usable_kg')
-        req.recyclable_kg = request.data.get('recyclable_kg')
-        req.trash_categories = request.data.get('trash_categories') or {}
-        notes = (request.data.get('notes') or '').strip()
+        serializer = TrashReportSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        report = serializer.validated_data
+
+        session_just_finished = req.status == 'approved'
+        if session_just_finished:
+            req.session_completed_at = timezone.now()
+        req.bags = report['bags']
+        req.weight_kg = report['weight_kg']
+        req.non_usable_kg = report['non_usable_kg']
+        req.recyclable_kg = report['recyclable_kg']
+        req.trash_categories = report['trash_categories']
 
         schedule = DeploymentSchedule.objects.filter(request_id=req.request_id).order_by('-id').first()
         cleanup_type = schedule.cleanup_type if schedule else 'unsupported'
 
         req.status = 'pending_verification' if cleanup_type == 'troid_supported' else 'completed'
         req.save()
+        actor = request.user.name if hasattr(request, 'user') and hasattr(request.user, 'name') else 'Admin'
+        if session_just_finished:
+            StatusHistory.objects.create(
+                request=req,
+                label='Session Completed by CENRO',
+                date=timezone.now(),
+                actor=actor,
+                role='Admin',
+                state='current',
+            )
         StatusHistory.objects.create(
             request=req,
             label='Trash Report Filed by CENRO',
             date=timezone.now(),
-            actor=request.user.name if hasattr(request, 'user') and hasattr(request.user, 'name') else 'Admin',
+            actor=actor,
             role='Admin',
             state='current',
-            details=notes,
+            details=report['notes'],
         )
         check_and_schedule_priority_followup(req.barangay)
         if req.status == 'completed':

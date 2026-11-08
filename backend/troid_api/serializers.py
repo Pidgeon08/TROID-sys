@@ -1,6 +1,15 @@
 from rest_framework import serializers
 from .models import Boat, DetectionEvent, User, Operator, Request, StatusHistory, Photo, DeploymentSchedule, PriorityArea, LandfillRecord, RecyclingRecord, SegregationRecord, AuditLog, HeatmapData, CollectionArea, Notification
 
+class TrashReportSerializer(serializers.Serializer):
+    """The collected-garbage figures required to finish a cleanup. 0 is a valid answer."""
+    bags = serializers.IntegerField(min_value=0)
+    weight_kg = serializers.FloatField(min_value=0)
+    non_usable_kg = serializers.FloatField(min_value=0)
+    recyclable_kg = serializers.FloatField(min_value=0)
+    trash_categories = serializers.DictField(child=serializers.IntegerField(min_value=0), allow_empty=False)
+    notes = serializers.CharField(allow_blank=True, default='')
+
 class DetectionEventSerializer(serializers.ModelSerializer):
     class Meta:
         model = DetectionEvent

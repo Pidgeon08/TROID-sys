@@ -113,7 +113,6 @@ export default function ViewRequest({ id: propId, onClose }) {
   const [rescheduleTime, setRescheduleTime] = useState("");
   const [rescheduleReason, setRescheduleReason] = useState("");
   const [rescheduling, setRescheduling] = useState(false);
-  const [markingCompleted, setMarkingCompleted] = useState(false);
   const [showTrashReport, setShowTrashReport] = useState(false);
   const [trashCategoryValues, setTrashCategoryValues] = useState(emptyCategoryValues);
   const [trashBags, setTrashBags] = useState("");
@@ -235,25 +234,6 @@ export default function ViewRequest({ id: propId, onClose }) {
       alert("Failed to reschedule request. Please try again.");
     } finally {
       setRescheduling(false);
-    }
-  };
-
-  const handleMarkSessionCompleted = async () => {
-    setMarkingCompleted(true);
-    try {
-      await api.markSessionCompleted(request.id);
-      setRequest((prev) => ({ ...prev, status: "Processing" }));
-      logAudit({
-        currentUser,
-        action: "Session marked completed",
-        module: "Requests",
-        details: `${request.id} (${request.location?.barangay || "unknown zone"}) marked as session completed`,
-      });
-    } catch (err) {
-      console.error("Failed to mark session completed:", err);
-      alert("Failed to mark session completed. Please try again.");
-    } finally {
-      setMarkingCompleted(false);
     }
   };
 
@@ -400,12 +380,11 @@ export default function ViewRequest({ id: propId, onClose }) {
           )}
           {request.status === "Approved" && (
             <button
-              onClick={handleMarkSessionCompleted}
-              disabled={markingCompleted}
-              className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-white px-3.5 py-2 text-sm font-medium text-emerald-600 hover:bg-emerald-50 disabled:opacity-50"
+              onClick={openTrashReport}
+              className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-white px-3.5 py-2 text-sm font-medium text-emerald-600 hover:bg-emerald-50"
             >
               <ClipboardCheck size={15} />
-              {markingCompleted ? "Marking..." : "Mark Session Completed"}
+              Mark Session Completed
             </button>
           )}
           <button
@@ -903,6 +882,9 @@ export default function ViewRequest({ id: propId, onClose }) {
                   ? "This cleanup is TROID-supported — the counts you enter here stand in as TROID's detected output until a live detection feed is connected. You'll review and correct them in the verification step next."
                   : "This cleanup is unsupported by TROID — record what was actually collected manually."}
               </p>
+              <p className="text-xs font-medium text-slate-700 mt-2">
+                All fields except notes are required to finish this cleanup. Enter 0 for anything not collected.
+              </p>
             </div>
             <div className="px-6 pt-4 space-y-4 overflow-y-auto">
               <div>
@@ -943,6 +925,7 @@ export default function ViewRequest({ id: propId, onClose }) {
                   <input
                     type="number"
                     min="0"
+                    step="0.1"
                     required
                     value={trashWeightKg}
                     onChange={(e) => setTrashWeightKg(stripLeadingZero(e.target.value))}
@@ -954,6 +937,7 @@ export default function ViewRequest({ id: propId, onClose }) {
                   <input
                     type="number"
                     min="0"
+                    step="0.1"
                     required
                     value={trashNonUsableKg}
                     onChange={(e) => setTrashNonUsableKg(stripLeadingZero(e.target.value))}
@@ -965,6 +949,7 @@ export default function ViewRequest({ id: propId, onClose }) {
                   <input
                     type="number"
                     min="0"
+                    step="0.1"
                     required
                     value={trashRecyclableKg}
                     onChange={(e) => setTrashRecyclableKg(stripLeadingZero(e.target.value))}
