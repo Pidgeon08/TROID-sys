@@ -180,7 +180,7 @@ const Dashboard = () => {
                   <Trash2 className="w-6 h-6" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <h3 className="text-[15px] font-semibold text-slate-900 truncate">Trash Collected by Bots</h3>
+                  <h3 className="text-[15px] font-semibold text-slate-900 truncate">Trash Collected</h3>
                   <div className="flex items-baseline gap-2.5 mt-2">
                     <span className="text-3xl font-bold text-slate-950 tracking-tight">{totalBags}</span>
                     <span className="text-sm font-semibold text-slate-500">Bags</span>

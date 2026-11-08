@@ -877,14 +877,6 @@ export default function ViewRequest({ id: propId, onClose }) {
           >
             <div className="p-6 border-b border-slate-100">
               <h3 className="text-lg font-bold text-slate-900">Trash Collection Report</h3>
-              <p className="text-xs text-slate-500 mt-1">
-                {schedule?.cleanup_type === "troid_supported"
-                  ? "This cleanup is TROID-supported — the counts you enter here stand in as TROID's detected output until a live detection feed is connected. You'll review and correct them in the verification step next."
-                  : "This cleanup is unsupported by TROID — record what was actually collected manually."}
-              </p>
-              <p className="text-xs font-medium text-slate-700 mt-2">
-                All fields except notes are required to finish this cleanup. Enter 0 for anything not collected.
-              </p>
             </div>
             <div className="px-6 pt-4 space-y-4 overflow-y-auto">
               <div>

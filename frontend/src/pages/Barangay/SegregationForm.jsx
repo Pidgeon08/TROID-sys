@@ -113,7 +113,7 @@ export default function SegregationForm() {
       <header className="mb-6">
         <h1 className="text-[28px] font-bold text-slate-900 tracking-tight leading-none">Trash Segregation</h1>
         <p className="text-slate-500 text-sm mt-1.5 font-medium">
-          Record trash collected by TROID bots after cleanup. Segregate by type, weight, and bags.
+          Record trash collected after cleanup. Segregate by type, weight, and bags.
         </p>
       </header>
 
