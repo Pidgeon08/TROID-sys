@@ -8,6 +8,9 @@ import ForceChangePasswordModal from '../components/ForceChangePasswordModal';
 import ForgotPasswordModal from '../components/ForgotPasswordModal';
 import LoadingModal from '../components/LoadingModal';
 
+// The hosted backend can take about a minute to wake up after sitting idle.
+const LOGIN_TIMEOUT_MS = 90000;
+
 const ROLE_LABELS = {
   admin: 'Admin',
   mayorsoffice: 'City Admin',
@@ -38,6 +41,7 @@ const Login = ({ onLogin }) => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
+        signal: AbortSignal.timeout(LOGIN_TIMEOUT_MS),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -61,7 +65,9 @@ const Login = ({ onLogin }) => {
       navigate(`/${role === 'mayorsoffice' ? 'mayorsoffice/dashboard' : (role === 'barangay' || role === 'ngo') ? 'barangay/dashboard' : 'admin/dashboard'}`);
     } catch (err) {
       console.error('Login error:', err);
-      setError('Login failed. Please try again.');
+      setError(err.name === 'TimeoutError'
+        ? 'The server is not responding. Please try again in a few minutes.'
+        : 'Login failed. Please try again.');
     } finally {
       setLoading(false);
     }
