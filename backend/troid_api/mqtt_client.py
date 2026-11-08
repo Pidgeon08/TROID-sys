@@ -1,18 +1,29 @@
+import os
 import threading
 import time
 import uuid
+from zoneinfo import ZoneInfo
 import paho.mqtt.client as mqtt
 from django.utils import timezone
 from .bot_auth import verify_bot_message
-from .models import Boat, DetectionEvent
+from .models import Boat, DeploymentSchedule, DetectionEvent, Request
 from .realtime import broadcast
+
+APP_TIMEZONE = ZoneInfo('Asia/Manila')   # same as views.py
 
 # ==================== CONFIGURATION ====================
 MQTT_BROKER = "broker.emqx.io"
 MQTT_PORT = 1883
 MQTT_USERNAME = ""
 MQTT_PASSWORD = ""
-MQTT_CLIENT_ID = f"troid_django_{uuid.uuid4().hex[:8]}"
+# On Render the backend uses a FIXED client id with a persistent session: the
+# free plan sleeps when idle, and while it sleeps the broker queues the bots'
+# detections for this id and delivers them when it wakes. Locally a random id
+# is used, so a dev server never steals the deployed backend's session.
+MQTT_CLIENT_ID = os.environ.get('MQTT_CLIENT_ID') or (
+    'troid_django_render_k7q2m9' if os.environ.get('RENDER')
+    else f"troid_django_dev_{uuid.uuid4().hex[:8]}")
+MQTT_PERSISTENT = bool(os.environ.get('MQTT_CLIENT_ID') or os.environ.get('RENDER'))
 
 # Topics
 TOPIC_HEARTBEAT = "troid/bot/+/heartbeat"
@@ -27,7 +38,7 @@ def _on_connect(client, userdata, flags, rc):
     if rc == 0:
         print(f"[MQTT] Connected to broker (rc={rc})")
         client.subscribe(TOPIC_HEARTBEAT)
-        client.subscribe(TOPIC_DETECTION)
+        client.subscribe(TOPIC_DETECTION, qos=1)   # qos 1: queued while we're asleep
         client.subscribe(TOPIC_STATUS)
         print("[MQTT] Subscribed to topics")
     else:
@@ -85,10 +96,27 @@ def _handle_detection(bot_id, payload):
             print(f"[MQTT] Skipping unverified detection for Boat {bot_id}")
             return
 
+        lat, lng = payload.get('latitude'), payload.get('longitude')
+        if lat is None or lng is None:
+            print(f"[MQTT] Skipping detection without a location for Boat {bot_id}")
+            return
+
+        # Same as the log_detection view: keep the boat's last position and link
+        # the detection to today's deployment request (the barangay heatmap filters on it).
+        boat.last_latitude = lat
+        boat.last_longitude = lng
+        boat.save()
+        linked_request = None
+        today = timezone.now().astimezone(APP_TIMEZONE).strftime('%Y-%m-%d')
+        schedule = DeploymentSchedule.objects.filter(bot=boat, day=today).order_by('-id').first()
+        if schedule and schedule.request_id:
+            linked_request = Request.objects.filter(request_id=schedule.request_id).first()
+
         detection = DetectionEvent.objects.create(
             boat=boat,
-            latitude=payload.get('latitude', 0.0),
-            longitude=payload.get('longitude', 0.0),
+            request=linked_request,
+            latitude=lat,
+            longitude=lng,
             trash_count=payload.get('trash_count', 1),
             categories=payload.get('categories', {}),
             confidence=confidence,
@@ -138,11 +166,14 @@ def _handle_status(bot_id, payload):
 def _run_client():
     global _client
     with _client_lock:
-        if _client is not None and _client.is_connected():
+        # Once started, paho's loop thread reconnects by itself. Starting a second
+        # client here would fight the first one over the same fixed client id.
+        if _client is not None:
             return
 
-        client_id = f"{MQTT_CLIENT_ID}_{uuid.uuid4().hex[:6]}"
-        client = mqtt.Client(client_id=client_id, clean_session=True)
+        client_id = MQTT_CLIENT_ID if MQTT_PERSISTENT else f"{MQTT_CLIENT_ID}_{uuid.uuid4().hex[:6]}"
+        client = mqtt.Client(client_id=client_id, clean_session=not MQTT_PERSISTENT)
+        client.reconnect_delay_set(1, 60)
         client.on_connect = _on_connect
         client.on_message = _on_message
 
