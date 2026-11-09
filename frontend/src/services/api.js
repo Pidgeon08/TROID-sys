@@ -102,8 +102,7 @@ export const api = {
   rescheduleRequest: (id, data) => api.post(`/requests/${id}/reschedule/`, data),
   submitTrashReport: (id, data) => api.post(`/requests/${id}/submit_trash_report/`, data),
   requestLetter: (id) => api.get(`/requests/${id}/letter/`),
-  botDetections: (id) => api.get(`/requests/${id}/bot_detections/`),
-  submitVerification: (id, data) => api.post(`/requests/${id}/submit_verification/`, data),
+  troidCount: (id) => api.get(`/requests/${id}/troid_count/`),
   postCleanupComparison: () => api.get('/requests/post-cleanup-comparison/'),
 
   notifications: (userId) => api.get(`/notifications/?user_id=${userId}`),

@@ -19,7 +19,7 @@ import LetterAttachment from "../../components/LetterAttachment";
 import { logAudit } from "../../services/auditLog";
 import { Card } from "../../components/ui/Card";
 import NotificationBell from "../../components/NotificationBell";
-import { REQUEST_STATUS_STYLES, TRASH_CATEGORIES, mapRequest, getDeploymentStatus, formatTime12h, toStatusLabel } from "../../constants/requests";
+import { REQUEST_STATUS_STYLES, TRASH_CATEGORIES, mapRequest, fillTroidCounts, getDeploymentStatus, formatTime12h, toStatusLabel } from "../../constants/requests";
 
 function emptyCategoryValues() {
   return TRASH_CATEGORIES.reduce((acc, cat) => ({ ...acc, [cat]: "" }), {});
@@ -54,6 +54,8 @@ export default function BarangayViewRequest() {
   const [trashRecyclableKg, setTrashRecyclableKg] = useState("");
   const [trashNotes, setTrashNotes] = useState("");
   const [submittingTrashReport, setSubmittingTrashReport] = useState(false);
+  // What the robot counted, per category; null when it wasn't a TROID-assisted cleanup.
+  const [troidCount, setTroidCount] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -83,6 +85,14 @@ export default function BarangayViewRequest() {
     setTrashRecyclableKg("");
     setTrashNotes("");
     setShowTrashReport(true);
+    setTroidCount(null);
+    api.troidCount(request.id)
+      .then((res) => {
+        if (!res.troid_assisted) return;
+        setTroidCount(res.categories);
+        setTrashCategoryValues((prev) => fillTroidCounts(prev, res.categories));
+      })
+      .catch((err) => console.error("Failed to load TROID counts:", err));
   };
 
   const handleSubmitTrashReport = async () => {
@@ -156,7 +166,7 @@ export default function BarangayViewRequest() {
             <FileText size={15} />
             Download All
           </button>
-          {request.status === "Approved" && (
+          {(request.status === "Approved" || request.status === "Ongoing") && (
             <button
               onClick={openTrashReport}
               className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-white px-3.5 py-2 text-sm font-medium text-emerald-600 hover:bg-emerald-50"
@@ -457,7 +467,12 @@ export default function BarangayViewRequest() {
                 <div className="grid grid-cols-2 gap-3">
                   {TRASH_CATEGORIES.map((cat) => (
                     <div key={cat}>
-                      <label className="mb-1 block text-[11px] text-slate-500">{cat}</label>
+                      <label className="mb-1 flex flex-wrap items-center justify-between gap-x-2 text-[11px] text-slate-500">
+                        <span>{cat}</span>
+                        {troidCount && (
+                          <span className="font-semibold text-sky-700">TROID counted: {troidCount[cat] || 0}</span>
+                        )}
+                      </label>
                       <input
                         type="number"
                         min="0"

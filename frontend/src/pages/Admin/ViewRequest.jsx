@@ -14,7 +14,6 @@ import {
   CalendarClock,
   ClipboardCheck,
   FileCheck2,
-  ShieldCheck,
   ChevronLeft as ChevronLeftIcon,
   ChevronRight as ChevronRightIcon,
 } from "lucide-react";
@@ -23,7 +22,7 @@ import LetterAttachment from "../../components/LetterAttachment";
 import { logAudit } from "../../services/auditLog";
 import { Card } from "../../components/ui/Card";
 import NotificationBell from "../../components/NotificationBell";
-import { REQUEST_STATUS_STYLES, TRASH_CATEGORIES, mapRequest, getDeploymentStatus, formatTime12h, toStatusLabel } from "../../constants/requests";
+import { REQUEST_STATUS_STYLES, TRASH_CATEGORIES, mapRequest, fillTroidCounts, getDeploymentStatus, formatTime12h, toStatusLabel } from "../../constants/requests";
 
 function emptyCategoryValues() {
   return TRASH_CATEGORIES.reduce((acc, cat) => ({ ...acc, [cat]: "" }), {});
@@ -120,11 +119,8 @@ export default function ViewRequest({ id: propId, onClose }) {
   const [trashRecyclableKg, setTrashRecyclableKg] = useState("");
   const [trashNotes, setTrashNotes] = useState("");
   const [submittingTrashReport, setSubmittingTrashReport] = useState(false);
-  const [showVerification, setShowVerification] = useState(false);
-  const [loadingBotDetections, setLoadingBotDetections] = useState(false);
-  const [verifiedCategoryValues, setVerifiedCategoryValues] = useState(emptyCategoryValues);
-  const [verificationNotes, setVerificationNotes] = useState("");
-  const [submittingVerification, setSubmittingVerification] = useState(false);
+  // What the robot counted, per category; null when it wasn't a TROID-assisted cleanup.
+  const [troidCount, setTroidCount] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -244,6 +240,14 @@ export default function ViewRequest({ id: propId, onClose }) {
     setTrashRecyclableKg("");
     setTrashNotes("");
     setShowTrashReport(true);
+    setTroidCount(null);
+    api.troidCount(request.id)
+      .then((res) => {
+        if (!res.troid_assisted) return;
+        setTroidCount(res.categories);
+        setTrashCategoryValues((prev) => fillTroidCounts(prev, res.categories));
+      })
+      .catch((err) => console.error("Failed to load TROID counts:", err));
   };
 
   const handleSubmitTrashReport = async () => {
@@ -282,56 +286,6 @@ export default function ViewRequest({ id: propId, onClose }) {
       alert("Failed to submit trash report. Please try again.");
     } finally {
       setSubmittingTrashReport(false);
-    }
-  };
-
-  const openVerification = async () => {
-    setVerificationNotes("");
-    setShowVerification(true);
-    setLoadingBotDetections(true);
-    try {
-      const res = await api.botDetections(request.id);
-      const detected = res.categories || {};
-      setVerifiedCategoryValues({
-        ...emptyCategoryValues(),
-        ...detected,
-      });
-    } catch (err) {
-      console.error("Failed to fetch bot detections:", err);
-      setVerifiedCategoryValues(emptyCategoryValues());
-    } finally {
-      setLoadingBotDetections(false);
-    }
-  };
-
-  const handleSubmitVerification = async () => {
-    const verifiedCategoriesPayload = Object.fromEntries(
-      Object.entries(verifiedCategoryValues).map(([cat, v]) => [cat, Number(v)])
-    );
-    setSubmittingVerification(true);
-    try {
-      await api.submitVerification(request.id, {
-        verified_categories: verifiedCategoriesPayload,
-        verification_notes: verificationNotes.trim(),
-      });
-      setRequest((prev) => ({
-        ...prev,
-        status: "Verified",
-        verifiedCategories: verifiedCategoriesPayload,
-        verificationNotes: verificationNotes.trim(),
-      }));
-      logAudit({
-        currentUser,
-        action: "Detection verified",
-        module: "Requests",
-        details: `${request.id} (${request.location?.barangay || "unknown zone"}) bot detection verified by CENRO`,
-      });
-      setShowVerification(false);
-    } catch (err) {
-      console.error("Failed to submit verification:", err);
-      alert("Failed to submit verification. Please try again.");
-    } finally {
-      setSubmittingVerification(false);
     }
   };
 
@@ -377,7 +331,7 @@ export default function ViewRequest({ id: propId, onClose }) {
               Reschedule
             </button>
           )}
-          {request.status === "Approved" && (
+          {(request.status === "Approved" || request.status === "Ongoing") && (
             <button
               onClick={openTrashReport}
               className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-white px-3.5 py-2 text-sm font-medium text-emerald-600 hover:bg-emerald-50"
@@ -707,23 +661,6 @@ export default function ViewRequest({ id: propId, onClose }) {
             </div>
           </Card>
           )}
-
-          {request.status === "Pending Verification" && (
-          <Card title="Verify Bot Detection">
-            <div className="flex flex-col gap-4">
-              <p className="text-xs text-slate-500">
-                This was a TROID-supported cleanup. Review the bot's detected trash categories against your trash report and correct any inaccuracies.
-              </p>
-              <button
-                onClick={openVerification}
-                className="flex items-center justify-center gap-2 rounded-lg bg-orange-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-orange-700 transition-colors"
-              >
-                <ShieldCheck size={16} />
-                Review & Verify
-              </button>
-            </div>
-          </Card>
-          )}
         </div>
       </div>
 
@@ -865,7 +802,12 @@ export default function ViewRequest({ id: propId, onClose }) {
                 <div className="grid grid-cols-2 gap-3">
                   {TRASH_CATEGORIES.map((cat) => (
                     <div key={cat}>
-                      <label className="mb-1 block text-[11px] text-slate-500">{cat}</label>
+                      <label className="mb-1 flex flex-wrap items-center justify-between gap-x-2 text-[11px] text-slate-500">
+                        <span>{cat}</span>
+                        {troidCount && (
+                          <span className="font-semibold text-sky-700">TROID counted: {troidCount[cat] || 0}</span>
+                        )}
+                      </label>
                       <input
                         type="number"
                         min="0"
@@ -956,80 +898,6 @@ export default function ViewRequest({ id: propId, onClose }) {
                 className="flex-1 rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-emerald-700 transition-colors disabled:opacity-50"
               >
                 {submittingTrashReport ? "Submitting..." : "Submit Report"}
-              </button>
-            </div>
-          </form>
-        </div>,
-        document.body
-      )}
-
-      {showVerification && createPortal(
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 p-4">
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              handleSubmitVerification();
-            }}
-            className="w-full max-w-lg bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden max-h-[90vh] flex flex-col"
-          >
-            <div className="p-6 border-b border-slate-100">
-              <h3 className="text-lg font-bold text-slate-900">Verify Bot Detection</h3>
-              <p className="text-xs text-slate-500 mt-1">
-                Pre-filled with what the bot detected. Correct any values that don't match your trash report — corrections help improve the detection model.
-              </p>
-            </div>
-            <div className="px-6 pt-4 space-y-4 overflow-y-auto">
-              {loadingBotDetections ? (
-                <p className="text-sm text-slate-400 text-center py-6">Loading bot detections...</p>
-              ) : (
-                <div>
-                  <p className="mb-1.5 text-xs font-semibold text-slate-500">Detected trash by category</p>
-                  <div className="grid grid-cols-2 gap-3">
-                    {TRASH_CATEGORIES.map((cat) => (
-                      <div key={cat}>
-                        <label className="mb-1 block text-[11px] text-slate-500">{cat}</label>
-                        <input
-                          type="number"
-                          min="0"
-                          required
-                          value={verifiedCategoryValues[cat]}
-                          onChange={(e) => {
-                            const raw = stripLeadingZero(e.target.value);
-                            setVerifiedCategoryValues((prev) => ({ ...prev, [cat]: raw }));
-                          }}
-                          className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-500/20"
-                        />
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-              <div>
-                <label className="mb-1.5 block text-xs font-semibold text-slate-500">Verification Notes (optional)</label>
-                <textarea
-                  value={verificationNotes}
-                  onChange={(e) => setVerificationNotes(e.target.value)}
-                  rows={3}
-                  placeholder="Explain any corrections made..."
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-500/20"
-                />
-              </div>
-            </div>
-            <div className="p-6 flex gap-3 border-t border-slate-100">
-              <button
-                type="button"
-                onClick={() => setShowVerification(false)}
-                disabled={submittingVerification}
-                className="flex-1 rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors disabled:opacity-50"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={submittingVerification || loadingBotDetections}
-                className="flex-1 rounded-lg bg-orange-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-orange-700 transition-colors disabled:opacity-50"
-              >
-                {submittingVerification ? "Submitting..." : "Submit Verification"}
               </button>
             </div>
           </form>

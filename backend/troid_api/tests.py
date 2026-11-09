@@ -16,7 +16,10 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from . import bot_auth, mqtt_client
-from .models import AuditLog, Boat, CollectionArea, DetectionEvent, LetterFile, Notification, Operator, Request, User
+from .models import (
+    AuditLog, Boat, CollectionArea, DeploymentSchedule, DetectionEvent, LetterFile, Notification, Operator, Request,
+    StatusHistory, User,
+)
 
 
 def make_user(role, status='active', token=None):
@@ -371,8 +374,7 @@ class EndpointRoleTests(TestCase):
         self.assert_roles('post', f'/api/requests/{rid}/reschedule/', ('admin',), {})
         self.assert_roles('post', f'/api/requests/{rid}/submit_trash_report/', REQUESTER_ROLES, {})
         self.assert_roles('get', f'/api/requests/{rid}/letter/', STAFF_ROLES)
-        self.assert_roles('get', f'/api/requests/{rid}/bot_detections/', ('admin',))
-        self.assert_roles('post', f'/api/requests/{rid}/submit_verification/', ('admin',), {})
+        self.assert_roles('get', f'/api/requests/{rid}/troid_count/', REQUESTER_ROLES)
         self.assert_roles('get', '/api/requests/post-cleanup-comparison/', ('admin',))
         self.assert_roles('post', f'/api/requests/{rid}/restore/', ('admin',))
         self.assert_roles('delete', f'/api/requests/{rid}/', ('admin',))
@@ -1313,3 +1315,167 @@ class RobotPresenceTests(TestCase):
     def test_rejects_bad_input_and_missing_sessions(self):
         self.assertEqual(self.client.post(self.URL, {'in_use': 'yes'}, format='json', **self.first).status_code, 400)
         self.assertEqual(self.client.post(self.URL, {'in_use': True}, format='json').status_code, 401)
+
+
+@patch('troid_api.mqtt_client.broadcast')
+class CleanupDriveTests(TestCase):
+    """The Companion app lists an operator's cleanups and starts them; the robot's
+    detections are then counted against that request for the trash report."""
+
+    def setUp(self):
+        cache.clear()
+        bot_auth._last_ts.clear()
+        self.client = APIClient()
+        self.operator = make_user('operator')
+        self.profile = assign_operator(self.operator)
+        self.boat = self.profile.assigned_bot
+        self.boat.device_key = 'a' * 64
+        self.boat.save(update_fields=['device_key'])
+        self.operator.companion_session_token = 'app-session'
+        self.operator.save(update_fields=['companion_session_token'])
+        self.headers = {'HTTP_AUTHORIZATION': f'Companion {self.operator.id}:app-session'}
+        self.req = self.make_request('2026-11-20')
+
+    def make_request(self, day, boat=None, status='approved', cleanup_type='troid_supported'):
+        req = Request.objects.create(email='requester@example.com', status=status, barangay='Poro',
+                                     location_name='River Mouth', notes='Near the bridge')
+        DeploymentSchedule.objects.create(bot=boat or self.boat, day=day, label='06:00', zone='Poro',
+                                          request_id=req.request_id, cleanup_type=cleanup_type)
+        return req
+
+    def listed(self):
+        response = self.client.get('/api/companion/requests/', **self.headers)
+        self.assertEqual(response.status_code, 200)
+        return [r['request_id'] for r in response.json()['requests']]
+
+    def start(self, req=None):
+        req = req or self.req
+        return self.client.post(f'/api/companion/requests/{req.request_id}/start/', format='json', **self.headers)
+
+    def detect(self, label):
+        topic, raw = signed_message(self.boat, 'detection', {
+            'is_verified': True, 'latitude': 16.5, 'longitude': 120.3, 'confidence': 0.8,
+            'trash_count': 1, 'categories': {label: 1},
+        })
+        mqtt_client._on_message(None, None, SimpleNamespace(topic=topic, payload=raw))
+
+    def test_lists_only_cleanups_assigned_to_this_robot(self, _):
+        other_bot = Boat.objects.create(name='Other')
+        self.make_request('2026-11-21', boat=other_bot)
+        self.make_request('2026-11-22', cleanup_type='unsupported')
+        self.make_request('2026-11-23', status='completed')
+        self.make_request('2026-11-24', status='pending_admin_approval')
+
+        self.assertEqual(self.listed(), [self.req.request_id])
+
+    def test_a_drive_in_progress_is_listed_first(self, _):
+        later = self.make_request('2026-11-30', status='ongoing')
+
+        self.assertEqual(self.listed(), [later.request_id, self.req.request_id])
+
+    def test_overview_shows_the_schedule_and_location(self, _):
+        response = self.client.get(f'/api/companion/requests/{self.req.request_id}/', **self.headers)
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual((body['schedule_day'], body['schedule_time'], body['barangay'], body['location_name']),
+                         ('2026-11-20', '06:00', 'Poro', 'River Mouth'))
+
+    def test_start_logs_the_time_and_marks_it_ongoing(self, _):
+        response = self.start()
+
+        self.assertEqual(response.status_code, 201)
+        self.req.refresh_from_db()
+        self.assertEqual(self.req.status, 'ongoing')
+        self.assertIsNotNone(self.req.drive_started_at)
+        self.assertEqual(self.req.bot_id, self.boat)
+        self.assertEqual(self.req.operator, self.profile)
+        entry = StatusHistory.objects.get(request=self.req, label='Cleanup Drive Started')
+        self.assertEqual(entry.date, self.req.drive_started_at)
+        self.assertEqual(entry.actor, self.operator.name)
+        self.assertTrue(AuditLog.objects.filter(action='Started cleanup drive').exists())
+
+    def test_starting_twice_keeps_the_first_time(self, _):
+        self.start()
+        self.req.refresh_from_db()
+        first = self.req.drive_started_at
+
+        self.assertEqual(self.start().status_code, 200)
+
+        self.req.refresh_from_db()
+        self.assertEqual(self.req.drive_started_at, first)
+        self.assertEqual(StatusHistory.objects.filter(request=self.req, label='Cleanup Drive Started').count(), 1)
+
+    def test_cant_start_someone_elses_request(self, _):
+        other = self.make_request('2026-11-21', boat=Boat.objects.create(name='Other'))
+
+        self.assertEqual(self.start(other).status_code, 404)
+        other.refresh_from_db()
+        self.assertEqual(other.status, 'approved')
+
+    def test_cant_start_a_finished_request(self, _):
+        done = self.make_request('2026-11-21', status='completed')
+
+        self.assertEqual(self.start(done).status_code, 400)
+
+    def test_cant_start_a_second_drive_while_one_is_running(self, _):
+        second = self.make_request('2026-11-21')
+        self.start()
+
+        self.assertEqual(self.start(second).status_code, 409)
+        second.refresh_from_db()
+        self.assertEqual(second.status, 'approved')
+
+    def test_needs_the_operators_app_session(self, _):
+        for call in (self.client.get('/api/companion/requests/'),
+                     self.client.post(f'/api/companion/requests/{self.req.request_id}/start/')):
+            self.assertIn(call.status_code, (401, 403))
+
+    def test_detections_are_recorded_against_the_started_drive(self, _):
+        # Today's schedule points elsewhere: the drive the operator started wins.
+        today = timezone.now().astimezone(mqtt_client.APP_TIMEZONE).strftime('%Y-%m-%d')
+        self.make_request(today)
+        self.start()
+
+        self.detect('Plastic')
+
+        self.assertEqual(DetectionEvent.objects.get().request, self.req)
+
+    def test_trash_report_is_pre_filled_with_the_report_categories(self, _):
+        self.start()
+        for label in ('Plastic', 'Plastic', 'Paper', 'Organic', 'Others', 'Metal', 'Glass'):
+            self.detect(label)
+        admin = make_user('admin')
+
+        response = self.client.get(f'/api/requests/{self.req.request_id}/troid_count/', **session_header(admin))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {
+            'troid_assisted': True,
+            'categories': {'Plastic': 2, 'Paper/Cardboard': 1, 'Organic/Biodegradable': 1, 'Other': 1,
+                           'Metal': 1, 'Glass': 1},
+            'total': 7,
+        })
+
+    def test_a_cleanup_without_the_robot_gets_no_counts(self, _):
+        manual = self.make_request('2026-11-21', cleanup_type='unsupported')
+        admin = make_user('admin')
+
+        body = self.client.get(f'/api/requests/{manual.request_id}/troid_count/', **session_header(admin)).json()
+
+        self.assertFalse(body['troid_assisted'])
+
+    def test_filing_the_report_closes_the_drive_without_a_verification_step(self, _):
+        self.start()
+        admin = make_user('admin')
+        report = {'bags': 1, 'weight_kg': 2, 'non_usable_kg': 1, 'recyclable_kg': 1,
+                  'trash_categories': {'Plastic': 9}, 'notes': ''}
+
+        response = self.client.post(f'/api/requests/{self.req.request_id}/submit_trash_report/', report,
+                                    format='json', **session_header(admin))
+
+        self.assertEqual(response.status_code, 200)
+        self.req.refresh_from_db()
+        self.assertEqual(self.req.status, 'completed')
+        self.assertEqual(self.req.trash_categories, {'Plastic': 9})  # The edited figure is what's kept.
+        self.assertIsNotNone(self.req.session_completed_at)

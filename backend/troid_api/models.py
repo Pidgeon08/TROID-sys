@@ -173,6 +173,7 @@ class Request(models.Model):
         ('pending_mayor_approval', 'Pending City Admin Approval'),
         ('pending_admin_approval', 'Pending Admin Approval'),
         ('approved', 'Approved'),
+        ('ongoing', 'Ongoing'),
         ('declined', 'Declined'),
         ('parked', 'Parked'),
         ('processing', 'Processing'),
@@ -210,6 +211,8 @@ class Request(models.Model):
     weight_kg = models.FloatField(null=True, blank=True)
     non_usable_kg = models.FloatField(null=True, blank=True)
     recyclable_kg = models.FloatField(null=True, blank=True)
+    # When the operator pressed Start Cleanup Drive in the Companion app.
+    drive_started_at = models.DateTimeField(null=True, blank=True)
     session_completed_at = models.DateTimeField(null=True, blank=True)
     trash_categories = models.JSONField(default=dict, blank=True)
     verified_categories = models.JSONField(default=dict, blank=True)

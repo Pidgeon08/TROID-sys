@@ -18,6 +18,7 @@ from rest_framework.response import Response
 from django.contrib.auth.hashers import check_password, make_password
 from django.core.mail import send_mail
 from django.conf import settings
+from django.db import transaction
 from django.utils import timezone
 
 try:
@@ -38,6 +39,7 @@ from .serializers import (
 )
 from .authentication import INACTIVE_STATUSES, CompanionTokenAuthentication, is_app_operator
 from .permissions import ADMIN, ANY_ROLE, MAYOR, PUBLIC, REQUESTERS, STAFF, HasRole, RoleViewSetMixin, require
+from .drives import active_drive, scheduled_request_ids, troid_counts
 from .priority import check_and_schedule_priority_followup
 from .throttles import CompanionLoginEmailThrottle, CompanionLoginIPThrottle
 
@@ -452,6 +454,120 @@ def companion_task_status(request):
     return Response({'error': 'Unable to save the update in Supabase.'}, status=status.HTTP_502_BAD_GATEWAY)
 
 
+DRIVE_STATUSES = ('approved', 'ongoing')
+
+
+def _operator_and_bot(user):
+    profile = Operator.objects.filter(user=user, archived=False).select_related('assigned_bot').first()
+    boat = profile.assigned_bot if profile else None
+    return profile, boat if boat and not boat.archived else None
+
+
+def _drive_requests(boat):
+    """(request, schedule) for the cleanups assigned to this robot and not finished
+    yet: drives in progress first, then soonest first."""
+    schedules = {}
+    for schedule in DeploymentSchedule.objects.filter(
+        bot=boat, cleanup_type='troid_supported', request_id__in=scheduled_request_ids(boat),
+    ).order_by('id'):
+        schedules[schedule.request_id] = schedule
+    requests_ = Request.objects.filter(archived=False, status__in=DRIVE_STATUSES, request_id__in=schedules)
+    pairs = [(req, schedules[req.request_id]) for req in requests_]
+    pairs.sort(key=lambda pair: (pair[0].status != 'ongoing', pair[1].day, pair[1].label))
+    return pairs
+
+
+def _drive_request_data(req, schedule):
+    return {
+        'request_id': req.request_id,
+        'request_type': req.request_type,
+        'status': req.status,
+        'requested_by_name': req.requested_by_name,
+        'requested_by_role': req.requested_by_role,
+        'barangay': req.barangay,
+        'location_name': req.location_name,
+        'municipality': req.municipality,
+        'province': req.province,
+        'schedule_day': schedule.day,
+        'schedule_time': schedule.label,
+        'zone': schedule.zone,
+        'notes': req.notes,
+        'letter_file_name': req.letter_file_name,
+        'drive_started_at': req.drive_started_at,
+    }
+
+
+@api_view(['GET'])
+@authentication_classes([CompanionTokenAuthentication])
+@permission_classes([CompanionOperator])
+def companion_requests(request):
+    """The cleanups assigned to this operator and their robot."""
+    _, boat = _operator_and_bot(request.user)
+    if not boat:
+        return Response({'requests': []})
+    return Response({'requests': [_drive_request_data(req, sch) for req, sch in _drive_requests(boat)]})
+
+
+@api_view(['GET'])
+@authentication_classes([CompanionTokenAuthentication])
+@permission_classes([CompanionOperator])
+def companion_request_detail(request, request_id):
+    _, boat = _operator_and_bot(request.user)
+    pair = next((p for p in _drive_requests(boat) if p[0].request_id == request_id), None) if boat else None
+    if not pair:
+        return Response({'error': 'This request is not assigned to you.'}, status=status.HTTP_404_NOT_FOUND)
+    return Response(_drive_request_data(*pair))
+
+
+@api_view(['POST'])
+@authentication_classes([CompanionTokenAuthentication])
+@permission_classes([CompanionOperator])
+def companion_start_drive(request, request_id):
+    """Starts the cleanup drive: logs the time and marks the request Ongoing. From
+    here the robot's detections are recorded against this request. Pressing start
+    again on a drive already running changes nothing."""
+    profile, boat = _operator_and_bot(request.user)
+    with transaction.atomic():
+        req = Request.objects.select_for_update().filter(request_id=request_id, archived=False).first()
+        schedule = None
+        if req and boat:
+            schedule = DeploymentSchedule.objects.filter(
+                bot=boat, cleanup_type='troid_supported', request_id=request_id,
+            ).order_by('-id').first()
+        if not schedule:
+            return Response({'error': 'This request is not assigned to you.'}, status=status.HTTP_404_NOT_FOUND)
+        if req.status == 'ongoing':
+            return Response(_drive_request_data(req, schedule))
+        if req.status != 'approved':
+            return Response({'error': 'This request can no longer be started.'}, status=status.HTTP_400_BAD_REQUEST)
+        running = active_drive(boat)
+        if running:
+            return Response(
+                {'error': f'{boat.label} is still on {running.request_id}. Finish that drive first.'},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        started_at = timezone.now()
+        req.status = 'ongoing'
+        req.drive_started_at = started_at
+        req.bot_id = boat
+        req.operator = profile
+        req.save(update_fields=['status', 'drive_started_at', 'bot_id', 'operator'])
+        StatusHistory.objects.create(
+            request=req,
+            label='Cleanup Drive Started',
+            date=started_at,
+            actor=request.user.name,
+            role=ROLE_LABELS['operator'],
+            state='current',
+            details=f'Robot {boat.label}',
+        )
+        record_audit(request, user=request.user.email[:100], role=ROLE_LABELS['operator'],
+                     action='Started cleanup drive', module=COMPANION_MODULE,
+                     details=f'{req.request_id} with robot {boat.label}', status='success')
+    return Response(_drive_request_data(req, schedule), status=status.HTTP_201_CREATED)
+
+
 @api_view(['GET'])
 @permission_classes([HasRole(
     *ADMIN,
@@ -855,7 +971,7 @@ class RequestViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
         'mayor_approve': MAYOR,
         'unpark': ADMIN + MAYOR,
         'submit_trash_report': ADMIN + REQUESTERS,
-        'bot_detections': ADMIN,
+        'troid_count': ADMIN + REQUESTERS,
         'post_cleanup_comparison': ADMIN,
     }
 
@@ -1019,13 +1135,13 @@ class RequestViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
         session can't be marked finished without them. 'processing' only remains for
         sessions that were finished before the figures were required."""
         req = self.get_object()
-        if req.status not in ('approved', 'processing'):
+        if req.status not in ('approved', 'ongoing', 'processing'):
             return Response({'error': 'Request is not awaiting a trash report'}, status=status.HTTP_400_BAD_REQUEST)
         serializer = TrashReportSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         report = serializer.validated_data
 
-        session_just_finished = req.status == 'approved'
+        session_just_finished = req.status in ('approved', 'ongoing')
         if session_just_finished:
             req.session_completed_at = timezone.now()
         req.bags = report['bags']
@@ -1034,10 +1150,7 @@ class RequestViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
         req.recyclable_kg = report['recyclable_kg']
         req.trash_categories = report['trash_categories']
 
-        schedule = DeploymentSchedule.objects.filter(request_id=req.request_id).order_by('-id').first()
-        cleanup_type = schedule.cleanup_type if schedule else 'unsupported'
-
-        req.status = 'pending_verification' if cleanup_type == 'troid_supported' else 'completed'
+        req.status = 'completed'
         req.save()
         actor = request.user.name if hasattr(request, 'user') and hasattr(request.user, 'name') else 'Admin'
         if session_just_finished:
@@ -1069,25 +1182,29 @@ class RequestViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
         return Response({'status': req.status})
 
     @action(detail=True, methods=['get'])
-    def bot_detections(self, request, request_id=None):
+    def troid_count(self, request, request_id=None):
+        """What the robot counted on this cleanup, to pre-fill the trash report."""
         req = self.get_object()
-        if req.status != 'pending_verification':
-            return Response({'error': 'Request is not pending verification'}, status=status.HTTP_400_BAD_REQUEST)
-        # No live bot-detection feed is wired up yet, so for TROID-supported cleanups the
-        # trash collection report CENRO files in is treated as the bot's detected output —
-        # CENRO then reviews/corrects it in the verification step below.
-        return Response({'categories': req.trash_categories or {}})
+        detections = list(req.detection_events.all())
+        supported = DeploymentSchedule.objects.filter(
+            request_id=req.request_id, cleanup_type='troid_supported',
+        ).exists()
+        counts = troid_counts(detections)
+        return Response({
+            'troid_assisted': supported or bool(detections),
+            'categories': counts,
+            'total': sum(counts.values()),
+        })
 
     @action(detail=False, methods=['get'], url_path='post-cleanup-comparison')
     def post_cleanup_comparison(self, request):
-        """For each finished cleanup drive, compare TROID's detected trash against what
-        CENRO actually confirmed. Until a live bot-detection feed exists, TROID-supported
-        cleanups treat the manually filed trash collection report as the bot's detected
-        output, and the CENRO-verified categories (once verified) as the confirmed count.
+        """For each finished cleanup drive, compare what TROID counted against the filed
+        trash report. Cleanups from before the robot's counts were recorded have no
+        detections: for those the old report and CENRO's verified figures are compared.
         Unsupported cleanups have no bot involved, so the report is just the user's count."""
         reqs = Request.objects.filter(
-            archived=False, status__in=['completed', 'segregated', 'pending_verification', 'verified']
-        ).exclude(trash_categories={}).select_related('collection_area')
+            archived=False, status__in=['completed', 'segregated', 'verified']
+        ).exclude(trash_categories={}).select_related('collection_area').prefetch_related('detection_events')
 
         schedules_by_request = {
             s.request_id: s.cleanup_type
@@ -1098,7 +1215,11 @@ class RequestViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
         for req in reqs:
             cleanup_type = schedules_by_request.get(req.request_id, 'unsupported')
 
-            if cleanup_type == 'troid_supported':
+            counted = troid_counts(req.detection_events.all())
+            if counted:
+                troid_categories = counted
+                user_categories = req.trash_categories or {}
+            elif cleanup_type == 'troid_supported':
                 troid_categories = req.trash_categories or {}
                 user_categories = req.verified_categories or {}
             else:
@@ -1137,34 +1258,6 @@ class RequestViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
                 'collection_area': collection_area,
             })
         return Response(results)
-
-    @action(detail=True, methods=['post'])
-    def submit_verification(self, request, request_id=None):
-        req = self.get_object()
-        if req.status != 'pending_verification':
-            return Response({'error': 'Request is not pending verification'}, status=status.HTTP_400_BAD_REQUEST)
-        req.verified_categories = request.data.get('verified_categories') or {}
-        req.verification_notes = (request.data.get('verification_notes') or '').strip()
-        req.verified_at = timezone.now()
-        req.status = 'verified'
-        req.save()
-        req.detection_events.update(is_verified=True)
-        StatusHistory.objects.create(
-            request=req,
-            label='Detection Verified by CENRO',
-            date=timezone.now(),
-            actor=request.user.name if hasattr(request, 'user') and hasattr(request.user, 'name') else 'Admin',
-            role='Admin',
-            state='current',
-            details=req.verification_notes,
-        )
-        notify_request_update(
-            req,
-            'verified',
-            'Your cleanup request record is finalized',
-            f'CENRO has verified the bot detection accuracy for request {req.request_id}. The cleanup record is now complete.',
-        )
-        return Response({'status': req.status})
 
     def destroy(self, request, *args, **kwargs):
         req = self.get_object()

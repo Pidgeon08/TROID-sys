@@ -1,8 +1,9 @@
-export const TABS = ["All Requests", "Pending City Admin", "Pending Admin", "Approved", "Unscheduled", "Pending Verification", "Verified", "Parked"];
+export const TABS = ["All Requests", "Pending City Admin", "Pending Admin", "Approved", "Ongoing", "Unscheduled", "Verified", "Parked"];
 
 export const REQUEST_STATUS_STYLES = {
   Pending: "bg-amber-50 text-amber-700",
   Approved: "bg-emerald-50 text-emerald-700",
+  Ongoing: "bg-sky-50 text-sky-700",
   Declined: "bg-red-50 text-red-700",
   Parked: "bg-purple-50 text-purple-700",
   "Pending City Admin Approval": "bg-amber-50 text-amber-700",
@@ -26,6 +27,13 @@ export function matchesRequestQuery(req, query) {
     (req.type || '').toLowerCase().includes(q) ||
     (req.requestedBy?.name || '').toLowerCase().includes(q) ||
     (req.location?.name || '').toLowerCase().includes(q)
+  );
+}
+
+// Fills the blank trash report fields with what the robot counted (0 if it saw none).
+export function fillTroidCounts(values, counts) {
+  return Object.fromEntries(
+    Object.entries(values).map(([cat, value]) => [cat, value === "" ? String(counts[cat] || 0) : value])
   );
 }
 

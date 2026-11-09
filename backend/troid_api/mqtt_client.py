@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 import paho.mqtt.client as mqtt
 from django.utils import timezone
 from .bot_auth import verify_bot_message
+from .drives import active_drive
 from .models import Boat, DeploymentSchedule, DetectionEvent, Request
 from .realtime import broadcast
 
@@ -101,16 +102,17 @@ def _handle_detection(bot_id, payload):
             print(f"[MQTT] Skipping detection without a location for Boat {bot_id}")
             return
 
-        # Same as the log_detection view: keep the boat's last position and link
-        # the detection to today's deployment request (the barangay heatmap filters on it).
+        # Keep the boat's last position, and link the detection to the drive the operator
+        # started, else to today's deployment (the barangay heatmap filters on this link).
         boat.last_latitude = lat
         boat.last_longitude = lng
         boat.save()
-        linked_request = None
-        today = timezone.now().astimezone(APP_TIMEZONE).strftime('%Y-%m-%d')
-        schedule = DeploymentSchedule.objects.filter(bot=boat, day=today).order_by('-id').first()
-        if schedule and schedule.request_id:
-            linked_request = Request.objects.filter(request_id=schedule.request_id).first()
+        linked_request = active_drive(boat)
+        if linked_request is None:
+            today = timezone.now().astimezone(APP_TIMEZONE).strftime('%Y-%m-%d')
+            schedule = DeploymentSchedule.objects.filter(bot=boat, day=today).order_by('-id').first()
+            if schedule and schedule.request_id:
+                linked_request = Request.objects.filter(request_id=schedule.request_id).first()
 
         detection = DetectionEvent.objects.create(
             boat=boat,
