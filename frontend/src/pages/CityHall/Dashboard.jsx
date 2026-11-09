@@ -99,7 +99,7 @@ export default function Dashboard() {
             <div className="w-9 h-9 rounded-full bg-blue-100 flex items-center justify-center text-blue-700">
               <ShieldCheck className="w-5 h-5" />
             </div>
-            <h1 className="text-[28px] font-bold text-slate-900 tracking-tight leading-none">City Hall Dashboard</h1>
+            <h1 className="text-[28px] font-bold text-slate-900 tracking-tight leading-none">City Admin Dashboard</h1>
           </div>
           <p className="text-slate-500 text-sm mt-1.5 font-medium">Overview of TROID bot requests from barangays. Review pending requests below.</p>
         </div>

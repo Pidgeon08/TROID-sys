@@ -161,7 +161,7 @@ export default function BarangayViewRequest() {
           Back to Requests
         </button>
         <div className="flex items-center gap-2.5">
-          <NotificationBell currentUser={currentUser} userType="barangay" />
+          <NotificationBell currentUser={currentUser} userType="barangay" requestId={id} />
           <button className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
             <FileText size={15} />
             Download All
@@ -252,7 +252,11 @@ export default function BarangayViewRequest() {
                 <MapPin size={16} className="text-emerald-600" />
               </div>
               <div className="text-sm">
-                <p className="font-semibold text-slate-800">{request.location?.name}</p>
+                {request.location?.name && (
+                  <p className="font-semibold text-slate-800">
+                    <span className="font-normal text-slate-500">Landmark: </span>{request.location.name}
+                  </p>
+                )}
                 <p className="text-slate-500 mt-0.5">{request.location?.barangay}</p>
                 <p className="text-slate-500">{request.location?.municipality}</p>
                 <p className="text-slate-500">{request.location?.province}</p>

@@ -34,6 +34,7 @@ const ACTIONS = [
   "Bot deployed",
   "Bot archived",
   "Maintenance scheduled",
+  "Maintenance cancelled",
   "User added",
   "User updated",
   "User removed",

@@ -37,6 +37,52 @@ export function fillTroidCounts(values, counts) {
   );
 }
 
+// YYYY-MM-DD in Manila, the zone the server dates schedules and sessions in.
+export function manilaDate(date) {
+  return date.toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
+}
+
+// Finished cleanup drives per day, from the 1st of the current month through today.
+export function cleanupsThisMonth(requests) {
+  const today = manilaDate(new Date());
+  const month = today.slice(0, 7);
+  const days = Array.from({ length: Number(today.slice(8)) }, (_, i) => ({
+    date: `${month}-${String(i + 1).padStart(2, '0')}`,
+    bags: 0,
+    drives: 0,
+  }));
+  requests.forEach((request) => {
+    if (request.archived || !request.session_completed_at) return;
+    const finished = manilaDate(new Date(request.session_completed_at));
+    if (!finished.startsWith(month)) return;
+    const day = days[Number(finished.slice(8)) - 1];
+    if (!day) return;
+    day.bags += Number(request.bags) || 0;
+    day.drives += 1;
+  });
+  return days;
+}
+
+// Where a cleanup happens. location_name is only a landmark to guide the crew.
+export function requestArea(raw) {
+  return raw.collection_area_detail?.name || raw.barangay || '';
+}
+
+// The five collection areas with the most bags. `max` scales the bars to the top area.
+export function topCollectionAreas(requests) {
+  const areas = {};
+  requests.forEach((req) => {
+    const bags = Number(req.bags) || 0;
+    if (bags === 0) return;
+    const area = req.collection_area_detail;
+    const key = `${area?.id ?? ''}|${req.barangay}`;
+    areas[key] = areas[key] || { key, name: area?.name || 'No collection area', barangay: req.barangay || '', bags: 0 };
+    areas[key].bags += bags;
+  });
+  const top = Object.values(areas).sort((a, b) => b.bags - a.bags).slice(0, 5);
+  return top.map((area) => ({ ...area, max: top[0].bags }));
+}
+
 export function formatFileSize(bytes) {
   const megabytes = bytes / (1024 * 1024);
   return megabytes >= 1 ? `${megabytes.toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;

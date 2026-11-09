@@ -11,7 +11,7 @@ export const USER_MANUALS = {
       description: 'Your at-a-glance view of fleet activity, collection totals, and hotspots.',
       keywords: ['overview', 'home', 'stats', 'priority areas', 'hotspots'],
       steps: [
-        'Check the "Trash Collected" and "Deployed Cleaning" cards for a running total across all barangays.',
+        'Check the "Trash Collected" and "Cleanup Drives Done" cards for the current month across all barangays. Hover over a graph to see the figure for each day.',
         'The Collective Hotspots map shows where waste is concentrated — switch between Today/Weekly/Monthly or pick a custom date range.',
         'The Priority Areas panel lists barangays TROID has automatically flagged for a follow-up drive based on recent collection volume, along with which bot was booked.',
         'Most Trash Collected and Recent Activities give quick links into Reports and Requests for more detail.',
@@ -26,7 +26,8 @@ export const USER_MANUALS = {
       steps: [
         'Use the search bar and status filter to find a specific bot by ID, operator, or location.',
         'Click a row to select a bot and see its connection, battery, assigned location, and total trash collected in the sidebar.',
-        'Use Quick Action to schedule maintenance (which takes the bot offline), jump to its deployment schedule, or archive it if it is being retired.',
+        'A bot shows Paired while it is reporting to the system, Unpaired when it is not, and Under maintenance on a date it has maintenance scheduled. Creating a new device key with Connect robot sets it back to Unpaired until the robot reports in with that key.',
+        'Use Quick Action to schedule or cancel maintenance, jump to its deployment schedule, or archive it if it is being retired.',
         'Click "Add bot" to register a new unit to the fleet.',
       ],
     },
@@ -198,7 +199,7 @@ export const USER_MANUALS = {
       description: 'File a new cleanup request for the City Admin and CENRO to review.',
       keywords: ['new request', 'submit', 'send request', 'cleanup'],
       steps: [
-        'Fill in the request details — location, preferred date/time, and notes — and attach a collection area if you\'ve already had one approved.',
+        'Fill in the request details — landmark, preferred date/time, and notes — and attach a collection area if you\'ve already had one approved.',
         'Submit it; it first goes to the City Admin for approval, then to CENRO for scheduling.',
         'Track its progress afterward in My Requests.',
       ],

@@ -168,6 +168,21 @@ class LetterUploadTests(TestCase):
                 self.assertEqual(response.status_code, 201)
                 self.assertEqual(response.json()['letter_content_type'], content_type)
 
+    def test_a_landmark_is_optional(self):
+        area = CollectionArea.objects.create(name='Bridge', barangay='Poro', status='approved')
+        data = {
+            'request_id': 'REQ-TEST',
+            'barangay': 'Poro',
+            'location_name': '',
+            'collection_area': area.id,
+            'letter': {'name': 'real.pdf', 'data': self.PDF},
+        }
+
+        response = self.client.post('/api/requests/', data, format='json', **session_header(self.user))
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()['collection_area_detail']['name'], 'Bridge')
+
     def test_a_letter_is_required(self):
         response = self.create()
 
@@ -1136,6 +1151,14 @@ class DeviceKeyEndpointTests(TestCase):
         bot_auth._last_ts.clear()
         with self.assertLogs('troid_api.bot_auth', 'WARNING'):
             self.assertIsNone(bot_auth.verify_bot_message(*signed_message(self.boat, 'heartbeat', {}, key=first)))
+
+    def test_creating_a_key_unpairs_the_robot(self):
+        Boat.objects.filter(id=self.boat.id).update(is_online=True, last_seen=timezone.now())
+
+        self.client.post(self.url, **session_header(self.admin))
+
+        listing = self.client.get('/api/boats/', **session_header(self.admin)).json()
+        self.assertFalse(next(b for b in listing if b['id'] == self.boat.id)['is_online'])
 
     def test_bot_without_recent_heartbeat_lists_as_offline(self):
         # is_online is still True: the offline checker never ran (BACKGROUND_WORKERS=False).

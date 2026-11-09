@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { FileText, Clock, CheckCircle2, Eye, MapPin, Recycle } from "lucide-react";
 import api from "../../services/api";
+import { useUnreadNotifications } from "../../hooks/useUnreadNotifications";
+import { UnreadDot } from "../../components/ui/UnreadDot";
 import { mapRequest, matchesRequestQuery } from "../../constants/requests";
 import { SummaryCard } from "../../components/ui/SummaryCard";
 
@@ -36,6 +38,7 @@ const BCOL_STATUS_DOT = {
 };
 
 export default function BarangayRequests({ currentUser }) {
+  const unreadRequestIds = new Set(useUnreadNotifications(currentUser?.id).map((n) => n.request_id));
   const [activeTab, setActiveTab] = useState("All");
   const [searchQuery, setSearchQuery] = useState("");
   const [requests, setRequests] = useState([]);
@@ -144,7 +147,12 @@ export default function BarangayRequests({ currentUser }) {
                   const isPendingMayor = req.status === "Pending City Admin Approval";
                   return (
                   <tr key={req.id} className="border-t border-slate-50 transition-colors hover:bg-slate-50/60">
-                    <td className="px-5 py-3.5 font-semibold text-slate-800">{req.id}</td>
+                    <td className="px-5 py-3.5 font-semibold text-slate-800">
+                      <span className="inline-flex items-center gap-2">
+                        {req.id}
+                        {unreadRequestIds.has(req.id) && <UnreadDot />}
+                      </span>
+                    </td>
                     <td className="px-5 py-3.5 text-slate-600">{req.type}</td>
                     <td className="px-5 py-3.5 text-slate-600 flex items-center gap-1"><MapPin className="w-3 h-3 text-slate-400" />{req.location?.barangay}</td>
                     <td className="px-5 py-3.5 text-slate-500">

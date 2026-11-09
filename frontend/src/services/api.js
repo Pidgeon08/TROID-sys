@@ -106,7 +106,6 @@ export const api = {
   postCleanupComparison: () => api.get('/requests/post-cleanup-comparison/'),
 
   notifications: (userId) => api.get(`/notifications/?user_id=${userId}`),
-  unreadNotificationCount: (userId) => api.get(`/notifications/unread-count/?user_id=${userId}`),
   markNotificationRead: (id) => api.post(`/notifications/${id}/mark_read/`),
   markAllNotificationsRead: (userId) => api.post('/notifications/mark-all-read/', { user_id: userId }),
 

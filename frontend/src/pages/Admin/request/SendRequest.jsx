@@ -3,8 +3,7 @@ import { useNavigate } from "react-router-dom";
 import {
   ArrowLeft,
   MapPin,
-  User,
-  Phone,
+  Layers,
   Camera,
   Send,
   FileText,
@@ -25,30 +24,25 @@ export default function SendRequest() {
   const navigate = useNavigate();
   const [formData, setFormData] = useState({
     location: "",
-    assignedBarangayId: "",
-    contact: "",
+    barangay: "",
+    collectionAreaId: "",
     date: "",
     requestType: "Cleanup",
   });
   const [photoBase64List, setPhotoBase64List] = useState([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [barangays, setBarangays] = useState([]);
+  const [collectionAreas, setCollectionAreas] = useState([]);
+  const [areasLoading, setAreasLoading] = useState(true);
   const [showOverview, setShowOverview] = useState(false);
   const [viewPhoto, setViewPhoto] = useState(false);
   const [letterFile, setLetterFile] = useState(null);
   const [selectedPhotoIndex, setSelectedPhotoIndex] = useState(0);
 
   useEffect(() => {
-    const fetchBarangays = async () => {
-      try {
-        const data = await api.users();
-        const barangayUsers = Array.isArray(data) ? data.filter((u) => u.role === "barangay" || u.role === "ngo") : [];
-        setBarangays(barangayUsers);
-      } catch (err) {
-        console.error("Failed to fetch barangays:", err);
-      }
-    };
-    fetchBarangays();
+    api.collectionAreas({ status: "approved" })
+      .then((areas) => setCollectionAreas(Array.isArray(areas) ? areas : []))
+      .catch((err) => console.error("Failed to fetch collection areas:", err))
+      .finally(() => setAreasLoading(false));
   }, []);
 
   const handleChange = (e) => {
@@ -80,11 +74,14 @@ export default function SendRequest() {
     });
   };
 
-  const selectedBarangay = barangays.find((brgy) => brgy.id === parseInt(formData.assignedBarangayId)) || null;
+  // A request needs a collection area, so only barangays that have one can be chosen.
+  const barangays = [...new Set(collectionAreas.map((area) => area.barangay).filter(Boolean))].sort();
+  const barangayAreas = collectionAreas.filter((area) => area.barangay === formData.barangay);
+  const selectedCollectionArea = barangayAreas.find((area) => String(area.id) === String(formData.collectionAreaId));
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (!formData.location || !formData.assignedBarangayId || !formData.contact || !formData.date) {
+    if (!formData.barangay || !formData.collectionAreaId || !formData.date) {
       alert("Please fill in all required fields.");
       return;
     }
@@ -111,11 +108,11 @@ export default function SendRequest() {
         request_type: formData.requestType,
         requested_by_name: "CENRO Admin",
         requested_by_role: "admin",
-        requested_by_barangay: selectedBarangay ? selectedBarangay.name : "",
-        contact: formData.contact || "000000000000",
+        requested_by_barangay: formData.barangay,
         email: "admin@cenro.gov.ph",
         location_name: formData.location,
-        barangay: selectedBarangay ? selectedBarangay.name : "",
+        collection_area: formData.collectionAreaId,
+        barangay: formData.barangay,
         municipality: "",
         province: "",
         letter: { name: letterFile.name, data: letterFile.data },
@@ -154,18 +151,24 @@ export default function SendRequest() {
         <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-6">
           <form onSubmit={handleSubmit} className="space-y-5">
             <div>
-              <label className="block text-xs font-semibold text-slate-500 mb-1.5">Location / Address</label>
+              <label className="block text-xs font-semibold text-slate-500 mb-1.5">Assign to Barangay</label>
               <div className="relative">
-                <MapPin size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                <input
-                  type="text"
-                  name="location"
-                  value={formData.location}
-                  onChange={handleChange}
-                  placeholder="Enter specific location (e.g., Carlatan Creek near bridge)"
-                  className="w-full rounded-lg border border-slate-200 bg-white py-2.5 pl-9 pr-3 text-sm text-slate-700 placeholder:text-slate-400 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
+                <MapPin size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                <select
+                  name="barangay"
+                  value={formData.barangay}
+                  onChange={(e) => setFormData({ ...formData, barangay: e.target.value, collectionAreaId: "" })}
+                  className="w-full appearance-none rounded-lg border border-slate-200 bg-white py-2.5 pl-9 pr-9 text-sm text-slate-700 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
                   required
-                />
+                >
+                  <option value="" disabled>
+                    {areasLoading ? "Loading barangays..." : barangays.length === 0 ? "No approved collection areas yet" : "Select a barangay"}
+                  </option>
+                  {barangays.map((barangay) => (
+                    <option key={barangay} value={barangay}>{barangay}</option>
+                  ))}
+                </select>
+                <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
               </div>
             </div>
 
@@ -185,21 +188,20 @@ export default function SendRequest() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-semibold text-slate-500 mb-1.5">Assign to Barangay</label>
+                <label className="block text-xs font-semibold text-slate-500 mb-1.5">Collection Area</label>
                 <div className="relative">
-                  <User size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <Layers size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
                   <select
-                    name="assignedBarangayId"
-                    value={formData.assignedBarangayId}
+                    name="collectionAreaId"
+                    value={formData.collectionAreaId}
                     onChange={handleChange}
-                    className="w-full appearance-none rounded-lg border border-slate-200 bg-white py-2.5 pl-9 pr-9 text-sm text-slate-700 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
+                    disabled={!formData.barangay}
+                    className="w-full appearance-none rounded-lg border border-slate-200 bg-white py-2.5 pl-9 pr-9 text-sm text-slate-700 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30 disabled:bg-slate-50 disabled:text-slate-400"
                     required
                   >
-                    <option value="" disabled>Select a barangay</option>
-                    {barangays.map((brgy) => (
-                      <option key={brgy.id} value={brgy.id}>
-                        {brgy.name}
-                      </option>
+                    <option value="" disabled>{formData.barangay ? "Select a collection area" : "Select a barangay first"}</option>
+                    {barangayAreas.map((area) => (
+                      <option key={area.id} value={area.id}>{area.name}</option>
                     ))}
                   </select>
                   <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
@@ -207,19 +209,19 @@ export default function SendRequest() {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-500 mb-1.5">Contact Number</label>
+                <label className="block text-xs font-semibold text-slate-500 mb-1.5">Landmark (Optional)</label>
                 <div className="relative">
-                  <Phone size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <MapPin size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                   <input
-                    type="tel"
-                    name="contact"
-                    value={formData.contact}
+                    type="text"
+                    name="location"
+                    value={formData.location}
                     onChange={handleChange}
-                    placeholder="09XX XXX XXXX"
+                    placeholder="e.g., Beside the barangay hall, near the bridge"
                     className="w-full rounded-lg border border-slate-200 bg-white py-2.5 pl-9 pr-3 text-sm text-slate-700 placeholder:text-slate-400 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
-                    required
                   />
                 </div>
+                <p className="text-[11px] text-slate-400 mt-1.5">A guide only, for the operator and the workers accompanying them.</p>
               </div>
             </div>
 
@@ -359,20 +361,20 @@ export default function SendRequest() {
             </div>
             <div className="p-6 space-y-3 max-h-[60vh] overflow-y-auto">
               <div className="flex items-center justify-between py-2 text-sm border-b border-slate-50">
-                <span className="text-slate-500">Location</span>
-                <span className="font-medium text-slate-800 text-right">{formData.location}</span>
+                <span className="text-slate-500">Barangay</span>
+                <span className="font-medium text-slate-800 text-right">{formData.barangay || '—'}</span>
               </div>
               <div className="flex items-center justify-between py-2 text-sm border-b border-slate-50">
                 <span className="text-slate-500">Request Type</span>
                 <span className="font-medium text-slate-800 text-right">{formData.requestType}</span>
               </div>
               <div className="flex items-center justify-between py-2 text-sm border-b border-slate-50">
-                <span className="text-slate-500">Barangay</span>
-                <span className="font-medium text-slate-800 text-right">{selectedBarangay ? selectedBarangay.name : '—'}</span>
+                <span className="text-slate-500">Collection Area</span>
+                <span className="font-medium text-slate-800 text-right">{selectedCollectionArea?.name || '—'}</span>
               </div>
               <div className="flex items-center justify-between py-2 text-sm border-b border-slate-50">
-                <span className="text-slate-500">Contact</span>
-                <span className="font-medium text-slate-800 text-right">{formData.contact || '—'}</span>
+                <span className="text-slate-500">Landmark</span>
+                <span className="font-medium text-slate-800 text-right">{formData.location || '—'}</span>
               </div>
               <div className="flex items-center justify-between py-2 text-sm border-b border-slate-50">
                 <span className="text-slate-500">Preferred Date</span>

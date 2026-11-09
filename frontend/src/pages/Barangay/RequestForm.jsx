@@ -330,7 +330,7 @@ function RequestForm({ currentUser }) {
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (!formData.location || !formData.collectionAreaId || !formData.date || !formData.time) {
+    if (!formData.collectionAreaId || !formData.date || !formData.time) {
       alert("Please fill in all required fields.");
       return;
     }
@@ -432,7 +432,7 @@ function RequestForm({ currentUser }) {
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-500 mb-1.5">Location / Address</label>
+              <label className="block text-xs font-semibold text-slate-500 mb-1.5">Landmark (Optional)</label>
               <div className="relative">
                 <MapPin size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                 <input
@@ -440,11 +440,11 @@ function RequestForm({ currentUser }) {
                   name="location"
                   value={formData.location}
                   onChange={handleChange}
-                  placeholder={barangayLocation ? `Enter specific location (e.g., ${barangayLocation})` : "Enter specific location (e.g., nearby creek or riverbank)"}
+                  placeholder="e.g., Beside the barangay hall, near the bridge"
                   className="w-full rounded-lg border border-slate-200 bg-white py-2.5 pl-9 pr-3 text-sm text-slate-700 placeholder:text-slate-400 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
-                  required
                 />
               </div>
+              <p className="text-[11px] text-slate-400 mt-1.5">A guide only, for the operator and the workers accompanying them.</p>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -642,8 +642,8 @@ function RequestForm({ currentUser }) {
                 <span className="font-medium text-slate-800 text-right">{selectedCollectionArea?.name || '—'}</span>
               </div>
               <div className="flex items-center justify-between py-2 text-sm border-b border-slate-50">
-                <span className="text-slate-500">Location</span>
-                <span className="font-medium text-slate-800 text-right">{formData.location}</span>
+                <span className="text-slate-500">Landmark</span>
+                <span className="font-medium text-slate-800 text-right">{formData.location || '—'}</span>
               </div>
               <div className="flex items-center justify-between py-2 text-sm border-b border-slate-50">
                 <span className="text-slate-500">Barangay</span>

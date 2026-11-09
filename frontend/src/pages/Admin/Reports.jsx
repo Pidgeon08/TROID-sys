@@ -19,7 +19,7 @@ import jsPDF from 'jspdf';
 import * as XLSX from 'xlsx-js-style';
 import api from '../../services/api';
 import { logAudit } from '../../services/auditLog';
-import { TRASH_CATEGORIES, REQUEST_STATUS_STYLES, toStatusLabel } from '../../constants/requests';
+import { TRASH_CATEGORIES, REQUEST_STATUS_STYLES, toStatusLabel, requestArea } from '../../constants/requests';
 
 // Distinct color per trash category, so the waste-type donut segments are visually
 // distinguishable instead of every slice sharing one color.
@@ -222,7 +222,7 @@ const Reports = () => {
           .slice(0, 5)
           .map((r) => ({
             date: r.date_submitted ? new Date(r.date_submitted).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '-',
-            zone: r.location_name || '-',
+            zone: requestArea(r) || '-',
             bags: Number(r.bags) || 0,
             unit: r.bot_id ? `Boat-${r.bot_id}` : '-',
             operator: r.operator ? `Operator-${r.operator}` : '-',
@@ -339,8 +339,8 @@ const Reports = () => {
     const summarize = (reqs) => ({
       totalBags: reqs.reduce((sum, r) => sum + (Number(r.bags) || 0), 0),
       deployments: reqs.length,
-      zones: new Set(reqs.map((r) => r.location_name).filter(Boolean)).size,
-      hotspots: new Set(reqs.map((r) => r.location_name).filter(Boolean)).size,
+      zones: new Set(reqs.map(requestArea).filter(Boolean)).size,
+      hotspots: new Set(reqs.map(requestArea).filter(Boolean)).size,
     });
 
     const current = summarize(currentReqs);

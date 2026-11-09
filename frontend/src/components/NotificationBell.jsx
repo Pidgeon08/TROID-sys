@@ -2,8 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Bell } from "lucide-react";
 import api from "../services/api";
-
-const POLL_INTERVAL = 30000;
+import { notifyNotificationsChanged, useUnreadNotifications } from "../hooks/useUnreadNotifications";
 
 function routePrefix(userType) {
   if (userType === "mayorsoffice") return "mayorsoffice";
@@ -23,24 +22,22 @@ function timeAgo(dateString) {
   return `${days}d ago`;
 }
 
-const NotificationBell = ({ currentUser, userType, variant = "light" }) => {
-  const [unreadCount, setUnreadCount] = useState(0);
+const NotificationBell = ({ currentUser, userType, variant = "light", requestId = null }) => {
+  const unread = useUnreadNotifications(currentUser?.id);
+  const unreadCount = unread.length;
   const [notifications, setNotifications] = useState([]);
   const [open, setOpen] = useState(false);
   const panelRef = useRef(null);
   const navigate = useNavigate();
 
+  // Opening a request counts as seeing its notifications.
   useEffect(() => {
-    if (!currentUser?.id) return;
-    const fetchUnread = () => {
-      api.unreadNotificationCount(currentUser.id)
-        .then((res) => setUnreadCount(res.unread_count || 0))
-        .catch(() => {});
-    };
-    fetchUnread();
-    const interval = setInterval(fetchUnread, POLL_INTERVAL);
-    return () => clearInterval(interval);
-  }, [currentUser?.id]);
+    const seen = unread.filter((n) => requestId && n.request_id === requestId);
+    if (seen.length === 0) return;
+    Promise.all(seen.map((n) => api.markNotificationRead(n.id)))
+      .then(notifyNotificationsChanged)
+      .catch(() => {});
+  }, [unread, requestId]);
 
   useEffect(() => {
     const handleClickOutside = (e) => {
@@ -65,7 +62,7 @@ const NotificationBell = ({ currentUser, userType, variant = "light" }) => {
       try {
         await api.markNotificationRead(notif.id);
         setNotifications((prev) => prev.map((n) => (n.id === notif.id ? { ...n, is_read: true } : n)));
-        setUnreadCount((prev) => Math.max(0, prev - 1));
+        notifyNotificationsChanged();
       } catch {
         // ignore
       }

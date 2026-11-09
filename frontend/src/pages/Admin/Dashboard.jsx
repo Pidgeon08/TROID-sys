@@ -7,6 +7,8 @@ import { useNavigate, useOutletContext } from 'react-router-dom';
 import L from 'leaflet';
 import 'leaflet.heat';
 import api from '../../services/api';
+import MonthSparkline from '../../components/MonthSparkline';
+import { cleanupsThisMonth, requestArea, topCollectionAreas } from '../../constants/requests';
 
 // --- HeatmapLayer Component ---
 function HeatmapLayer({ points, type }) {
@@ -94,41 +96,29 @@ const Dashboard = () => {
 
   const [loading, setLoading] = useState(true);
   const [addressPoints, setAddressPoints] = useState([]);
-  const [topCreeks, setTopCreeks] = useState([]);
+  const [topAreas, setTopAreas] = useState([]);
   const [recentActivities, setRecentActivities] = useState([]);
-  const [boatsData, setBoatsData] = useState([]);
   const [requestsData, setRequestsData] = useState([]);
   const [priorityAreas, setPriorityAreas] = useState([]);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [heatmapRes, requestsRes, boatsRes, priorityRes] = await Promise.all([
+        const [heatmapRes, requestsRes, priorityRes] = await Promise.all([
           api.getHeatmap(),
           api.requests(),
-          api.boats(),
           api.priorityAreas(),
         ]);
 
         setAddressPoints(Array.isArray(heatmapRes) ? heatmapRes : []);
         setRequestsData(Array.isArray(requestsRes) ? requestsRes : []);
-        setBoatsData(Array.isArray(boatsRes) ? boatsRes : []);
         setPriorityAreas(Array.isArray(priorityRes) ? priorityRes : []);
 
-        const creekMap = {};
-        requestsRes.forEach(req => {
-          if (req.location_name) {
-            if (!creekMap[req.location_name]) {
-              creekMap[req.location_name] = { name: req.location_name, bags: 0, max: 25 };
-            }
-            creekMap[req.location_name].bags += (Number(req.bags) || 0);
-          }
-        });
-        setTopCreeks(Object.values(creekMap).sort((a, b) => b.bags - a.bags).slice(0, 5));
+        setTopAreas(topCollectionAreas(requestsRes));
 
         setRecentActivities(
           requestsRes.slice(0, 5).map(req => ({
-            text: `Request ${req.request_id} submitted for ${req.location_name}`,
+            text: `Request ${req.request_id} submitted for ${requestArea(req)}`,
             time: req.date_submitted
               ? new Date(req.date_submitted).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
               : req.date_submitted,
@@ -144,8 +134,10 @@ const Dashboard = () => {
     fetchData();
   }, []);
 
-  const totalBags = requestsData.reduce((sum, r) => sum + (Number(r.bags) || 0), 0);
-  const activeBots = boatsData.filter(b => b.is_active).length;
+  const monthDays = cleanupsThisMonth(requestsData);
+  const monthBags = monthDays.reduce((sum, day) => sum + day.bags, 0);
+  const monthDrives = monthDays.reduce((sum, day) => sum + day.drives, 0);
+  const monthName = new Date().toLocaleDateString('en-US', { month: 'long', timeZone: 'Asia/Manila' });
 
   if (loading) {
     return (
@@ -182,51 +174,29 @@ const Dashboard = () => {
                 <div className="flex-1 min-w-0">
                   <h3 className="text-[15px] font-semibold text-slate-900 truncate">Trash Collected</h3>
                   <div className="flex items-baseline gap-2.5 mt-2">
-                    <span className="text-3xl font-bold text-slate-950 tracking-tight">{totalBags}</span>
-                    <span className="text-sm font-semibold text-slate-500">Bags</span>
+                    <span className="text-3xl font-bold text-slate-950 tracking-tight">{monthBags}</span>
+                    <span className="text-sm font-semibold text-slate-500">Bags in {monthName}</span>
                   </div>
                 </div>
               </div>
-              <div className="w-full h-16 mt-6 relative overflow-hidden rounded-b-2xl">
-                <svg className="w-full h-full" viewBox="0 0 340 64" preserveAspectRatio="none">
-                  <defs>
-                    <linearGradient id="blueGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#2563eb" stopOpacity="0.25" />
-                      <stop offset="100%" stopColor="#2563eb" stopOpacity="0.00" />
-                    </linearGradient>
-                  </defs>
-                  <path d="M0,52 C60,42 90,12 130,22 C170,32 210,4 270,38 C300,55 320,40 340,48 L340,64 L0,64 Z" fill="url(#blueGrad)" />
-                  <path d="M0,52 C60,42 90,12 130,22 C170,32 210,4 270,38 C300,55 320,40 340,48" fill="none" stroke="#2563eb" strokeWidth="2.5" strokeLinecap="round" />
-                </svg>
-              </div>
+              <MonthSparkline days={monthDays.map((d) => ({ date: d.date, value: d.bags }))} color="#2563eb" unit="bag" />
             </div>
 
-            {/* Stat Card: Deployed Bots */}
+            {/* Stat Card: Cleanup Drives Done */}
             <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] flex flex-col justify-between overflow-hidden relative group hover:shadow-[0_6px_24px_rgba(0,0,0,0.06)] transition-all duration-200">
               <div className="p-6 pb-0 flex items-start gap-4">
                 <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 shrink-0">
                   <Ship className="w-6 h-6" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <h3 className="text-[15px] font-semibold text-slate-900 truncate">Deployed Cleaning in Barangays</h3>
+                  <h3 className="text-[15px] font-semibold text-slate-900 truncate">Cleanup Drives Done</h3>
                   <div className="flex items-baseline gap-2.5 mt-2">
-                    <span className="text-3xl font-bold text-slate-950 tracking-tight">{activeBots}</span>
-                    <span className="text-sm font-semibold text-slate-500">Bots</span>
+                    <span className="text-3xl font-bold text-slate-950 tracking-tight">{monthDrives}</span>
+                    <span className="text-sm font-semibold text-slate-500">Drives in {monthName}</span>
                   </div>
                 </div>
               </div>
-              <div className="w-full h-16 mt-6 relative overflow-hidden rounded-b-2xl">
-                <svg className="w-full h-full" viewBox="0 0 340 64" preserveAspectRatio="none">
-                  <defs>
-                    <linearGradient id="greenGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#10b981" stopOpacity="0.25" />
-                      <stop offset="100%" stopColor="#10b981" stopOpacity="0.00" />
-                    </linearGradient>
-                  </defs>
-                  <path d="M0,54 C40,48 70,22 110,32 C150,42 190,8 240,24 C280,36 310,25 340,38 L340,64 L0,64 Z" fill="url(#greenGrad)" />
-                  <path d="M0,54 C40,48 70,22 110,32 C150,42 190,8 240,24 C280,36 310,25 340,38" fill="none" stroke="#10b981" strokeWidth="2.5" strokeLinecap="round" />
-                </svg>
-              </div>
+              <MonthSparkline days={monthDays.map((d) => ({ date: d.date, value: d.drives }))} color="#10b981" unit="drive" />
             </div>
 
           </div>
@@ -372,20 +342,21 @@ const Dashboard = () => {
                 View all
               </button>
             </div>
-            {topCreeks.length === 0 ? (
+            {topAreas.length === 0 ? (
               <p className="text-xs text-slate-400 py-2">No collection data yet.</p>
             ) : (
             <div className="flex flex-col gap-4">
-              {topCreeks.map((item, idx) => (
-                <div key={idx} className="flex items-center gap-3.5">
+              {topAreas.map((item) => (
+                <div key={item.key} className="flex items-center gap-3.5">
                   <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-900 shrink-0">
                     <MapPin className="w-4 h-4" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="flex justify-between text-xs font-bold text-slate-900 mb-1.5">
+                    <div className="flex justify-between gap-2 text-xs font-bold text-slate-900">
                       <span className="truncate">{item.name}</span>
                       <span className="shrink-0">{item.bags} Bags</span>
                     </div>
+                    <p className="truncate text-[11px] text-slate-500 mt-0.5 mb-1.5">{item.barangay}</p>
                     <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
                       <div
                         className="h-full bg-[#1b4de4] rounded-full transition-all duration-500"

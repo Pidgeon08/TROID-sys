@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useOutletContext } from "react-router-dom";
 import {
   Search,
   FileText,
@@ -11,6 +11,8 @@ import {
   Signature,
 } from "lucide-react";
 import api from "../../services/api";
+import { useUnreadNotifications } from "../../hooks/useUnreadNotifications";
+import { UnreadDot } from "../../components/ui/UnreadDot";
 import { mapRequest, matchesRequestQuery } from "../../constants/requests";
 import { SummaryCard } from "../../components/ui/SummaryCard";
 import { Pagination } from "../../components/ui/Pagination";
@@ -51,6 +53,8 @@ const STATUS_DOT = {
 
 export default function Requests() {
   const navigate = useNavigate();
+  const { currentUser } = useOutletContext() || {};
+  const unreadRequestIds = new Set(useUnreadNotifications(currentUser?.id).map((n) => n.request_id));
   const [activeTab, setActiveTab] = useState("All Requests");
   const [currentPage, setCurrentPage] = useState(1);
   const [requests, setRequests] = useState([]);
@@ -154,7 +158,12 @@ export default function Requests() {
             <tbody>
               {paginated.map((req) => (
                 <tr key={req.id} className="border-t border-slate-50 hover:bg-slate-50/60 transition-colors">
-                  <td className="px-5 py-3.5 font-semibold text-slate-800">{req.id}</td>
+                  <td className="px-5 py-3.5 font-semibold text-slate-800">
+                    <span className="inline-flex items-center gap-2">
+                      {req.id}
+                      {unreadRequestIds.has(req.id) && <UnreadDot />}
+                    </span>
+                  </td>
                   <td className="px-5 py-3.5 text-slate-600">{req.type}</td>
                   <td className="px-5 py-3.5 text-slate-600">{req.requestedBy?.name}</td>
                   <td className="px-5 py-3.5 text-slate-600">{req.location?.barangay}</td>

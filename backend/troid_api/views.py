@@ -830,7 +830,9 @@ class BoatViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
         replacing any previous one. It is shown only in this response."""
         boat = self.get_object()
         boat.device_key = secrets.token_hex(32)
-        boat.save(update_fields=['device_key'])
+        # Unpaired until the robot reports in with the new key.
+        boat.is_online = False
+        boat.save(update_fields=['device_key', 'is_online'])
         record_audit(request, user=request.user.email[:100], role=ROLE_LABELS.get(request.user.role, request.user.role),
                      action='Created robot device key', module='Bot Management',
                      details=f'{boat.label} ({boat.name})', status='success')

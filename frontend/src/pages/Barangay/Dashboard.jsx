@@ -7,7 +7,7 @@ import "leaflet/dist/leaflet.css";
 import L from "leaflet";
 import "leaflet.heat";
 import api from "../../services/api";
-import { REQUEST_STATUS_STYLES } from "../../constants/requests";
+import { REQUEST_STATUS_STYLES, requestArea, topCollectionAreas } from "../../constants/requests";
 
 function HeatmapLayer({ points, type }) {
   const map = useMap();
@@ -146,20 +146,11 @@ const Dashboard = ({ currentUser }) => {
 
         setAddressPoints(Array.isArray(heatmapRes) ? heatmapRes : []);
 
-        const locationMap = {};
-        barangayRequests.forEach(req => {
-          if (req.location_name) {
-            if (!locationMap[req.location_name]) {
-              locationMap[req.location_name] = { name: req.location_name, bags: 0, max: 25 };
-            }
-            locationMap[req.location_name].bags += (Number(req.bags) || 0);
-          }
-        });
-        setTopLocations(Object.values(locationMap).sort((a, b) => b.bags - a.bags).slice(0, 5));
+        setTopLocations(topCollectionAreas(barangayRequests));
 
         setRecentActivities(
           barangayRequests.slice(0, 5).map(req => ({
-            text: `Request ${req.request_id} submitted for ${req.location_name}`,
+            text: `Request ${req.request_id} submitted for ${requestArea(req)}`,
             time: req.date_submitted
               ? new Date(req.date_submitted).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
               : req.date_submitted,
@@ -168,10 +159,11 @@ const Dashboard = ({ currentUser }) => {
 
         const latestPerLocation = {};
         barangayRequests.forEach(req => {
-          if (req.location_name) {
-            const current = latestPerLocation[req.location_name];
+          const area = requestArea(req);
+          if (area) {
+            const current = latestPerLocation[area];
             if (!current || new Date(req.date_submitted) > new Date(current.date_submitted)) {
-              latestPerLocation[req.location_name] = req;
+              latestPerLocation[area] = req;
             }
           }
         });
@@ -186,7 +178,7 @@ const Dashboard = ({ currentUser }) => {
         };
         setLocationConditions(
           Object.values(latestPerLocation).map(req => ({
-            name: req.location_name,
+            name: requestArea(req),
             status: req.status.charAt(0).toUpperCase() + req.status.slice(1),
             color: statusToColor[req.status] || 'emerald',
           }))

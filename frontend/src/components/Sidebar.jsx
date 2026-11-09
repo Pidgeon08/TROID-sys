@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { createPortal } from "react-dom";
 import { NavLink, useLocation } from 'react-router-dom';
+import { useUnreadNotifications } from '../hooks/useUnreadNotifications';
+import { UnreadDot } from './ui/UnreadDot';
 import { Home, Map, FileText, LogOut, Shield, Users, Bot, InboxIcon, Send, CalendarClock, MapPin, UserCog, Wrench, ChevronDown, LayoutGrid, ClipboardList } from 'lucide-react';
 
 const navItems = {
@@ -16,7 +18,7 @@ const navItems = {
         { to: '/admin/operators', icon: UserCog, label: 'Operator Management' },
       ],
     },
-    { to: '/admin/requests', icon: InboxIcon, label: 'Requests' },
+    { to: '/admin/requests', icon: InboxIcon, label: 'Requests', hasNotifications: true },
     { to: '/admin/task-status-updates', icon: ClipboardList, label: 'Task Status Updates' },
     { to: '/admin/collection-areas', icon: MapPin, label: 'Collection Areas' },
     { to: '/admin/deployment', icon: CalendarClock, label: 'Deployment Schedule' },
@@ -26,13 +28,13 @@ const navItems = {
   ],
   mayorsoffice: [
     { to: '/mayorsoffice/dashboard', icon: Home, label: 'Dashboard' },
-    { to: '/mayorsoffice/requests', icon: InboxIcon, label: 'Requests' },
+    { to: '/mayorsoffice/requests', icon: InboxIcon, label: 'Requests', hasNotifications: true },
     { to: '/mayorsoffice/utilities', icon: Wrench, label: 'Utilities' },
   ],
   barangay: [
     { to: '/barangay/dashboard', icon: Home, label: 'Dashboard' },
     { to: '/barangay/areas', icon: MapPin, label: 'Collection Areas' },
-    { to: '/barangay/requests', icon: InboxIcon, label: 'My Requests' },
+    { to: '/barangay/requests', icon: InboxIcon, label: 'My Requests', hasNotifications: true },
     { to: '/barangay/request', icon: Send, label: 'Submit Request' },
     { to: '/barangay/heatmap', icon: Map, label: 'Bot Tracking' },
     { to: '/barangay/utilities', icon: Wrench, label: 'Utilities' },
@@ -40,7 +42,7 @@ const navItems = {
   ngo: [
     { to: '/barangay/dashboard', icon: Home, label: 'Dashboard' },
     { to: '/barangay/areas', icon: MapPin, label: 'Collection Areas' },
-    { to: '/barangay/requests', icon: InboxIcon, label: 'My Requests' },
+    { to: '/barangay/requests', icon: InboxIcon, label: 'My Requests', hasNotifications: true },
     { to: '/barangay/request', icon: Send, label: 'Submit Request' },
     { to: '/barangay/heatmap', icon: Map, label: 'Bot Tracking' },
     { to: '/barangay/utilities', icon: Wrench, label: 'Utilities' },
@@ -63,6 +65,7 @@ const navItems = {
   const Sidebar = ({ onLogout, userType = 'admin', currentUser = null }) => {
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const location = useLocation();
+  const unreadCount = useUnreadNotifications(currentUser?.id).length;
 
   const items = navItems[userType] || [];
   const groupContainsActive = (item) =>
@@ -159,6 +162,9 @@ const navItems = {
                     <>
                       <item.icon className={getIconClass(isActive)} />
                       <span>{item.label}</span>
+                      {item.hasNotifications && unreadCount > 0 && (
+                        <UnreadDot className="ml-auto shadow-[0_0_8px_#ef4444]" />
+                      )}
                     </>
                   )}
                 </NavLink>

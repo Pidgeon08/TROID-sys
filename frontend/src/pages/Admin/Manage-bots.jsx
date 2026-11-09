@@ -3,25 +3,21 @@ import { useOutletContext, useNavigate } from 'react-router-dom';
 import api from '../../services/api';
 import { logAudit } from '../../services/auditLog';
 import { useRealtime } from '../../hooks/useRealtime';
-import { formatTime12h } from '../../constants/requests';
+import { formatTime12h, manilaDate } from '../../constants/requests';
 import { Plus, Ship, Zap, WifiOff, Ban, Battery, BatteryCharging, X, Copy, Check } from 'lucide-react';
 import { Card } from '../../components/ui/Card';
 import { SearchBar } from '../../components/ui/SearchBar';
 import { EmptyState } from '../../components/ui/EmptyState';
 
 const STATUS_STYLES = {
-    Active: 'bg-green-50 text-green-800',
-    Idle: 'bg-blue-50 text-blue-700',
-    Charging: 'bg-amber-50 text-amber-800',
-    Offline: 'bg-red-50 text-red-800',
-};
-
-const CONNECTION_STYLES = {
-    Online: 'bg-green-50 text-green-800',
-    Offline: 'bg-red-50 text-red-800',
+    Paired: 'bg-green-50 text-green-800',
+    Unpaired: 'bg-red-50 text-red-800',
+    'Under maintenance': 'bg-amber-50 text-amber-800',
 };
 
 const PAGE_SIZE = 5;
+
+const todayInManila = () => manilaDate(new Date());
 
 export default function ManageBots() {
     const { currentUser } = useOutletContext() || {};
@@ -69,13 +65,19 @@ export default function ManageBots() {
                 // No bot list has loaded yet: keep whatever is on screen.
                 if (!boatsRes) return;
 
+                const today = todayInManila();
                 const mappedBots = boatsRes.map((b) => {
                     const op = operatorsRes.find(o => o.assigned_bot === b.id);
+                    const botSchedules = schedules.filter(s => s.bot === b.id);
 
-                    // Most recently created schedule entry for this bot stands in as its current assignment.
-                    const latestSchedule = schedules
-                        .filter(s => s.bot === b.id)
+                    // Most recently created cleanup entry for this bot stands in as its current assignment.
+                    const latestSchedule = botSchedules
+                        .filter(s => s.status !== 'maintenance')
                         .sort((a, z) => z.id - a.id)[0] || null;
+
+                    const nextMaintenance = botSchedules
+                        .filter(s => s.status === 'maintenance' && s.day >= today)
+                        .sort((a, z) => a.day.localeCompare(z.day))[0] || null;
 
                     const totalTrashBags = requests
                         .filter(r => r.bot_id === b.id)
@@ -84,8 +86,8 @@ export default function ManageBots() {
                     return {
                         backendId: b.id,
                         id: `TRD-${String(b.id).padStart(3, '0')}`,
-                        status: b.is_active ? 'Active' : 'Offline',
-                        online: b.is_online ? 'Online' : 'Offline',
+                        status: nextMaintenance?.day === today ? 'Under maintenance' : b.is_online ? 'Paired' : 'Unpaired',
+                        nextMaintenance,
                         battery: b.battery_level,
                         assignedLocation: latestSchedule?.zone || 'Not assigned',
                         assignedOperator: op ? op.name : 'Not Assigned',
@@ -194,8 +196,8 @@ export default function ManageBots() {
             const botToAdd = {
                 id: created.name || nextId,
                 backendId: created.id,
-                status: created.is_active ? 'Active' : 'Offline',
-                online: 'Offline',
+                status: 'Unpaired',
+                nextMaintenance: null,
                 battery: created.battery_level,
                 assignedLocation: 'Not Assigned',
                 assignedOperator: newBot.assignedOperator !== 'Not Assigned' ? newBot.assignedOperator : 'Not Assigned',
@@ -249,6 +251,8 @@ export default function ManageBots() {
             setDeviceKey(await api.createBoatDeviceKey(selectedBot.backendId));
             setKeyCopied(false);
             setIsConnectConfirmOpen(false);
+            // Creating a key unpairs the robot; show that now instead of on the next poll.
+            setRealtimeNonce((n) => n + 1);
         } catch (err) {
             console.error('Failed to create device key:', err);
             alert(err.message || 'Failed to create the device key. Please try again.');
@@ -274,15 +278,24 @@ export default function ManageBots() {
         e.preventDefault();
         if (!selectedBot) return;
 
+        // A bot holds one schedule entry per day (unique_together on bot and day).
+        const dateTaken = lastGood.current.schedules.some(
+            s => s.bot === selectedBot.backendId && s.day === maintenanceDetails.date
+        );
+        if (dateTaken) {
+            alert(`${selectedBot.id} already has something scheduled on ${maintenanceDetails.date}. Pick another date or reschedule it first.`);
+            return;
+        }
+
         try {
-            await api.updateBoat(selectedBot.backendId, {
-                is_active: false,
+            await api.createDeploymentSchedule({
+                bot: selectedBot.backendId,
+                day: maintenanceDetails.date,
+                status: 'maintenance',
+                label: maintenanceDetails.type,
             });
 
-            setBots(prev => prev.map(b => (
-                b.id === selectedBot.id ? { ...b, status: 'Offline' } : b
-            )));
-
+            setRealtimeNonce((n) => n + 1);
             setIsMaintenanceOpen(false);
             setMaintenanceDetails({ type: 'Routine Maintenance', date: '', notes: '' });
 
@@ -293,8 +306,28 @@ export default function ManageBots() {
                 details: `${selectedBot.id}: ${maintenanceDetails.type} scheduled for ${maintenanceDetails.date}`,
             });
         } catch (err) {
-            console.error('Failed to update bot status:', err);
+            console.error('Failed to schedule maintenance:', err);
             alert('Failed to schedule maintenance. Please try again.');
+        }
+    };
+
+    const handleCancelMaintenance = async () => {
+        const maintenance = selectedBot?.nextMaintenance;
+        if (!maintenance) return;
+
+        try {
+            await api.deleteDeploymentSchedule(maintenance.id);
+            setRealtimeNonce((n) => n + 1);
+
+            logAudit({
+                currentUser,
+                action: 'Maintenance cancelled',
+                module: 'Bot Management',
+                details: `${selectedBot.id}: ${maintenance.label} on ${maintenance.day} cancelled`,
+            });
+        } catch (err) {
+            console.error('Failed to cancel maintenance:', err);
+            alert('Failed to cancel maintenance. Please try again.');
         }
     };
 
@@ -348,8 +381,8 @@ export default function ManageBots() {
     };
 
     const archivedCount = bots.filter(b => b.archived).length;
-    const activeCount = activeBots.filter(b => b.status === 'Active').length;
-    const offlineCount = activeBots.filter(b => b.status === 'Offline').length;
+    const pairedCount = activeBots.filter(b => b.status === 'Paired').length;
+    const unpairedCount = activeBots.filter(b => b.status === 'Unpaired').length;
 
     const openAddBotModal = () => {
         const existingIds = bots
@@ -393,8 +426,8 @@ export default function ManageBots() {
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
                         {[
                             { icon: Ship, label: 'Total bots', value: activeBots.length, caption: 'Registered fleet' },
-                            { icon: Zap, label: 'Active', value: activeCount, caption: 'Currently running' },
-                            { icon: WifiOff, label: 'Offline', value: offlineCount, caption: 'Not currently running' },
+                            { icon: Zap, label: 'Paired', value: pairedCount, caption: 'Reporting to the system' },
+                            { icon: WifiOff, label: 'Unpaired', value: unpairedCount, caption: 'Not reporting to the system' },
                             { icon: Ban, label: 'Archived', value: archivedCount, caption: 'Removed from fleet' },
                         ].map(({ icon: Icon, label, value, caption }) => (
                             <Card key={label} className="flex flex-col justify-between min-h-[140px]">
@@ -426,10 +459,9 @@ export default function ManageBots() {
                                 className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:ring-2 focus:ring-blue-500/30"
                             >
                                 <option>All statuses</option>
-                                <option>Active</option>
-                                <option>Idle</option>
-                                <option>Charging</option>
-                                <option>Offline</option>
+                                <option>Paired</option>
+                                <option>Unpaired</option>
+                                <option>Under maintenance</option>
                             </select>
                         </div>
 
@@ -438,7 +470,6 @@ export default function ManageBots() {
                                 <thead>
                                     <tr className="bg-slate-50 text-slate-500">
                                         <th className="px-4 py-2.5 font-medium">Bot</th>
-                                        <th className="px-4 py-2.5 font-medium">Connection</th>
                                         <th className="px-4 py-2.5 font-medium">Status</th>
                                         <th className="px-4 py-2.5 font-medium">Battery</th>
                                         <th className="px-4 py-2.5 font-medium">Assigned location</th>
@@ -455,11 +486,6 @@ export default function ManageBots() {
                                             }`}
                                         >
                                             <td className="px-4 py-2.5 font-medium text-slate-800">{bot.id}</td>
-                                            <td className="px-4 py-2.5">
-                                                <span className={`inline-block rounded-full px-2.5 py-1 text-xs font-medium ${CONNECTION_STYLES[bot.online] || 'bg-slate-100 text-slate-600'}`}>
-                                                    {bot.online}
-                                                </span>
-                                            </td>
                                             <td className="px-4 py-2.5">
                                                 <span className={`inline-block rounded-full px-2.5 py-1 text-xs font-medium ${STATUS_STYLES[bot.status] || 'bg-slate-100 text-slate-600'}`}>
                                                     {bot.status}
@@ -488,7 +514,7 @@ export default function ManageBots() {
                                     ))}
                                     {paged.length === 0 && (
                                         <tr>
-                                            <td colSpan={6}>
+                                            <td colSpan={5}>
                                                 <EmptyState title="No bots match your search." subtitle="Try adjusting your filters or add a new bot." />
                                             </td>
                                         </tr>
@@ -545,12 +571,6 @@ export default function ManageBots() {
                                         <span className="font-medium text-slate-800">{selectedBot.id}</span>
                                     </p>
                                     <p className="text-slate-600">
-                                        <span className="text-slate-400">Connection: </span>
-                                        <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${CONNECTION_STYLES[selectedBot.online] || 'bg-slate-100 text-slate-600'}`}>
-                                            {selectedBot.online}
-                                        </span>
-                                    </p>
-                                    <p className="text-slate-600">
                                         <span className="text-slate-400">Status: </span>
                                         <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_STYLES[selectedBot.status] || 'bg-slate-100 text-slate-600'}`}>
                                             {selectedBot.status}
@@ -573,6 +593,12 @@ export default function ManageBots() {
                                     </p>
                                     <p className="text-slate-600">
                                         <span className="text-slate-400">Scheduled cleanup: </span>{selectedBot.scheduledCleanup}
+                                    </p>
+                                    <p className="text-slate-600">
+                                        <span className="text-slate-400">Next maintenance: </span>
+                                        {selectedBot.nextMaintenance
+                                            ? `${selectedBot.nextMaintenance.day} (${selectedBot.nextMaintenance.label})`
+                                            : 'None'}
                                     </p>
                                     <p className="text-slate-600">
                                         <span className="text-slate-400">Total trash collected: </span>{selectedBot.totalTrash}
@@ -603,6 +629,14 @@ export default function ManageBots() {
                             >
                                 Schedule maintenance
                             </button>
+                            {selectedBot?.nextMaintenance && (
+                                <button
+                                    onClick={handleCancelMaintenance}
+                                    className="w-full rounded-lg border border-slate-200 py-2 text-sm text-slate-600 transition-colors hover:border-blue-400 hover:bg-blue-50 hover:text-blue-700"
+                                >
+                                    Cancel maintenance on {selectedBot.nextMaintenance.day}
+                                </button>
+                            )}
                             <button
                                 onClick={() => navigate('/admin/deployment')}
                                 disabled={!selectedBot}
@@ -695,6 +729,7 @@ export default function ManageBots() {
                                 <input
                                     type="date"
                                     required
+                                    min={todayInManila()}
                                     value={maintenanceDetails.date}
                                     onChange={(e) => setMaintenanceDetails({ ...maintenanceDetails, date: e.target.value })}
                                     className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
@@ -740,10 +775,10 @@ export default function ManageBots() {
                             </button>
                         </div>
                         <p className="text-sm text-slate-600 mb-2">
-                            Create a device key for <strong>{selectedBot.id}</strong>? The robot's Raspberry Pi uses it to report its condition (online, battery) to the TROID system.
+                            Create a device key for <strong>{selectedBot.id}</strong>? The robot's Raspberry Pi uses it to report its condition (status, battery) to the TROID system.
                         </p>
                         <p className="text-sm text-slate-600 mb-4">
-                            If this robot already has a key, the old one stops working and the robot must be updated with the new one.
+                            If this robot already has a key, the old one stops working and the robot must be updated with the new one. The bot shows Unpaired until it reports in with the new key.
                         </p>
                         <div className="flex justify-end gap-2">
                             <button

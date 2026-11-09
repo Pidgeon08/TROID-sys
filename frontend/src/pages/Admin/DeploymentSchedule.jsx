@@ -40,6 +40,7 @@ const TIME_SLOTS = [
 const STATUS_STYLES = {
   scheduled: "bg-emerald-50 text-emerald-700 border border-emerald-100",
   available: "bg-sky-50 text-sky-700 border border-sky-100",
+  maintenance: "bg-amber-50 text-amber-700 border border-amber-100",
   none: "bg-slate-50 text-slate-400 border border-slate-100",
 };
 
@@ -171,12 +172,14 @@ function ScheduleModal({ bots, operators, approvedRequests, priorityBarangays = 
 
   const operatorsMatchBots = selectedBots.length > 0 && selectedOperators.length === selectedBots.length;
 
+  const isBooked = (botId, day) => ['scheduled', 'maintenance'].includes(schedule?.[botId]?.[day]?.status);
+
   // Each bot can only hold one schedule per day, so if any selected bot is already
   // booked on the chosen date, no time slot on that date is actually usable for it.
   // (A bot's own current slot doesn't count as a conflict against itself while rescheduling.)
   const busyBotsOnDate = selectedBots
     .map((id) => bots.find((b) => b.id === id))
-    .filter((b) => b && schedule?.[b.id]?.[selectedDate]?.status === 'scheduled' && !isSelfSlot(b.id, selectedDate));
+    .filter((b) => b && isBooked(b.id, selectedDate) && !isSelfSlot(b.id, selectedDate));
   const dateHasConflict = busyBotsOnDate.length > 0;
 
   const openConfirm = () => {
@@ -226,7 +229,7 @@ function ScheduleModal({ bots, operators, approvedRequests, priorityBarangays = 
 
   // A bot can only hold one schedule per date, so "available" just means not already scheduled that day
   // (except the bot's own current slot when rescheduling it).
-  const availableBots = bots.filter((b) => schedule?.[b.id]?.[selectedDate]?.status !== 'scheduled' || isSelfSlot(b.id, selectedDate));
+  const availableBots = bots.filter((b) => !isBooked(b.id, selectedDate) || isSelfSlot(b.id, selectedDate));
   // An operator is unavailable if the bot they're assigned to already has a deployment that day.
   const availableOperators = operators.filter(
     (o) => !o.archived && !(o.assigned_bot && schedule?.[o.assigned_bot]?.[selectedDate]?.status === 'scheduled' && !isSelfSlot(o.assigned_bot, selectedDate))
@@ -236,7 +239,7 @@ function ScheduleModal({ bots, operators, approvedRequests, priorityBarangays = 
     const newDate = e.target.value;
     setSelectedDate(newDate);
     const stillAvailableIds = new Set(
-      bots.filter((b) => schedule?.[b.id]?.[newDate]?.status !== 'scheduled' || isSelfSlot(b.id, newDate)).map((b) => b.id)
+      bots.filter((b) => !isBooked(b.id, newDate) || isSelfSlot(b.id, newDate)).map((b) => b.id)
     );
     setSelectedBots((prev) => prev.filter((id) => stillAvailableIds.has(id)));
   };
