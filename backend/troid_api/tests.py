@@ -1381,6 +1381,33 @@ class CleanupDriveTests(TestCase):
         self.assertEqual((body['schedule_day'], body['schedule_time'], body['barangay'], body['location_name']),
                          ('2026-11-20', '06:00', 'Poro', 'River Mouth'))
 
+    def letter_response(self, req):
+        return self.client.get(f'/api/companion/requests/{req.request_id}/letter/', **self.headers)
+
+    def test_assigned_operator_can_open_the_letter(self, _):
+        self.req.letter_file_name = 'letter.pdf'
+        self.req.letter_content_type = 'application/pdf'
+        self.req.save()
+        LetterFile.objects.create(request=self.req, data='JVBERi0=')
+
+        response = self.letter_response(self.req)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(),
+                         {'file_name': 'letter.pdf', 'content_type': 'application/pdf', 'data': 'JVBERi0='})
+
+    def test_letter_of_a_cleanup_on_another_robot_is_refused(self, _):
+        other = self.make_request('2026-11-21', boat=Boat.objects.create(name='Other'))
+        LetterFile.objects.create(request=other, data='JVBERi0=')
+
+        self.assertEqual(self.letter_response(other).status_code, 404)
+
+    def test_request_without_a_letter_file_says_so(self, _):
+        response = self.letter_response(self.req)
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()['error'], 'This request has no letter file.')
+
     def test_start_logs_the_time_and_marks_it_ongoing(self, _):
         response = self.start()
 
@@ -1428,6 +1455,7 @@ class CleanupDriveTests(TestCase):
 
     def test_needs_the_operators_app_session(self, _):
         for call in (self.client.get('/api/companion/requests/'),
+                     self.client.get(f'/api/companion/requests/{self.req.request_id}/letter/'),
                      self.client.post(f'/api/companion/requests/{self.req.request_id}/start/')):
             self.assertIn(call.status_code, (401, 403))
 

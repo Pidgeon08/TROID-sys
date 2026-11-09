@@ -477,6 +477,12 @@ def _drive_requests(boat):
     return pairs
 
 
+def _assigned_drive(user, request_id):
+    """(request, schedule) if this cleanup is assigned to the operator's robot, else None."""
+    _, boat = _operator_and_bot(user)
+    return next((p for p in _drive_requests(boat) if p[0].request_id == request_id), None) if boat else None
+
+
 def _drive_request_data(req, schedule):
     return {
         'request_id': req.request_id,
@@ -512,11 +518,28 @@ def companion_requests(request):
 @authentication_classes([CompanionTokenAuthentication])
 @permission_classes([CompanionOperator])
 def companion_request_detail(request, request_id):
-    _, boat = _operator_and_bot(request.user)
-    pair = next((p for p in _drive_requests(boat) if p[0].request_id == request_id), None) if boat else None
+    pair = _assigned_drive(request.user, request_id)
     if not pair:
         return Response({'error': 'This request is not assigned to you.'}, status=status.HTTP_404_NOT_FOUND)
     return Response(_drive_request_data(*pair))
+
+
+@api_view(['GET'])
+@authentication_classes([CompanionTokenAuthentication])
+@permission_classes([CompanionOperator])
+def companion_request_letter(request, request_id):
+    pair = _assigned_drive(request.user, request_id)
+    if not pair:
+        return Response({'error': 'This request is not assigned to you.'}, status=status.HTTP_404_NOT_FOUND)
+    req = pair[0]
+    letter_file = LetterFile.objects.filter(request=req).first()
+    if not letter_file:
+        return Response({'error': 'This request has no letter file.'}, status=status.HTTP_404_NOT_FOUND)
+    return Response({
+        'file_name': req.letter_file_name,
+        'content_type': req.letter_content_type,
+        'data': letter_file.data,
+    })
 
 
 @api_view(['POST'])

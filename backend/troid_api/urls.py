@@ -15,6 +15,7 @@ urlpatterns = [
     path('companion/task-status/', views.companion_task_status, name='companion-task-status'),
     path('companion/requests/', views.companion_requests, name='companion-requests'),
     path('companion/requests/<str:request_id>/', views.companion_request_detail, name='companion-request-detail'),
+    path('companion/requests/<str:request_id>/letter/', views.companion_request_letter, name='companion-request-letter'),
     path('companion/requests/<str:request_id>/start/', views.companion_start_drive, name='companion-start-drive'),
     path('companion/bot/', views.companion_bot, name='companion-bot'),
     path('companion/bot/presence/', views.companion_bot_presence, name='companion-bot-presence'),
