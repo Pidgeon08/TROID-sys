@@ -229,6 +229,50 @@ class LetterUploadTests(TestCase):
         self.assertNotIn(self.PDF, listing.content.decode())
 
 
+class CityAdminNotificationTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.city_admin = make_user('mayorsoffice')
+        self.archived_city_admin = make_user('mayorsoffice', status='archived')
+        self.barangay = make_user('barangay')
+        self.admin = make_user('admin')
+
+    def notified(self):
+        return Notification.objects.filter(notif_type='awaiting_approval')
+
+    def parked_request(self, returns_to):
+        return Request.objects.create(status='parked', parked_from_status=returns_to, barangay='Poro')
+
+    def test_a_new_request_notifies_active_city_admins_only(self):
+        data = {'request_id': 'REQ-TEST', 'barangay': 'Poro', 'letter': {'name': 'real.pdf', 'data': LetterUploadTests.PDF}}
+
+        response = self.client.post('/api/requests/', data, format='json', **session_header(self.barangay))
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual([n.recipient for n in self.notified()], [self.city_admin])
+        count = self.client.get('/api/notifications/unread-count/', **session_header(self.city_admin)).json()
+        self.assertEqual(count, {'unread_count': 1})
+        listed = self.client.get('/api/notifications/', **session_header(self.city_admin)).json()
+        self.assertEqual(listed[0]['request_id'], 'REQ-TEST')
+        self.assertIn('Poro', listed[0]['message'])
+
+    def test_unparking_back_to_city_admin_notifies_them(self):
+        req = self.parked_request('pending_mayor_approval')
+
+        self.client.post(f'/api/requests/{req.request_id}/unpark/', **session_header(self.admin))
+
+        self.assertEqual([n.recipient for n in self.notified()], [self.city_admin])
+
+    def test_no_notification_when_nothing_waits_on_the_city_admin(self):
+        by_cenro = self.parked_request('pending_admin_approval')
+        by_city_admin = self.parked_request('pending_mayor_approval')
+
+        self.client.post(f'/api/requests/{by_cenro.request_id}/unpark/', **session_header(self.admin))
+        self.client.post(f'/api/requests/{by_city_admin.request_id}/unpark/', **session_header(self.city_admin))
+
+        self.assertFalse(self.notified().exists())
+
+
 class HealthCheckTests(TestCase):
     @override_settings(API_AUTH_ENFORCED=True)
     def test_answers_without_a_session_or_the_database(self):

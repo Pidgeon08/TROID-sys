@@ -255,6 +255,7 @@ class Notification(models.Model):
         ('rescheduled', 'Rescheduled'),
         ('report_filed', 'Report Filed'),
         ('verified', 'Verified'),
+        ('awaiting_approval', 'Awaiting Approval'),
     ]
     recipient = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications')
     request = models.ForeignKey(Request, on_delete=models.CASCADE, null=True, blank=True, related_name='notifications')

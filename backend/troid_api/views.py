@@ -149,6 +149,15 @@ def notify_request_update(req, notif_type, title, message):
             print(f'[email] Failed to send {notif_type} notification to {req.email}: {exc}')
 
 
+def notify_city_admins(req, title):
+    """Tells every active City Admin that a request is waiting on their approval."""
+    message = f'Request {req.request_id} from {req.barangay or req.requested_by_name or "a requester"} needs your approval.'
+    Notification.objects.bulk_create(
+        Notification(recipient=city_admin, request=req, notif_type='awaiting_approval', title=title, message=message)
+        for city_admin in User.objects.filter(role='mayorsoffice', status='active')
+    )
+
+
 @api_view(['GET'])
 @authentication_classes([])
 @permission_classes([AllowAny])
@@ -1030,6 +1039,8 @@ class RequestViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
                     photo_id=photo.get('photo_id') or (idx + 1),
                     image_data=photo.get('image_data') or '',
                 )
+        if request_obj.status == 'pending_mayor_approval':
+            notify_city_admins(request_obj, 'New request awaiting your approval')
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=['get'])
@@ -1152,6 +1163,9 @@ class RequestViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
             state='current',
             details='Returned to review',
         )
+        # A City Admin who unparks it themselves doesn't need telling.
+        if req.status == 'pending_mayor_approval' and getattr(request.user, 'role', None) != 'mayorsoffice':
+            notify_city_admins(req, 'A request is back for your approval')
         return Response({'status': req.status})
 
     @action(detail=True, methods=['post'])
