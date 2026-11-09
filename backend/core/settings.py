@@ -34,9 +34,9 @@ SUPABASE_SECRET_KEY = os.environ.get('SUPABASE_SECRET_KEY', '')
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 #
-# All three of these fall back to the original hardcoded dev values when the
-# env vars aren't set, so local `python manage.py runserver` keeps working
-# unchanged. Set SECRET_KEY/DEBUG=False/ALLOWED_HOSTS for real deployments.
+# SECRET_KEY and ALLOWED_HOSTS fall back to the original hardcoded dev values
+# when the env vars aren't set; set them for real deployments. DEBUG is OFF
+# unless the env var says DEBUG=True (add that to .env for local debugging).
 
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = os.environ.get(
@@ -45,7 +45,7 @@ SECRET_KEY = os.environ.get(
 )
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.environ.get('DEBUG', 'True') == 'True'
+DEBUG = os.environ.get('DEBUG', 'False') == 'True'
 
 # Comma-separated in production, e.g. "troid-sys-22ps.onrender.com"
 ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
