@@ -273,6 +273,100 @@ class CityAdminNotificationTests(TestCase):
         self.assertFalse(self.notified().exists())
 
 
+class BackupRestoreTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.admin = make_user('admin')
+        self.boat = Boat.objects.create(name='Robot', device_key='a' * 64)
+        self.req = Request.objects.create(request_id='REQ-0001', barangay='Poro', bags=12)
+        LetterFile.objects.create(request=self.req, data='bGV0dGVy')
+
+    def download(self):
+        response = self.client.get('/api/backup/', **session_header(self.admin))
+        self.assertEqual(response.status_code, 200)
+        return response.json()
+
+    def restore(self, payload, user=None):
+        return self.client.post('/api/backup/restore/', payload, format='json', **session_header(user or self.admin))
+
+    def test_a_backup_has_every_table_but_no_sessions(self):
+        backup = self.download()
+
+        self.assertEqual(backup['format'], 'troid-backup')
+        self.assertEqual(backup['counts']['troid_api.request'], 1)
+        self.assertEqual(backup['counts']['troid_api.letterfile'], 1)
+        users = [r for r in backup['records'] if r['model'] == 'troid_api.user']
+        self.assertTrue(all(r['fields']['session_token'] is None for r in users))
+        self.assertTrue(any(r['fields']['device_key'] == 'a' * 64 for r in backup['records'] if r['model'] == 'troid_api.boat'))
+        self.assertTrue(AuditLog.objects.filter(action='Database backup downloaded').exists())
+
+    def test_restore_brings_the_data_back(self):
+        backup = self.download()
+        self.req.delete()
+        Boat.objects.create(name='Added after the backup')
+        make_user('barangay')
+
+        response = self.restore(backup)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()['still_signed_in'])
+        self.assertEqual(list(Request.objects.values_list('request_id', 'bags')), [('REQ-0001', 12)])
+        self.assertEqual(LetterFile.objects.get().data, 'bGV0dGVy')
+        self.assertEqual(list(Boat.objects.values_list('name', flat=True)), ['Robot'])
+        self.assertFalse(User.objects.filter(role='barangay').exists())
+        self.assertEqual(Request.objects.get().date_submitted, self.req.date_submitted)
+        # New rows still get fresh ids, and the restore itself is in the audit log.
+        self.assertNotEqual(Boat.objects.create(name='New').pk, self.boat.pk)
+        self.assertTrue(AuditLog.objects.filter(action='Database restored').exists())
+        self.assertEqual(self.client.get('/api/requests/', **session_header(self.admin)).status_code, 200)
+
+    @override_settings(API_AUTH_ENFORCED=True)
+    def test_restore_signs_out_everyone_else(self):
+        other = make_user('barangay')
+        backup = self.download()
+
+        self.restore(backup)
+
+        self.assertEqual(self.client.get('/api/requests/', **session_header(other)).status_code, 401)
+
+    def test_a_backup_bigger_than_the_default_upload_limit_restores(self):
+        LetterFile.objects.filter(request=self.req).update(data='A' * 8_000_000)
+        backup = self.download()
+        LetterFile.objects.all().delete()
+
+        response = self.restore(backup)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(LetterFile.objects.get().data), 8_000_000)
+
+    def test_bad_files_change_nothing(self):
+        backup = self.download()
+        no_admin = {**backup, 'records': [r for r in backup['records'] if r['model'] != 'troid_api.user']}
+        foreign = {**backup, 'records': backup['records'] + [{'model': 'auth.user', 'pk': 1, 'fields': {}}]}
+        newer = {**backup, 'migration': '9999_future'}
+        damaged = {**backup, 'records': backup['records'] + [{'model': 'troid_api.boat', 'pk': 99, 'fields': {'nope': 1}}]}
+        Boat.objects.create(name='Still here')
+
+        for name, payload in [('not a backup', {'hello': 1}), ('no admin', no_admin), ('foreign', foreign),
+                              ('newer', newer), ('damaged', damaged)]:
+            with self.subTest(name):
+                response = self.restore(payload)
+                self.assertEqual(response.status_code, 400)
+                self.assertIn('error', response.json())
+        self.assertTrue(Boat.objects.filter(name='Still here').exists())
+
+    @override_settings(API_AUTH_ENFORCED=False)
+    def test_admins_only_even_while_report_only(self):
+        backup = self.download()
+        self.assertEqual(self.client.get('/api/backup/').status_code, 401)
+        self.assertEqual(self.client.post('/api/backup/restore/', backup, format='json').status_code, 401)
+        for role in ('mayorsoffice', 'barangay', 'ngo', 'operator'):
+            with self.subTest(role=role):
+                user = make_user(role)
+                self.assertEqual(self.client.get('/api/backup/', **session_header(user)).status_code, 403)
+                self.assertEqual(self.restore(backup, user).status_code, 403)
+
+
 class HealthCheckTests(TestCase):
     @override_settings(API_AUTH_ENFORCED=True)
     def test_answers_without_a_session_or_the_database(self):

@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { useOutletContext } from "react-router-dom";
-import { ClipboardList, Settings as SettingsIcon, BookOpen } from "lucide-react";
+import { ClipboardList, Settings as SettingsIcon, BookOpen, DatabaseBackup } from "lucide-react";
 import AuditLogs from "./AuditLogs";
 import Settings from "./Settings";
+import BackupRestore from "./BackupRestore";
 import UserManual from "../../components/UserManual";
 
 export default function Utilities() {
@@ -12,7 +13,10 @@ export default function Utilities() {
   const TABS = [
     { key: "settings", label: "Settings", icon: SettingsIcon },
     { key: "manual", label: "User Manual", icon: BookOpen },
-    ...(isAdmin ? [{ key: "audit", label: "Audit Logs", icon: ClipboardList }] : []),
+    ...(isAdmin ? [
+      { key: "audit", label: "Audit Logs", icon: ClipboardList },
+      { key: "backup", label: "Backup & Restore", icon: DatabaseBackup },
+    ] : []),
   ];
 
   const [activeTab, setActiveTab] = useState("settings");
@@ -41,6 +45,7 @@ export default function Utilities() {
         </div>
       )}
       {activeTab === "audit" && isAdmin && <AuditLogs />}
+      {activeTab === "backup" && isAdmin && <BackupRestore />}
     </div>
   );
 }

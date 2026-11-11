@@ -167,6 +167,10 @@ export const api = {
     return api.get(`/heatmap/${q ? `?${q}` : ''}`);
   },
 
+  // A restore replaces the whole database; the body is the backup file's text as-is.
+  downloadBackup: () => api.get('/backup/'),
+  restoreBackup: (backupText) => request('/backup/restore/', { method: 'POST', body: backupText }),
+
   login: (data) => api.post('/login/', data),
   logout: () => request('/logout/', { method: 'POST', skipUnauthorizedEvent: true }),
   forgotPassword: (email) => api.post('/forgot-password/', { email }),

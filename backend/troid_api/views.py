@@ -37,6 +37,7 @@ from .serializers import (
     SegregationRecordSerializer, AuditLogSerializer, HeatmapDataSerializer, LoginSerializer,
     CollectionAreaSerializer, NotificationSerializer, PriorityAreaSerializer, TrashReportSerializer, LetterUploadSerializer
 )
+from . import backup
 from .authentication import INACTIVE_STATUSES, CompanionTokenAuthentication, is_app_operator
 from .permissions import ADMIN, ANY_ROLE, MAYOR, PUBLIC, REQUESTERS, STAFF, HasRole, RoleViewSetMixin, require
 from .drives import active_drive, scheduled_request_ids, troid_counts
@@ -820,6 +821,46 @@ def unread_notification_count(request):
     user_id = own_user_id(request, request.query_params.get('user_id'))
     count = Notification.objects.filter(recipient_id=user_id, is_read=False).count()
     return Response({"unread_count": count})
+
+
+# Always enforced (even while API_AUTH_ENFORCED is off): a backup holds password
+# hashes and robot keys, and a restore replaces the whole database.
+AdminOnly = HasRole(
+    *ADMIN,
+    always_enforce=True,
+    not_authenticated_message='A valid admin session is required.',
+    message='Admin access is required.',
+)
+
+
+def _audit_admin(request, action, details):
+    record_audit(request, user=request.user.email[:100], role=ROLE_LABELS.get(request.user.role, request.user.role),
+                 action=action, module='Backup & Restore', details=details, status='success')
+
+
+@api_view(['GET'])
+@permission_classes([AdminOnly])
+def backup_download(request):
+    data = backup.export_backup()
+    _audit_admin(request, 'Database backup downloaded', f'{len(data["records"])} records')
+    return Response(data)
+
+
+@api_view(['POST'])
+@permission_classes([AdminOnly])
+def backup_restore(request):
+    me = request.user
+    try:
+        restored = backup.restore_backup(request.data)
+    except backup.BackupError as exc:
+        return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    # Backups carry no sessions. Keep this admin signed in if their account came back as the same admin.
+    still_signed_in = User.objects.filter(
+        pk=me.pk, email=me.email, role='admin', status='active',
+    ).update(session_token=me.session_token) == 1
+    _audit_admin(request, 'Database restored',
+                 f'{restored} records from a backup made {request.data.get("created_at", "at an unknown time")}')
+    return Response({'restored': restored, 'still_signed_in': still_signed_in})
 
 
 class BoatViewSet(RoleViewSetMixin, viewsets.ModelViewSet):

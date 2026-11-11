@@ -5,6 +5,8 @@ urlpatterns = [
     # Listed before the router so its "<prefix>/<pk>/" routes don't capture
     # these fixed paths (e.g. "users/pending-count/" as a user with pk "pending-count").
     path('health/', views.health, name='health'),
+    path('backup/', views.backup_download, name='backup-download'),
+    path('backup/restore/', views.backup_restore, name='backup-restore'),
     path('users/pending-count/', views.pending_user_count, name='pending-user-count'),
     path('requests/pending-count/', views.pending_request_count, name='pending-request-count'),
     path('notifications/unread-count/', views.unread_notification_count, name='unread-notification-count'),

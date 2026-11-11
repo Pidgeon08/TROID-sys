@@ -25,6 +25,7 @@ const MODULES = [
   "Collection Schedule",
   "Report Generation",
   "Requests",
+  "Backup & Restore",
 ];
 
 const ACTIONS = [
@@ -35,6 +36,8 @@ const ACTIONS = [
   "Bot archived",
   "Maintenance scheduled",
   "Maintenance cancelled",
+  "Database backup downloaded",
+  "Database restored",
   "User added",
   "User updated",
   "User removed",
