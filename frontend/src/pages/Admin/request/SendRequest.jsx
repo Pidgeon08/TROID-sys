@@ -6,7 +6,6 @@ import {
   Layers,
   Camera,
   Send,
-  FileText,
   Calendar,
   Truck,
   ChevronDown,
@@ -327,23 +326,6 @@ export default function SendRequest() {
             </ol>
           </div>
 
-          <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-5">
-            <h2 className="text-[17px] font-bold text-slate-900 mb-4 flex items-center gap-2">
-              <FileText className="w-5 h-5 text-slate-500" />
-              Contact Info
-            </h2>
-            <div className="space-y-2.5 text-sm">
-              <p className="text-slate-600">
-                <span className="text-slate-400">CENRO Office:</span> San Fernando City
-              </p>
-              <p className="text-slate-600">
-                <span className="text-slate-400">Hotline:</span> (072) 123-4567
-              </p>
-              <p className="text-slate-600">
-                <span className="text-slate-400">Email:</span> cenro@sanfernando.gov.ph
-              </p>
-            </div>
-          </div>
         </div>
       </div>
 
