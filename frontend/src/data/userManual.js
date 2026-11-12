@@ -22,13 +22,14 @@ export const USER_MANUALS = {
       title: 'Bot Management',
       path: '/admin/manage-bots',
       description: 'Monitor the TROID fleet, add new bots, and schedule maintenance or archival.',
-      keywords: ['boats', 'fleet', 'troid bot', 'maintenance', 'archive bot', 'battery'],
+      keywords: ['boats', 'fleet', 'troid bot', 'maintenance', 'archive bot', 'restore bot', 'battery'],
       steps: [
         'Use the search bar and status filter to find a specific bot by ID, operator, or location.',
         'Click a row to select a bot and see its connection, battery, assigned location, and total trash collected in the sidebar.',
         'A bot shows Paired while it is reporting to the system, Unpaired when it is not, and Under maintenance on a date it has maintenance scheduled. Creating a new device key with Connect robot sets it back to Unpaired until the robot reports in with that key.',
         'Use Quick Action to schedule or cancel maintenance, jump to its deployment schedule, or archive it if it is being retired.',
         'Click "Add bot" to register a new unit to the fleet.',
+        'Click "Archived" to see archived bots. Select one and click "Restore bot" to return it to the active fleet.',
       ],
     },
     {

@@ -86,7 +86,7 @@ export default function ManageBots() {
                     return {
                         backendId: b.id,
                         id: `TRD-${String(b.id).padStart(3, '0')}`,
-                        status: nextMaintenance?.day === today ? 'Under maintenance' : b.is_online ? 'Paired' : 'Unpaired',
+                        status: b.archived ? 'Archived' : nextMaintenance?.day === today ? 'Under maintenance' : b.is_online ? 'Paired' : 'Unpaired',
                         nextMaintenance,
                         battery: b.battery_level,
                         assignedLocation: latestSchedule?.zone || 'Not assigned',
@@ -148,17 +148,28 @@ export default function ManageBots() {
     const [search, setSearch] = useState('');
     const [statusFilter, setStatusFilter] = useState('All statuses');
     const [page, setPage] = useState(1);
+    const [showArchived, setShowArchived] = useState(false);
 
     const [newBot, setNewBot] = useState({ id: '', assignedOperator: 'Not Assigned' });
 
-    const selectedBot = useMemo(() => {
-        return bots.find(b => b.id === selectedBotId) || bots.find(b => !b.archived) || null;
-    }, [bots, selectedBotId]);
-
     const activeBots = useMemo(() => bots.filter(b => !b.archived), [bots]);
+    // The list shows either the active fleet or the archived bots.
+    const shownBots = useMemo(() => bots.filter(b => b.archived === showArchived), [bots, showArchived]);
+
+    const selectedBot = useMemo(() => {
+        return shownBots.find(b => b.id === selectedBotId) || shownBots[0] || null;
+    }, [shownBots, selectedBotId]);
+
+    const toggleArchived = () => {
+        const next = !showArchived;
+        setShowArchived(next);
+        setPage(1);
+        setStatusFilter('All statuses');
+        setSelectedBotId(bots.find(b => b.archived === next)?.id || '');
+    };
 
     const filtered = useMemo(() => {
-        return activeBots.filter((b) => {
+        return shownBots.filter((b) => {
             const matchesSearch =
                 b.id.toLowerCase().includes(search.toLowerCase()) ||
                 b.assignedLocation.toLowerCase().includes(search.toLowerCase()) ||
@@ -166,7 +177,7 @@ export default function ManageBots() {
             const matchesStatus = statusFilter === 'All statuses' || b.status === statusFilter;
             return matchesSearch && matchesStatus;
         });
-    }, [activeBots, search, statusFilter]);
+    }, [shownBots, search, statusFilter]);
 
     const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
     const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -356,7 +367,7 @@ export default function ManageBots() {
         }
 
         setBots(prev => prev.map(b => (
-            b.id === selectedBot.id ? { ...b, archived: true } : b
+            b.id === selectedBot.id ? { ...b, archived: true, status: 'Archived' } : b
         )));
 
         if (selectedBot.assignedOperator !== 'Not Assigned') {
@@ -377,6 +388,32 @@ export default function ManageBots() {
             action: 'Bot archived',
             module: 'Bot Management',
             details: `Bot ${selectedBot.id} archived and removed from active fleet`,
+        });
+    };
+
+    const handleRestoreBot = async () => {
+        if (!selectedBot?.archived) return;
+        const restored = selectedBot;
+
+        try {
+            await api.updateBoat(restored.backendId, { archived: false });
+        } catch (err) {
+            console.error('Failed to restore bot:', err);
+            alert('Failed to restore bot. Please try again.');
+            return;
+        }
+
+        setBots(prev => prev.map(b => (
+            b.id === restored.id ? { ...b, archived: false, status: 'Unpaired' } : b
+        )));
+        setSelectedBotId(bots.find(b => b.archived && b.id !== restored.id)?.id || '');
+        setRealtimeNonce((n) => n + 1);
+
+        logAudit({
+            currentUser,
+            action: 'Bot restored',
+            module: 'Bot Management',
+            details: `Bot ${restored.id} restored to the active fleet`,
         });
     };
 
@@ -411,14 +448,27 @@ export default function ManageBots() {
                     <h1 className="text-[28px] font-bold text-slate-900 tracking-tight leading-none">Bot Management</h1>
                     <p className="text-slate-500 mt-1.5 text-sm font-medium">Monitor and manage CENRO's robotic cleanup fleet</p>
                 </div>
-                <button
-                    type="button"
-                    onClick={openAddBotModal}
-                    className="flex items-center gap-1.5 rounded-lg bg-[#1b4de4] px-3.5 py-2 text-sm font-medium text-white transition-colors hover:bg-[#153eb8]"
-                >
-                    <Plus className="h-4 w-4" />
-                    Add bot
-                </button>
+                <div className="flex items-center gap-3">
+                    <button
+                        type="button"
+                        onClick={toggleArchived}
+                        className={`rounded-lg border px-3.5 py-2 text-sm font-medium transition-colors ${
+                            showArchived
+                                ? 'border-blue-600 bg-blue-50 text-blue-700'
+                                : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                        }`}
+                    >
+                        Archived ({archivedCount})
+                    </button>
+                    <button
+                        type="button"
+                        onClick={openAddBotModal}
+                        className="flex items-center gap-1.5 rounded-lg bg-[#1b4de4] px-3.5 py-2 text-sm font-medium text-white transition-colors hover:bg-[#153eb8]"
+                    >
+                        <Plus className="h-4 w-4" />
+                        Add bot
+                    </button>
+                </div>
             </header>
 
             <div className="grid grid-cols-1 xl:grid-cols-[1fr_360px] gap-8 items-start">
@@ -453,16 +503,18 @@ export default function ManageBots() {
                                 placeholder="Search by bot ID, operator, or location"
                                 className="flex-1 min-w-[200px]"
                             />
-                            <select
-                                value={statusFilter}
-                                onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
-                                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:ring-2 focus:ring-blue-500/30"
-                            >
-                                <option>All statuses</option>
-                                <option>Paired</option>
-                                <option>Unpaired</option>
-                                <option>Under maintenance</option>
-                            </select>
+                            {!showArchived && (
+                                <select
+                                    value={statusFilter}
+                                    onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
+                                    className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:ring-2 focus:ring-blue-500/30"
+                                >
+                                    <option>All statuses</option>
+                                    <option>Paired</option>
+                                    <option>Unpaired</option>
+                                    <option>Under maintenance</option>
+                                </select>
+                            )}
                         </div>
 
                         <div className="overflow-x-auto rounded-lg border border-slate-200">
@@ -515,7 +567,11 @@ export default function ManageBots() {
                                     {paged.length === 0 && (
                                         <tr>
                                             <td colSpan={5}>
-                                                <EmptyState title="No bots match your search." subtitle="Try adjusting your filters or add a new bot." />
+                                                {showArchived && shownBots.length === 0 ? (
+                                                    <EmptyState title="No archived bots." />
+                                                ) : (
+                                                    <EmptyState title="No bots match your search." subtitle="Try adjusting your filters or add a new bot." />
+                                                )}
                                             </td>
                                         </tr>
                                     )}
@@ -614,6 +670,19 @@ export default function ManageBots() {
                     </Card>
 
                     <Card title="Quick action">
+                        {selectedBot?.archived ? (
+                        <div className="space-y-2">
+                            <p className="text-sm text-slate-500">
+                                {selectedBot.id} is archived and not part of the active fleet.
+                            </p>
+                            <button
+                                onClick={handleRestoreBot}
+                                className="w-full rounded-lg border border-blue-200 py-2 text-sm font-medium text-blue-700 transition-colors hover:border-blue-400 hover:bg-blue-50"
+                            >
+                                Restore bot
+                            </button>
+                        </div>
+                        ) : (
                         <div className="space-y-2">
                             <button
                                 onClick={() => setIsConnectConfirmOpen(true)}
@@ -652,6 +721,7 @@ export default function ManageBots() {
                                 Archive bot
                             </button>
                         </div>
+                        )}
                     </Card>
                 </div>
             </div>

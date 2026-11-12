@@ -34,6 +34,7 @@ const ACTIONS = [
   "Login failed",
   "Bot deployed",
   "Bot archived",
+  "Bot restored",
   "Maintenance scheduled",
   "Maintenance cancelled",
   "Database backup downloaded",
