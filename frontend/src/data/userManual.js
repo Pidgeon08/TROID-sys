@@ -100,12 +100,13 @@ export const USER_MANUALS = {
       id: 'heatmap',
       title: 'Heatmap',
       path: '/admin/heatmap',
-      description: 'View live waste-density coverage, and compare TROID vs. CENRO-reported totals per drive.',
-      keywords: ['coverage', 'post-cleanup comparison', 'collection area', 'map'],
+      description: 'See where TROID found trash, how much of a collection area it covered, and compare TROID vs. reported totals per drive.',
+      keywords: ['coverage', 'area covered', 'post-cleanup comparison', 'collection area', 'map', 'distance'],
       steps: [
-        'Live Heat Map shows waste density, bot pathing, or trash collected, filterable by category and time range.',
-        'Switch to Post-Cleanup Comparison to see TROID-detected vs. user-reported totals per completed drive.',
-        'Use "Select request" to open a searchable list of drives — picking one focuses the map on that request\'s collection-area polygon.',
+        'Live Heat Map shows waste density, bot pathing, or trash collected. Filter it by time (today, 7 days, 30 days, or a custom range) and by category.',
+        'Choose a collection area under "Compare with" to see how much of it TROID covered. Each point the robot reported counts as covering the chosen reach (5–30 m) around it; points outside the area are marked in amber.',
+        'Bot trail shows the distance and active time between the robot\'s points, and when the first and last points came in.',
+        'Switch to Post-Cleanup Comparison and use "Select request" to pick a completed drive. The map shows where TROID went against that request\'s collection area, next to TROID-detected vs. reported totals per category.',
       ],
     },
     {

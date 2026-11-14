@@ -163,6 +163,8 @@ export const api = {
     if (params.category) qs.set('category', params.category);
     if (params.time_filter) qs.set('time_filter', params.time_filter);
     if (params.barangay) qs.set('barangay', params.barangay);
+    if (params.start) qs.set('start', params.start);
+    if (params.end) qs.set('end', params.end);
     const q = qs.toString();
     return api.get(`/heatmap/${q ? `?${q}` : ''}`);
   },

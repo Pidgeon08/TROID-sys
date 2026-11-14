@@ -761,7 +761,7 @@ def get_heatmap_data(request):
     time_filter = request.query_params.get('time_filter', 'today')
     barangay = request.query_params.get('barangay')
 
-    detections = DetectionEvent.objects.filter(is_verified=True)
+    detections = DetectionEvent.objects.filter(is_verified=True).select_related('boat', 'request')
 
     if barangay:
         detections = detections.filter(request__barangay__iexact=barangay)
@@ -770,23 +770,23 @@ def get_heatmap_data(request):
         detections = detections.filter(categories__has_key=category)
 
     if time_filter == 'today':
-        from django.utils import timezone
-        from datetime import timedelta
         start = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
         detections = detections.filter(timestamp__gte=start)
     elif time_filter == 'weekly':
-        from django.utils import timezone
-        from datetime import timedelta
-        start = timezone.now() - timedelta(days=7)
-        detections = detections.filter(timestamp__gte=start)
+        detections = detections.filter(timestamp__gte=timezone.now() - timedelta(days=7))
     elif time_filter == 'monthly':
-        from django.utils import timezone
-        from datetime import timedelta
-        start = timezone.now() - timedelta(days=30)
-        detections = detections.filter(timestamp__gte=start)
+        detections = detections.filter(timestamp__gte=timezone.now() - timedelta(days=30))
+    elif time_filter == 'custom':
+        # ISO date-times from the page's custom range; either end may be left open.
+        for param, lookup in (('start', 'timestamp__gte'), ('end', 'timestamp__lte')):
+            value = parse_datetime(request.query_params.get(param) or '')
+            if value is not None:
+                if timezone.is_naive(value):
+                    value = timezone.make_aware(value)
+                detections = detections.filter(**{lookup: value})
 
     data = []
-    for d in detections:
+    for d in detections.order_by('timestamp'):
         weight = min(d.trash_count * 0.2, 1.0)
         data.append({
             'latitude': d.latitude,
@@ -796,6 +796,8 @@ def get_heatmap_data(request):
             'categories': d.categories or {},
             'timestamp': d.timestamp,
             'boat': d.boat.name,
+            'boat_id': d.boat_id,
+            'request': d.request.request_id if d.request else None,
             'confidence': d.confidence,
         })
     return Response(data)
@@ -1284,7 +1286,7 @@ class RequestViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
         Unsupported cleanups have no bot involved, so the report is just the user's count."""
         reqs = Request.objects.filter(
             archived=False, status__in=['completed', 'segregated', 'verified']
-        ).exclude(trash_categories={}).select_related('collection_area').prefetch_related('detection_events')
+        ).exclude(trash_categories={}).select_related('collection_area', 'bot_id').prefetch_related('detection_events')
 
         schedules_by_request = {
             s.request_id: s.cleanup_type
@@ -1295,7 +1297,8 @@ class RequestViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
         for req in reqs:
             cleanup_type = schedules_by_request.get(req.request_id, 'unsupported')
 
-            counted = troid_counts(req.detection_events.all())
+            events = sorted(req.detection_events.all(), key=lambda e: e.timestamp)
+            counted = troid_counts(events)
             if counted:
                 troid_categories = counted
                 user_categories = req.trash_categories or {}
@@ -1336,6 +1339,18 @@ class RequestViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
                 'bags': req.bags,
                 'weight_kg': req.weight_kg,
                 'collection_area': collection_area,
+                'bot': req.bot_id.label if req.bot_id else None,
+                # Where the robot actually was during the drive, to compare with the collection area.
+                'detections': [
+                    {
+                        'latitude': e.latitude,
+                        'longitude': e.longitude,
+                        'trash_count': e.trash_count,
+                        'timestamp': e.timestamp,
+                    }
+                    for e in events
+                    if e.latitude is not None and e.longitude is not None
+                ],
             })
         return Response(results)
 

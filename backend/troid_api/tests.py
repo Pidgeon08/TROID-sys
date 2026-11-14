@@ -3,6 +3,7 @@ import importlib.util
 import json
 import os
 import time
+from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -554,6 +555,73 @@ class TrashReportTests(TestCase):
         self.assertEqual(self.submit(self.REPORT).status_code, 200)
 
         self.assertEqual(self.submit(self.REPORT).status_code, 400)
+
+
+class HeatmapCoverageDataTests(TestCase):
+    """The Heatmap page measures coverage from where the robot actually detected trash."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.admin = make_user('admin')
+        self.boat = Boat.objects.create(name='Bot')
+        self.area = CollectionArea.objects.create(
+            name='Area', barangay='Poro', closed=True, status='approved',
+            points=[[16.616, 120.286], [16.617, 120.286], [16.617, 120.287]],
+        )
+        self.req = Request.objects.create(
+            email='requester@example.com', status='completed', barangay='Poro',
+            collection_area=self.area, bot_id=self.boat, trash_categories={'Plastic': 2},
+        )
+
+    def detect(self, lat, lng, at, request=None):
+        event = DetectionEvent.objects.create(
+            boat=self.boat, request=request, latitude=lat, longitude=lng, trash_count=1,
+            categories={'plastic_bottle': 1}, is_verified=True,
+        )
+        DetectionEvent.objects.filter(pk=event.pk).update(timestamp=at)
+        return event
+
+    def heatmap(self, **params):
+        return self.client.get('/api/heatmap/', params, **session_header(self.admin)).json()
+
+    def test_comparison_lists_each_drives_detections_in_order(self):
+        now = timezone.now()
+        self.detect(16.6166, 120.2866, now, request=self.req)
+        self.detect(16.6165, 120.2865, now - timedelta(minutes=5), request=self.req)
+        self.detect(16.0, 120.0, now)  # another drive's point
+
+        response = self.client.get('/api/requests/post-cleanup-comparison/', **session_header(self.admin))
+
+        self.assertEqual(response.status_code, 200)
+        [drive] = response.json()
+        self.assertEqual(drive['bot'], self.boat.label)
+        self.assertEqual(
+            [(d['latitude'], d['longitude']) for d in drive['detections']],
+            [(16.6165, 120.2865), (16.6166, 120.2866)],
+        )
+        self.assertEqual(drive['collection_area']['points'], self.area.points)
+
+    def test_heatmap_points_name_their_request(self):
+        self.detect(16.6166, 120.2866, timezone.now(), request=self.req)
+        self.detect(16.0, 120.0, timezone.now())
+
+        self.assertEqual(sorted(p['request'] or '' for p in self.heatmap()), ['', self.req.request_id])
+
+    def test_custom_range_filters_by_the_start_and_end_given(self):
+        now = timezone.now()
+        self.detect(16.1, 120.1, now - timedelta(days=10))
+        self.detect(16.2, 120.2, now - timedelta(days=3))
+        self.detect(16.3, 120.3, now)
+
+        points = self.heatmap(
+            time_filter='custom',
+            start=(now - timedelta(days=5)).isoformat(),
+            end=(now - timedelta(days=1)).isoformat(),
+        )
+        self.assertEqual([p['latitude'] for p in points], [16.2])
+
+        open_ended = self.heatmap(time_filter='custom', start=(now - timedelta(days=5)).isoformat())
+        self.assertEqual([p['latitude'] for p in open_ended], [16.2, 16.3])
 
 
 ROLES = ('admin', 'mayorsoffice', 'barangay', 'ngo', 'operator')
