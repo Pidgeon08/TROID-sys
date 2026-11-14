@@ -1405,6 +1405,23 @@ class CollectionAreaViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
             queryset = queryset.filter(status=status_param)
         return queryset
 
+    def create(self, request, *args, **kwargs):
+        user = request.user
+        role = getattr(user, 'role', None)
+        data = request.data.copy()
+        # A barangay or NGO account draws areas for its own barangay only.
+        if role in REQUESTERS and getattr(user, 'location', ''):
+            data['barangay'] = user.location
+        serializer = self.get_serializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        if role == 'admin':
+            # CENRO approves its own areas as it adds them.
+            serializer.save(status='approved', reviewed_by=user.name, date_reviewed=timezone.now(),
+                            submitted_by=serializer.validated_data.get('submitted_by') or user.name)
+        else:
+            serializer.save(status='pending')
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
     def _actor_name(self, request):
         return request.data.get('reviewed_by') or (request.user.name if hasattr(request, 'user') and hasattr(request.user, 'name') else 'Admin')
 

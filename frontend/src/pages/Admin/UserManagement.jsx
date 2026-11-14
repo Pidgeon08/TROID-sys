@@ -6,6 +6,7 @@ import { useUsers } from "../../hooks/useUsers";
 import { Card } from "../../components/ui/Card";
 import { SearchBar } from "../../components/ui/SearchBar";
 import { EmptyState } from "../../components/ui/EmptyState";
+import { BARANGAYS } from "../../utils/barangayBoundaries";
 
 const ROLE_STYLES = {
   Admin: "bg-blue-50 text-blue-700",
@@ -590,13 +591,16 @@ function AddUserModal({ onCancel, onSave }) {
           </div>
           <div>
             <label className="mb-1 block text-xs font-medium text-slate-500">Barangay</label>
-            <input
+            {/* One of San Fernando's barangays, so the account's collection areas can be checked against its boundary. */}
+            <select
               value={form.location}
               onChange={(e) => setForm({ ...form, location: e.target.value })}
-              placeholder="e.g. Carlatan"
               disabled={form.role !== 'Barangay' && form.role !== 'NGO'}
-              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30 disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed"
-            />
+              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30 disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed"
+            >
+              <option value="">Select a barangay</option>
+              {BARANGAYS.map((b) => <option key={b} value={b}>{b}</option>)}
+            </select>
           </div>
         </div>
 

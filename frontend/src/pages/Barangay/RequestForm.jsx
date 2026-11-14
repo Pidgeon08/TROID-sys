@@ -199,12 +199,16 @@ function MonthCalendar({ anchor, scheduleMap, bots, selectedDate, onSelectDate, 
   );
 }
 
-function RequestForm({ currentUser }) {
+// The same form for Barangay/NGO accounts and for CENRO (forCenro), which also picks the barangay.
+function RequestForm({ currentUser, forCenro = false }) {
   const navigate = useNavigate();
-  const barangayName = currentUser?.name || "Barangay";
+  const barangayName = currentUser?.name || (forCenro ? "CENRO" : "Barangay");
   const barangayLocation = currentUser?.location || "";
+  const requestsPath = forCenro ? "/admin/requests" : "/barangay/requests";
+  const areasPath = forCenro ? "/admin/collection-areas" : "/barangay/areas";
 
   const [formData, setFormData] = useState({
+    barangay: "",
     location: "",
     collectionAreaId: "",
     date: "",
@@ -265,12 +269,13 @@ function RequestForm({ currentUser }) {
 
   useEffect(() => {
     let cancelled = false;
-    api.collectionAreas({ barangay: barangayLocation, status: "approved" })
+    // CENRO can request for any barangay; a barangay account only for its own.
+    api.collectionAreas(forCenro ? { status: "approved" } : { barangay: barangayLocation, status: "approved" })
       .then((data) => { if (!cancelled) setCollectionAreas(data || []); })
       .catch((err) => console.error("Failed to load collection areas:", err))
       .finally(() => { if (!cancelled) setCollectionAreasLoading(false); });
     return () => { cancelled = true; };
-  }, [barangayLocation]);
+  }, [barangayLocation, forCenro]);
 
   useEffect(() => {
     if (!showTimeTable || ttLoaded) return;
@@ -325,11 +330,15 @@ function RequestForm({ currentUser }) {
       ? `${getWeekDays(ttAnchor)[0].toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${getWeekDays(ttAnchor)[6].toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`
       : `${MONTHS[ttAnchor.getMonth()]} ${ttAnchor.getFullYear()}`;
 
-  const selectedCollectionArea = collectionAreas.find((a) => String(a.id) === String(formData.collectionAreaId));
+  // A request needs a collection area, so CENRO can only pick barangays that have one.
+  const barangayOptions = forCenro ? [...new Set(collectionAreas.map((a) => a.barangay).filter(Boolean))].sort() : [];
+  const requestBarangay = forCenro ? formData.barangay : barangayLocation;
+  const areaOptions = forCenro ? collectionAreas.filter((a) => a.barangay === formData.barangay) : collectionAreas;
+  const selectedCollectionArea = areaOptions.find((a) => String(a.id) === String(formData.collectionAreaId));
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (!formData.collectionAreaId || !formData.date || !formData.time) {
+    if ((forCenro && !formData.barangay) || !formData.collectionAreaId || !formData.date || !formData.time) {
       alert("Please fill in all required fields.");
       return;
     }
@@ -355,12 +364,12 @@ function RequestForm({ currentUser }) {
         request_id: `REQ-${timestamp}`,
         request_type: REQUEST_TYPE,
         requested_by_name: barangayName,
-        requested_by_role: currentUser?.role || "barangay",
-        requested_by_barangay: barangayLocation,
+        requested_by_role: currentUser?.role || (forCenro ? "admin" : "barangay"),
+        requested_by_barangay: requestBarangay,
         email: currentUser?.email || `${barangayName.toLowerCase().replace(/\s+/g, '')}@barangay.gov.ph`,
         location_name: formData.location,
         collection_area: formData.collectionAreaId,
-        barangay: barangayLocation,
+        barangay: requestBarangay,
         municipality: "",
         province: "",
         preferred_date: formData.date,
@@ -369,7 +378,7 @@ function RequestForm({ currentUser }) {
         photos: photosPayload,
       };
       await api.createRequest(payload);
-      navigate("/barangay/requests");
+      navigate(requestsPath);
     } catch (err) {
       console.error("Failed to submit request:", err);
       alert("Failed to submit request. Please try again.");
@@ -383,13 +392,17 @@ function RequestForm({ currentUser }) {
     <div className="max-w-[1400px] mx-auto animate-fade-in pb-12">
       <header className="mb-6 flex items-center justify-between">
         <div>
-          <h1 className="text-[28px] font-bold text-slate-900 tracking-tight leading-none">Submit Cleanup Request</h1>
+          <h1 className="text-[28px] font-bold text-slate-900 tracking-tight leading-none">
+            {forCenro ? "Send Request" : "Submit Cleanup Request"}
+          </h1>
           <p className="text-slate-500 text-sm mt-1.5 font-medium">
-            Request TROID bot deployment for cleanup operations in your area
+            {forCenro
+              ? "Request TROID bot deployment for cleanup operations in a barangay"
+              : "Request TROID bot deployment for cleanup operations in your area"}
           </p>
         </div>
         <button
-          onClick={() => navigate("/barangay/requests")}
+          onClick={() => navigate(requestsPath)}
           className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
         >
           <ArrowLeft size={16} />
@@ -400,6 +413,31 @@ function RequestForm({ currentUser }) {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-6">
           <form onSubmit={handleSubmit} className="space-y-5">
+            {forCenro && (
+              <div>
+                <label htmlFor="request-barangay" className="block text-xs font-semibold text-slate-500 mb-1.5">Barangay</label>
+                <div className="relative">
+                  <MapPin size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                  <select
+                    id="request-barangay"
+                    value={formData.barangay}
+                    onChange={(e) => setFormData({ ...formData, barangay: e.target.value, collectionAreaId: "" })}
+                    className="w-full appearance-none rounded-lg border border-slate-200 bg-white py-2.5 pl-9 pr-9 text-sm text-slate-700 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
+                    required
+                  >
+                    <option value="" disabled>
+                      {collectionAreasLoading ? "Loading barangays..." : barangayOptions.length === 0 ? "No approved collection areas yet" : "Select a barangay"}
+                    </option>
+                    {barangayOptions.map((b) => (
+                      <option key={b} value={b}>{b}</option>
+                    ))}
+                  </select>
+                  <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                </div>
+                <p className="text-[11px] text-slate-400 mt-1.5">Only barangays with an approved collection area are listed.</p>
+              </div>
+            )}
+
             <div>
               <label className="block text-xs font-semibold text-slate-500 mb-1.5">Collection Area</label>
               <div className="relative">
@@ -408,13 +446,20 @@ function RequestForm({ currentUser }) {
                   name="collectionAreaId"
                   value={formData.collectionAreaId}
                   onChange={handleChange}
-                  className="w-full appearance-none rounded-lg border border-slate-200 bg-white py-2.5 pl-9 pr-9 text-sm text-slate-700 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
+                  disabled={forCenro && !formData.barangay}
+                  className="w-full appearance-none rounded-lg border border-slate-200 bg-white py-2.5 pl-9 pr-9 text-sm text-slate-700 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30 disabled:bg-slate-50 disabled:text-slate-400"
                   required
                 >
                   <option value="">
-                    {collectionAreasLoading ? "Loading areas..." : collectionAreas.length === 0 ? "No approved areas yet" : "Select a collection area"}
+                    {collectionAreasLoading
+                      ? "Loading areas..."
+                      : collectionAreas.length === 0
+                        ? "No approved areas yet"
+                        : forCenro && !formData.barangay
+                          ? "Select a barangay first"
+                          : "Select a collection area"}
                   </option>
-                  {collectionAreas.map((a) => (
+                  {areaOptions.map((a) => (
                     <option key={a.id} value={a.id}>{a.name}</option>
                   ))}
                 </select>
@@ -422,9 +467,9 @@ function RequestForm({ currentUser }) {
               </div>
               {!collectionAreasLoading && collectionAreas.length === 0 && (
                 <p className="text-[11px] text-amber-600 mt-1.5">
-                  You don't have any approved collection areas yet.{" "}
-                  <button type="button" onClick={() => navigate("/barangay/areas")} className="underline font-medium">
-                    Draw one first
+                  {forCenro ? "There are no approved collection areas yet." : "You don't have any approved collection areas yet."}{" "}
+                  <button type="button" onClick={() => navigate(areasPath)} className="underline font-medium">
+                    {forCenro ? "Add one first" : "Draw one first"}
                   </button>.
                 </p>
               )}
@@ -578,7 +623,9 @@ function RequestForm({ currentUser }) {
             <ol className="space-y-3 text-sm">
               <li className="flex gap-3">
                 <span className="w-5 h-5 rounded-full bg-[#1b4de4] text-white text-xs font-bold flex items-center justify-center shrink-0">1</span>
-                <span className="text-slate-600">Submit a cleanup request for your barangay area</span>
+                <span className="text-slate-600">
+                  {forCenro ? "Submit a cleanup request for a barangay's collection area" : "Submit a cleanup request for your barangay area"}
+                </span>
               </li>
               <li className="flex gap-3">
                 <span className="w-5 h-5 rounded-full bg-[#1b4de4] text-white text-xs font-bold flex items-center justify-center shrink-0">2</span>
@@ -629,7 +676,7 @@ function RequestForm({ currentUser }) {
               </div>
               <div className="flex items-center justify-between py-2 text-sm border-b border-slate-50">
                 <span className="text-slate-500">Barangay</span>
-                <span className="font-medium text-slate-800 text-right">{barangayName}</span>
+                <span className="font-medium text-slate-800 text-right">{forCenro ? formData.barangay : barangayName}</span>
               </div>
               <div className="flex items-center justify-between py-2 text-sm border-b border-slate-50">
                 <span className="text-slate-500">Preferred Date</span>

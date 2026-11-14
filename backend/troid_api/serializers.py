@@ -3,6 +3,7 @@ import binascii
 import os
 
 from rest_framework import serializers
+from . import boundaries
 from .models import Boat, DetectionEvent, User, Operator, Request, StatusHistory, Photo, DeploymentSchedule, PriorityArea, LandfillRecord, RecyclingRecord, SegregationRecord, AuditLog, HeatmapData, CollectionArea, Notification
 
 LETTER_MAX_BYTES = 5 * 1024 * 1024
@@ -203,6 +204,40 @@ class AuditLogSerializer(serializers.ModelSerializer):
 
 
 class CollectionAreaSerializer(serializers.ModelSerializer):
+    # Only CENRO (admin) reviews areas; anyone else's values for these are ignored.
+    REVIEW_FIELDS = ('status', 'decline_reason', 'reviewed_by', 'date_reviewed')
+
+    def validate(self, attrs):
+        request = self.context.get('request')
+        if getattr(getattr(request, 'user', None), 'role', None) != 'admin':
+            for field in self.REVIEW_FIELDS:
+                attrs.pop(field, None)
+
+        area = self.instance
+        # Renaming or recolouring an area leaves its shape alone, so only check a new or reshaped one.
+        if area is not None and not {'points', 'barangay', 'closed'} & attrs.keys():
+            return attrs
+        barangay = attrs.get('barangay', area.barangay if area else '')
+        points = attrs.get('points', area.points if area else [])
+        closed = attrs.get('closed', area.closed if area else True)
+
+        official = boundaries.canonical_barangay(barangay)
+        if not official:
+            raise serializers.ValidationError({'barangay': f'"{barangay}" is not a barangay of San Fernando.'})
+        attrs['barangay'] = official
+        if not isinstance(points, list) or not all(
+            isinstance(p, (list, tuple)) and len(p) == 2
+            and all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in p)
+            for p in points
+        ):
+            raise serializers.ValidationError({'points': 'Points must be [latitude, longitude] pairs.'})
+        if len(points) < (3 if closed else 2):
+            raise serializers.ValidationError({'points': 'Draw at least 3 points for an area, or 2 for a line.'})
+        problem = boundaries.check_area(points, official)
+        if problem:
+            raise serializers.ValidationError({'points': problem})
+        return attrs
+
     class Meta:
         model = CollectionArea
         fields = ['id', 'area_id', 'name', 'barangay', 'submitted_by', 'points', 'closed', 'color', 'status', 'decline_reason', 'reviewed_by', 'date_submitted', 'date_reviewed', 'archived']

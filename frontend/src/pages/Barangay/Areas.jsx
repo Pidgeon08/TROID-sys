@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useOutletContext } from "react-router-dom";
-import { MapContainer, TileLayer, Polyline, Polygon, CircleMarker, useMapEvents, useMap } from "react-leaflet";
+import { MapContainer, TileLayer, Polyline, Polygon, useMap } from "react-leaflet";
 import { TILE_URL, TILE_ATTRIBUTION } from "../../services/mapTiles";
 import "leaflet/dist/leaflet.css";
-import L from "leaflet";
+import { AreaDraftLayers, BarangayOutline } from "../../components/AreaDrawing";
+import { useAreaDraft } from "../../hooks/useAreaDraft";
+import { canonicalBarangay } from "../../utils/barangayBoundaries";
 import {
   Map as MapIcon,
   Plus,
@@ -46,26 +48,6 @@ function mapArea(raw) {
   };
 }
 
-function MapClickHandler({ enabled, draftPoints, isPolygon, onAddPoint, onClose }) {
-  const map = useMap();
-  useMapEvents({
-    click(e) {
-      if (!enabled) return;
-      const first = draftPoints[0];
-      if (draftPoints.length >= 3 && !isPolygon && first) {
-        const a = map.latLngToLayerPoint(e.latlng);
-        const b = map.latLngToLayerPoint(L.latLng(first[0], first[1]));
-        if (Math.hypot(a.x - b.x, a.y - b.y) <= 18) {
-          onClose();
-          return;
-        }
-      }
-      onAddPoint([e.latlng.lat, e.latlng.lng]);
-    },
-  });
-  return null;
-}
-
 function FlyTo({ position, zoom }) {
   const map = useMap();
   useEffect(() => {
@@ -80,13 +62,14 @@ function BarangayAreas() {
   const { currentUser } = useOutletContext() || {};
   const barangayName = currentUser?.name || "Barangay";
   const barangayLocation = currentUser?.location || barangayName;
+  // The official San Fernando barangay this account draws in; areas must stay inside it.
+  const officialBarangay = canonicalBarangay(currentUser?.location);
 
   const [areas, setAreas] = useState([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const [drawing, setDrawing] = useState(false);
-  const [draftPoints, setDraftPoints] = useState([]);
-  const [isPolygon, setIsPolygon] = useState(false);
+  const draft = useAreaDraft();
+  const { drawing, points: draftPoints, isPolygon } = draft;
   const [name, setName] = useState("");
   const [color, setColor] = useState(AREA_COLOR);
   const [flyTo, setFlyTo] = useState(null);
@@ -100,42 +83,33 @@ function BarangayAreas() {
 
   useEffect(() => {
     let cancelled = false;
-    api.collectionAreas({ barangay: barangayLocation })
+    api.collectionAreas({ barangay: officialBarangay || barangayLocation })
       .then((data) => { if (!cancelled) setAreas((data || []).map(mapArea)); })
       .catch((err) => console.error("Failed to load collection areas:", err))
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [barangayLocation]);
+  }, [officialBarangay, barangayLocation]);
 
-  const addPoint = (p) => setDraftPoints((prev) => [...prev, p]);
-
-  const closePolygon = () => {
-    if (drawing && draftPoints.length >= 3 && !isPolygon) {
-      setIsPolygon(true);
-      setDrawing(false);
-    }
-  };
-
-  const undoPoint = () => setDraftPoints((prev) => prev.slice(0, -1));
+  const undoPoint = draft.undo;
 
   const clearDraft = () => {
-    setDraftPoints([]);
-    setIsPolygon(false);
+    draft.clear();
     setName("");
     setColor(AREA_COLOR);
   };
 
-  const requiredPoints = isPolygon ? 3 : 2;
-  const canSubmitDraft = draftPoints.length >= requiredPoints && name.trim() && !submitting;
-  const isDraftingArea = drawing || draftPoints.length > 0;
+  const [saveError, setSaveError] = useState("");
+  const canSubmitDraft = draft.canSave && name.trim() && !submitting;
+  const isDraftingArea = draft.isDrafting;
 
   const confirmSaveArea = async () => {
     if (!canSubmitDraft) return;
     setSubmitting(true);
+    setSaveError("");
     try {
       const created = await api.createCollectionArea({
         name: name.trim(),
-        barangay: barangayLocation,
+        barangay: officialBarangay,
         submitted_by: barangayName,
         points: draftPoints,
         closed: isPolygon,
@@ -147,7 +121,7 @@ function BarangayAreas() {
       setActiveId(newArea.id);
       setFlyTo(centroid(draftPoints));
       clearDraft();
-      setDrawing(false);
+      draft.stop();
       setShowConfirm(false);
       setSavedFlash(`${newArea.name} submitted for admin approval`);
       setTimeout(() => setSavedFlash(""), 3000);
@@ -159,6 +133,7 @@ function BarangayAreas() {
       });
     } catch (err) {
       console.error("Failed to submit collection area:", err);
+      setSaveError(err.message?.replace(/^(points|barangay): /, "") || "The area couldn't be submitted. Please try again.");
     } finally {
       setSubmitting(false);
     }
@@ -224,9 +199,10 @@ function BarangayAreas() {
   };
 
   const startDrawing = () => {
+    if (!officialBarangay) return;
     clearDraft();
     setActiveId(null);
-    setDrawing(true);
+    draft.start();
   };
 
   return (
@@ -235,8 +211,14 @@ function BarangayAreas() {
         <div>
           <h1 className="text-[28px] font-bold text-slate-900 tracking-tight leading-none">Collection Areas</h1>
           <p className="text-slate-500 mt-1.5 text-sm font-medium">
-            Draw a cleanup / collection zone for {barangayName} and submit it for admin approval.
+            Draw a cleanup / collection zone in {officialBarangay || barangayName} and submit it for admin approval.
           </p>
+          {!officialBarangay && (
+            <p className="mt-2 text-xs font-medium text-amber-700">
+              Your account's barangay ({currentUser?.location || "not set"}) isn't one of San Fernando's barangays, so
+              you can't draw areas yet. Ask CENRO to set it in User Management.
+            </p>
+          )}
         </div>
         <div className="flex items-center gap-2">
           {savedFlash && (
@@ -247,7 +229,8 @@ function BarangayAreas() {
           <button
             type="button"
             onClick={startDrawing}
-            className={`flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-sm font-medium text-white transition-colors ${
+            disabled={!officialBarangay}
+            className={`flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-sm font-medium text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
               drawing ? "bg-amber-500 hover:bg-amber-600" : "bg-[#1b4de4] hover:bg-[#153eb8]"
             }`}
           >
@@ -274,7 +257,12 @@ function BarangayAreas() {
               </div>
             ) : drawing && (
               <div className="mb-4 rounded-lg bg-amber-50 border border-amber-100 px-3 py-2 text-xs font-medium text-amber-700">
-                Drawing mode active — click the map to add vertices. Click the first (blue) node to close a filled polygon.
+                Drawing mode active — click the map inside {officialBarangay}'s dashed outline, or on the water just off it, to add vertices. Click the first (blue) node to close a filled polygon.
+              </div>
+            )}
+            {draft.notice && (
+              <div className="mb-4 rounded-lg bg-red-50 border border-red-100 px-3 py-2 text-xs font-medium text-red-700" role="alert">
+                {draft.notice}
               </div>
             )}
 
@@ -422,13 +410,7 @@ function BarangayAreas() {
                 attribution={TILE_ATTRIBUTION}
               />
 
-              <MapClickHandler
-                enabled={drawing}
-                draftPoints={draftPoints}
-                isPolygon={isPolygon}
-                onAddPoint={addPoint}
-                onClose={closePolygon}
-              />
+              <BarangayOutline barangay={officialBarangay} />
               {flyTo && <FlyTo position={flyTo} />}
 
               {/* Saved shapes */}
@@ -460,47 +442,15 @@ function BarangayAreas() {
                 ) : null
               )}
 
-              {/* Draft shape */}
-              {isPolygon && draftPoints.length >= 3 ? (
-                <Polygon
-                  positions={draftPoints}
-                  pathOptions={{ color, weight: 3, fillColor: color, fillOpacity: 0.2 }}
-                />
-              ) : (
-                draftPoints.length >= 2 && (
-                  <Polyline
-                    positions={draftPoints}
-                    pathOptions={{ color, weight: 3, dashArray: "6 6", opacity: 0.9 }}
-                  />
-                )
-              )}
-
-              {/* Draft vertices */}
-              {draftPoints.map((p, i) => {
-                const isStart = i === 0;
-                const canClose = isStart && drawing && draftPoints.length >= 3 && !isPolygon;
-                return (
-                  <CircleMarker
-                    key={i}
-                    center={p}
-                    radius={canClose ? 7 : 5}
-                    eventHandlers={canClose ? { click: (e) => { e.originalEvent.stopPropagation(); closePolygon(); } } : undefined}
-                    pathOptions={{
-                      color: "#ffffff",
-                      weight: 2,
-                      fillColor: canClose ? "#1b4de4" : color,
-                      fillOpacity: 1,
-                    }}
-                  />
-                );
-              })}
+              {/* The shape being drawn */}
+              <AreaDraftLayers draft={draft} barangay={officialBarangay} color={color} />
             </MapContainer>
 
             {/* Drawing overlay hint */}
             {drawing && (
               <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[400] flex items-center gap-2 rounded-full bg-[#1b4de4] px-4 py-2 text-xs font-medium text-white shadow-lg">
                 <MapPin className="h-3.5 w-3.5" />
-                Click on the map to add points to the polyline
+                Click inside {officialBarangay} to add points
               </div>
             )}
           </div>
@@ -509,11 +459,13 @@ function BarangayAreas() {
             <span className="inline-flex items-center gap-1.5">
               <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: AREA_COLOR }} />
               Collection Area
+              <span className="ml-3 h-0 w-4 border-t-2 border-dashed border-slate-700" />
+              {officialBarangay || "Barangay"} boundary
             </span>
             {drawing ? (
               <button
                 type="button"
-                onClick={() => setDrawing(false)}
+                onClick={draft.stop}
                 className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 font-medium text-slate-600 hover:bg-slate-50"
               >
                 <X className="h-3.5 w-3.5" /> Stop drawing
@@ -543,7 +495,7 @@ function BarangayAreas() {
               </div>
               <div className="flex items-center justify-between text-sm">
                 <span className="text-slate-500">Barangay</span>
-                <span className="font-semibold text-slate-800 text-right">{barangayLocation}</span>
+                <span className="font-semibold text-slate-800 text-right">{officialBarangay}</span>
               </div>
               <div className="flex items-center justify-between text-sm">
                 <span className="text-slate-500">Shape</span>
@@ -558,6 +510,7 @@ function BarangayAreas() {
                   {color}
                 </span>
               </div>
+              {saveError && <p className="text-xs font-medium text-red-600" role="alert">{saveError}</p>}
             </div>
             <div className="p-6 pt-2 flex gap-3">
               <button

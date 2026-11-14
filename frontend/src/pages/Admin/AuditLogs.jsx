@@ -26,6 +26,7 @@ const MODULES = [
   "Report Generation",
   "Requests",
   "Backup & Restore",
+  "Collection Areas",
 ];
 
 const ACTIONS = [
@@ -57,6 +58,10 @@ const ACTIONS = [
   "Bot alert",
   "Request approved",
   "Request declined",
+  "Collection area added",
+  "Collection area submitted",
+  "Collection area approved",
+  "Collection area archived",
   "Report generated",
 ];
 

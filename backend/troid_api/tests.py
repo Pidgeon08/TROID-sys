@@ -273,6 +273,92 @@ class CityAdminNotificationTests(TestCase):
         self.assertFalse(self.notified().exists())
 
 
+def around(lat, lng, d=0.0005):
+    """A small triangle (about 55 m across) centred on a point."""
+    return [[lat + d, lng], [lat - d, lng - d], [lat - d, lng + d]]
+
+
+# Points well inside barangays (about 400 m from their borders), and out on the water west of Poro.
+IN_PORO = (16.61604, 120.28626)
+IN_CATBANGEN = (16.60797, 120.31252)
+SEA_500_M_OFF_PORO = [16.61828, 120.27289]
+SEA_2_KM_OFF_PORO = [16.61828, 120.25789]
+IN_BAUANG = [16.53, 120.33]
+
+
+class CollectionAreaBoundaryTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.admin = make_user('admin')
+        self.barangay = make_user('barangay')
+        User.objects.filter(pk=self.barangay.pk).update(location='Poro')
+
+    def add(self, user, **data):
+        body = {'name': 'Area', 'closed': True, 'color': '#1b4de4', **data}
+        return self.client.post('/api/collection-areas/', body, format='json', **session_header(user))
+
+    def test_cenro_adds_an_area_that_is_approved_straight_away(self):
+        response = self.add(self.admin, barangay='poro', points=around(*IN_PORO))
+
+        self.assertEqual(response.status_code, 201, response.content)
+        area = CollectionArea.objects.get()
+        self.assertEqual((area.barangay, area.status, area.reviewed_by), ('Poro', 'approved', self.admin.name))
+        self.assertIsNotNone(area.date_reviewed)
+
+    def test_a_barangay_account_submits_for_its_own_barangay_and_waits_for_approval(self):
+        response = self.add(self.barangay, barangay='Catbangen', status='approved', points=around(*IN_PORO))
+
+        self.assertEqual(response.status_code, 201, response.content)
+        area = CollectionArea.objects.get()
+        self.assertEqual((area.barangay, area.status, area.reviewed_by), ('Poro', 'pending', ''))
+
+    def test_an_area_in_another_barangay_is_refused(self):
+        for user in (self.barangay, self.admin):
+            with self.subTest(role=user.role):
+                response = self.add(user, barangay='Poro', points=around(*IN_CATBANGEN))
+                self.assertEqual(response.status_code, 400)
+                self.assertIn('is in Catbangen, not Poro', response.json()['points'][0])
+        self.assertFalse(CollectionArea.objects.exists())
+
+    def test_water_near_the_barangay_is_allowed_but_not_far_out_or_another_town(self):
+        near = self.add(self.admin, barangay='Poro', closed=False, points=[list(IN_PORO), SEA_500_M_OFF_PORO])
+        far = self.add(self.admin, barangay='Poro', closed=False, points=[list(IN_PORO), SEA_2_KM_OFF_PORO])
+        bauang = self.add(self.admin, barangay='Pagdalagan', closed=False, points=[IN_BAUANG, IN_BAUANG])
+
+        self.assertEqual(near.status_code, 201, near.content)
+        self.assertIn('Point 2 is more than 1,000 m out from Poro', far.json()['points'][0])
+        self.assertIn('is in Bauang, outside San Fernando', bauang.json()['points'][0])
+
+    def test_unknown_barangays_and_bad_shapes_are_refused(self):
+        unknown = self.add(self.admin, barangay='Atlantis', points=around(*IN_PORO))
+        too_few = self.add(self.admin, barangay='Poro', points=around(*IN_PORO)[:2])
+        not_points = self.add(self.admin, barangay='Poro', points=[['a', 'b'], [1], True])
+
+        self.assertIn('not a barangay of San Fernando', unknown.json()['barangay'][0])
+        self.assertIn('at least 3 points', too_few.json()['points'][0])
+        self.assertIn('[latitude, longitude]', not_points.json()['points'][0])
+
+    def test_an_existing_area_can_be_renamed_even_if_drawn_before_the_boundaries(self):
+        old = CollectionArea.objects.create(name='Old', barangay='Poro', points=around(*IN_CATBANGEN), status='pending')
+
+        renamed = self.client.patch(f'/api/collection-areas/{old.area_id}/', {'name': 'Renamed', 'status': 'approved'},
+                                    format='json', **session_header(self.barangay))
+        moved = self.client.patch(f'/api/collection-areas/{old.area_id}/', {'points': around(*IN_CATBANGEN)},
+                                  format='json', **session_header(self.barangay))
+
+        self.assertEqual(renamed.status_code, 200)
+        old.refresh_from_db()
+        # The barangay account can't approve its own area.
+        self.assertEqual((old.name, old.status), ('Renamed', 'pending'))
+        self.assertEqual(moved.status_code, 400)
+
+    def test_the_website_and_the_api_use_the_same_boundaries(self):
+        website_copy = Path(__file__).resolve().parents[2] / 'frontend' / 'src' / 'data' / 'sanFernandoBoundaries.json'
+        if not website_copy.exists():
+            self.skipTest('frontend not checked out')
+        self.assertEqual(website_copy.read_bytes(), (Path(__file__).resolve().parent / 'data' / 'san_fernando_boundaries.json').read_bytes())
+
+
 class BackupRestoreTests(TestCase):
     def setUp(self):
         self.client = APIClient()
