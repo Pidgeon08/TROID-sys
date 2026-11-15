@@ -13,8 +13,8 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         email = options['email'].strip()
-        if User.objects.filter(email__iexact=email).exists():
-            raise CommandError(f'A user with email {email} already exists.')
+        if User.unarchived_with_email(email).exists():
+            raise CommandError(f"{email} is already used by an account that isn't archived. Archive that account first.")
 
         password = getpass('Password: ')
         if len(password) < 8:

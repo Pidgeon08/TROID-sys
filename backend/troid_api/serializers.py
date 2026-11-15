@@ -84,6 +84,18 @@ class UserSerializer(serializers.ModelSerializer):
         model = User
         fields = ['id', 'user_id', 'name', 'email', 'role', 'status', 'location', 'date_created', 'must_change_password']
 
+    def validate(self, attrs):
+        # Only one account per email may be other than archived; the rest are kept for the record.
+        email = attrs.get('email', getattr(self.instance, 'email', ''))
+        account_status = attrs.get('status', getattr(self.instance, 'status', 'active'))
+        if account_status != 'archived':
+            others = User.unarchived_with_email(email)
+            if self.instance is not None:
+                others = others.exclude(pk=self.instance.pk)
+            if others.exists():
+                raise serializers.ValidationError({'email': f"{email} is already used by an account that isn't archived. Archive that account first."})
+        return attrs
+
     def validate_role(self, value):
         # Operator logins come only from Operator Management (OperatorViewSet.create),
         # which links them to an operator record so they can use the Companion app.

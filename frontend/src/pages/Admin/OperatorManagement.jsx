@@ -105,7 +105,8 @@ export default function OperatorManagement() {
       });
     } catch (err) {
       console.error('Failed to update operator archive state:', err);
-      alert('Failed to update operator. Please try again.');
+      const reason = (err?.message || '').replace(/^\w+: /, '');
+      alert(`Failed to update operator. ${reason && !reason.startsWith('API error') ? reason : 'Please try again.'}`);
     }
   };
 

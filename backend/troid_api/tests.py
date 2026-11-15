@@ -1606,6 +1606,121 @@ class DeviceKeyEndpointTests(TestCase):
         self.assertIsNone(self.boat.device_key)
 
 
+class SharedEmailAccountTests(TestCase):
+    """An email may have several accounts as long as only one of them isn't archived."""
+
+    EMAIL = 'poro@example.com'
+
+    def setUp(self):
+        self.client = APIClient()
+        self.admin = make_user('admin')
+        self.old = User.objects.create(
+            name='Old Poro', email=self.EMAIL, password='Old-password1', role='barangay', status='archived',
+            session_token='old-session',
+        )
+
+    def add_user(self, email=None, **data):
+        body = {'name': 'New Poro', 'email': email or self.EMAIL, 'role': 'barangay', 'status': 'active', **data}
+        with patch('troid_api.views.send_temp_password_email', return_value=True):
+            return self.client.post('/api/users/', body, format='json', **session_header(self.admin))
+
+    def set_status(self, user, status):
+        return self.client.patch(f'/api/users/{user.pk}/', {'status': status}, format='json', **session_header(self.admin))
+
+    def test_a_new_account_can_reuse_an_archived_accounts_email(self):
+        response = self.add_user()
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(sorted(User.objects.filter(email=self.EMAIL).values_list('status', flat=True)), ['active', 'archived'])
+
+    def test_only_one_account_per_email_may_be_unarchived(self):
+        self.assertEqual(self.add_user().status_code, 201)
+
+        for email, status in ((self.EMAIL, 'active'), ('Poro@Example.com', 'active'), (self.EMAIL, 'pending')):
+            with self.subTest(email=email, status=status):
+                response = self.add_user(email=email, status=status)
+
+                self.assertEqual(response.status_code, 400)
+                self.assertIn('Archive that account first', response.json()['email'][0])
+        self.assertEqual(User.objects.filter(email__iexact=self.EMAIL).count(), 2)
+
+        # Another archived copy is fine.
+        self.assertEqual(self.add_user(status='archived').status_code, 201)
+
+    def test_an_archived_account_is_restored_only_once_its_email_is_free(self):
+        new = User.objects.get(pk=self.add_user().json()['id'])
+
+        response = self.set_status(self.old, 'active')
+        self.assertEqual(response.status_code, 400)
+        self.old.refresh_from_db()
+        self.assertEqual(self.old.status, 'archived')
+
+        self.assertEqual(self.set_status(new, 'archived').status_code, 200)
+        self.assertEqual(self.set_status(self.old, 'active').status_code, 200)
+
+    def test_an_email_cannot_be_changed_to_one_in_use(self):
+        other = make_user('ngo')
+
+        response = self.client.patch(f'/api/users/{other.pk}/', {'email': 'ADMIN-active@example.com'}, format='json',
+                                     **session_header(self.admin))
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_the_database_refuses_a_second_unarchived_account(self):
+        from django.db import IntegrityError, transaction
+        User.objects.create(name='New', email=self.EMAIL, password='x', role='barangay', status='active')
+
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            User.objects.create(name='Another', email=self.EMAIL.upper(), password='x', role='ngo', status='pending')
+
+    @override_settings(API_AUTH_ENFORCED=True)
+    def test_signing_in_reaches_the_account_that_is_not_archived(self):
+        def login(password):
+            return self.client.post('/api/login/', {'email': self.EMAIL, 'password': password}, format='json')
+
+        self.assertEqual(login('Old-password1').status_code, 403)
+
+        new = User.objects.create(name='New', email=self.EMAIL, password='New-password1', role='barangay', status='active')
+
+        response = login('New-password1')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['id'], new.pk)
+        self.assertEqual(login('Old-password1').status_code, 401)
+
+    @patch('troid_api.views.send_temp_password_email', return_value=True)
+    def test_a_forgotten_password_is_reset_on_the_unarchived_account(self, send):
+        new = User.objects.create(name='New', email=self.EMAIL, password='New-password1', role='barangay', status='active')
+
+        self.client.post('/api/forgot-password/', {'email': self.EMAIL}, format='json')
+
+        self.assertEqual(send.call_args.args[0].pk, new.pk)
+        new.refresh_from_db()
+        self.assertTrue(new.must_change_password)
+
+    @patch('troid_api.views.send_temp_password_email', return_value=True)
+    def test_operators_follow_the_same_rule(self, _send):
+        self.old.role = 'operator'
+        self.old.save()
+        old_operator = Operator.objects.create(name='Old Op', user=self.old, archived=True)
+
+        response = self.client.post('/api/operators/', {'name': 'New Op', 'email': self.EMAIL}, format='json',
+                                    **session_header(self.admin))
+        self.assertEqual(response.status_code, 201)
+
+        response = self.client.patch(f'/api/operators/{old_operator.pk}/', {'archived': False}, format='json',
+                                     **session_header(self.admin))
+        self.assertEqual(response.status_code, 400)
+        old_operator.refresh_from_db()
+        self.old.refresh_from_db()
+        self.assertTrue(old_operator.archived)
+        self.assertEqual(self.old.status, 'archived')
+
+        again = self.client.post('/api/operators/', {'name': 'Third Op', 'email': self.EMAIL}, format='json',
+                                 **session_header(self.admin))
+        self.assertEqual(again.status_code, 400)
+        self.assertFalse(Operator.objects.filter(name='Third Op').exists())
+
+
 class OperatorAccountCreationTests(TestCase):
     """Operator logins come only from an admin adding them in Operator Management."""
 

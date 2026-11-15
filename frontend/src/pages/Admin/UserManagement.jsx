@@ -24,6 +24,12 @@ const STATUS_STYLES = {
 
 const PAGE_SIZE = 5;
 
+// The API client reports field errors as "field: message"; the message alone reads better here.
+function serverReason(err) {
+  const message = (err?.message || '').replace(/^\w+: /, '');
+  return message && !message.startsWith('API error') ? message : 'Please try again.';
+}
+
 export default function UserManagement({ currentUser }) {
   const { users, loading, selected, selectedId, setSelectedId, updateUser, addUser } = useUsers();
   const [search, setSearch] = useState("");
@@ -78,7 +84,7 @@ export default function UserManagement({ currentUser }) {
       });
     } catch (err) {
       console.error('Failed to update user status:', err);
-      alert('Failed to update user status. Please try again.');
+      alert(`Failed to update user status. ${serverReason(err)}`);
     }
   };
 
@@ -102,7 +108,7 @@ export default function UserManagement({ currentUser }) {
       });
     } catch (err) {
       console.error('Failed to save user:', err);
-      alert('Failed to save user. Please try again.');
+      alert(`Failed to save user. ${serverReason(err)}`);
     }
   };
 
@@ -141,7 +147,7 @@ export default function UserManagement({ currentUser }) {
       );
     } catch (err) {
       console.error('Failed to create user:', err);
-      alert(`Failed to create user: ${err.message}`);
+      alert(`Failed to create user. ${serverReason(err)}`);
     }
   };
 

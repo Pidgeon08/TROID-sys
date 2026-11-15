@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 
 import requests
 from django.utils.dateparse import parse_datetime
-from rest_framework import status, viewsets
+from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import (
     action, api_view, authentication_classes, permission_classes, throttle_classes,
 )
@@ -129,7 +129,7 @@ def own_user_id(request, requested_id):
 def notify_request_update(req, notif_type, title, message):
     """Creates an in-app Notification for the requester (matched by email) and
     emails them, mirroring send_temp_password_email's best-effort error handling."""
-    recipient = User.objects.filter(email=req.email).first() if req.email else None
+    recipient = User.for_email(req.email)
     if recipient:
         Notification.objects.create(
             recipient=recipient,
@@ -177,7 +177,7 @@ def login(request):
     serializer.is_valid(raise_exception=True)
     email = serializer.validated_data['email']
     password = serializer.validated_data['password']
-    user = User.objects.filter(email=email).first()
+    user = User.for_email(email)
     if not user or not check_password(password, user.password):
         # Logged here rather than by the browser, which has no session yet.
         record_audit(request, user=email[:100], role='-', action='Login failed', module='Authentication',
@@ -264,8 +264,8 @@ def companion_login(request):
     serializer.is_valid(raise_exception=True)
     email = serializer.validated_data['email'].strip()
     password = serializer.validated_data['password']
-    # Phones often capitalize the first letter, so fall back to a case-insensitive match.
-    user = User.objects.filter(email=email).first() or User.objects.filter(email__iexact=email).first()
+    # Matched ignoring case: phones often capitalize the first letter.
+    user = User.for_email(email)
 
     def refuse(code, error, details, role='-'):
         record_audit(request, user=email[:100], role=role, action='Login failed', module=COMPANION_MODULE,
@@ -700,9 +700,8 @@ def forgot_password(request):
     })
     if not email:
         return Response({'error': 'Email is required.'}, status=status.HTTP_400_BAD_REQUEST)
-    try:
-        user = User.objects.get(email=email)
-    except User.DoesNotExist:
+    user = User.for_email(email)
+    if user is None:
         # Don't reveal whether the email exists.
         return generic_response
 
@@ -1004,9 +1003,9 @@ class OperatorViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
 
         email_sent = None
         if email:
-            if User.objects.filter(email=email).exists():
+            if User.unarchived_with_email(email).exists():
                 operator.delete()
-                return Response({'error': f'An account with email {email} already exists.'}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({'error': f"{email} is already used by an account that isn't archived. Archive that account first."}, status=status.HTTP_400_BAD_REQUEST)
             temp_password = generate_temp_password()
             account = User.objects.create(
                 name=operator.name,
@@ -1028,6 +1027,12 @@ class OperatorViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
         return Response(data, status=status.HTTP_201_CREATED, headers=headers)
 
     def update(self, request, *args, **kwargs):
+        operator = self.get_object()
+        if operator.user and 'archived' in request.data:
+            restoring = not serializers.BooleanField().to_internal_value(request.data['archived'])
+            email = operator.user.email
+            if restoring and User.unarchived_with_email(email).exclude(pk=operator.user.pk).exists():
+                return Response({'error': f"{email} is already used by an account that isn't archived. Archive that account first."}, status=status.HTTP_400_BAD_REQUEST)
         response = super().update(request, *args, **kwargs)
         operator = self.get_object()
         if operator.user:

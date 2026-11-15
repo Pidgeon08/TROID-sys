@@ -1,6 +1,8 @@
 from datetime import timedelta
 
 from django.db import models
+from django.db.models import Q
+from django.db.models.functions import Lower
 from django.utils import timezone
 from django.contrib.auth.hashers import make_password
 
@@ -85,7 +87,9 @@ class User(models.Model):
     ]
     user_id = models.CharField(max_length=10, unique=True, blank=True, null=True)
     name = models.CharField(max_length=100)
-    email = models.EmailField(unique=True)
+    # Several accounts may share an email, but only one of them may be anything other than
+    # archived (see Meta), so an archived account doesn't block making a new one.
+    email = models.EmailField()
     password = models.CharField(max_length=128, default='')
     role = models.CharField(max_length=20, choices=ROLE_CHOICES)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='active')
@@ -99,6 +103,30 @@ class User(models.Model):
 
     # Accounts in these states may not sign in.
     INACTIVE_STATUSES = ('archived', 'pending')
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                Lower('email'), condition=~Q(status='archived'), name='one_unarchived_account_per_email',
+            ),
+        ]
+
+    @classmethod
+    def with_email(cls, email):
+        """Accounts using this email, ignoring case; at most one of them is not archived."""
+        return cls.objects.filter(email__iexact=(email or '').strip())
+
+    @classmethod
+    def unarchived_with_email(cls, email):
+        return cls.with_email(email).exclude(status='archived')
+
+    @classmethod
+    def for_email(cls, email):
+        """The account an email signs in to and receives mail for: the one that isn't archived,
+        or else the most recently created archived one (so it can be told it's archived)."""
+        if not (email or '').strip():
+            return None
+        return cls.unarchived_with_email(email).first() or cls.with_email(email).order_by('-date_created', '-id').first()
 
     TYPE_CODE_MAP = {
         'admin': '03',
