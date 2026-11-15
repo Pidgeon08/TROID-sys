@@ -18,6 +18,7 @@ import {
   Save,
   ChevronDown,
   RotateCcw,
+  ClipboardList,
 } from "lucide-react";
 import api from "../../services/api";
 import { logAudit } from "../../services/auditLog";
@@ -37,6 +38,7 @@ import {
 import { SummaryCard } from "../../components/ui/SummaryCard";
 import { Card } from "../../components/ui/Card";
 import { EmptyState } from "../../components/ui/EmptyState";
+import AreaRequestsModal from "./AreaRequestsModal";
 
 const DEFAULT_CENTER = [16.6195, 120.314];
 const DEFAULT_ZOOM = 14;
@@ -174,6 +176,7 @@ export default function CollectionAreas() {
   const [declineTarget, setDeclineTarget] = useState(null);
   const [declineReason, setDeclineReason] = useState("");
   const [approveTarget, setApproveTarget] = useState(null);
+  const [requestsArea, setRequestsArea] = useState(null);
   // Adding an area (approved as soon as it's saved) or editing one: "add", "edit" or null.
   const [mode, setMode] = useState(null);
   const [editTarget, setEditTarget] = useState(null);
@@ -675,6 +678,15 @@ export default function CollectionAreas() {
                       <Pencil size={14} />
                       Edit
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => setRequestsArea(a)}
+                      className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition-colors"
+                    >
+                      <ClipboardList size={14} />
+                      Requests
+                      <span className="rounded-full bg-slate-100 px-1.5 text-[11px] font-semibold text-slate-500">{a.requestCount}</span>
+                    </button>
                     {a.status === "pending" && (
                       <>
                         <button
@@ -763,6 +775,8 @@ export default function CollectionAreas() {
           </div>
         </div>
       </div>
+
+      {requestsArea && <AreaRequestsModal area={requestsArea} onClose={() => setRequestsArea(null)} />}
 
       {approveTarget && createPortal(
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 p-4">

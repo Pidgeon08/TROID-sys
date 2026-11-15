@@ -90,6 +90,7 @@ export const api = {
 
   requests: () => api.get('/requests/'),
   requestsArchived: () => api.get('/requests/?archived=true'),
+  requestsForArea: (areaId) => api.get(`/requests/?collection_area=${encodeURIComponent(areaId)}`),
   requestDetail: (id) => api.get(`/requests/${id}/`),
   restoreRequest: (id) => api.post(`/requests/${id}/restore/`),
   createRequest: (data) => api.post('/requests/', data),

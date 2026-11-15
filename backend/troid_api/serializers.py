@@ -255,7 +255,7 @@ class CollectionAreaSerializer(serializers.ModelSerializer):
 
     def get_request_count(self, area):
         count = getattr(area, 'request_count', None)
-        return count if count is not None else area.requests.count()
+        return count if count is not None else area.requests.filter(archived=False).count()
 
     def validate_name(self, value):
         value = value.strip()

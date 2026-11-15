@@ -1060,6 +1060,10 @@ class RequestViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
 
     def get_queryset(self):
         queryset = Request.objects.all().order_by('-date_submitted')
+        area_id = self.request.query_params.get('collection_area')
+        if area_id:
+            # The requests sent to one collection area (CENRO's Collection Areas page).
+            queryset = queryset.filter(collection_area__area_id=area_id)
         if self.request.query_params.get('archived') == 'true':
             return queryset.filter(archived=True)
         return queryset.filter(archived=False)
@@ -1410,7 +1414,9 @@ class CollectionAreaViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
     }
 
     def get_queryset(self):
-        queryset = CollectionArea.objects.annotate(request_count=Count('requests', distinct=True)).order_by('-date_submitted')
+        queryset = CollectionArea.objects.annotate(
+            request_count=Count('requests', filter=Q(requests__archived=False), distinct=True),
+        ).order_by('-date_submitted')
         if self.request.query_params.get('archived') == 'true':
             queryset = queryset.filter(archived=True)
         else:

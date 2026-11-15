@@ -518,10 +518,22 @@ class CollectionAreaEditTests(TestCase):
     def test_the_number_of_cleanups_sent_to_an_area_is_listed(self):
         Request.objects.create(collection_area=self.area, status='approved')
         Request.objects.create(collection_area=self.area, status='verified')
+        Request.objects.create(collection_area=self.area, status='verified', archived=True)
 
         areas = self.client.get('/api/collection-areas/', **session_header(self.admin)).json()
 
         self.assertEqual([a['request_count'] for a in areas], [2])
+
+    def test_the_requests_sent_to_an_area_can_be_listed(self):
+        other = CollectionArea.objects.create(name='Other', barangay='Catbangen', points=around(*IN_CATBANGEN))
+        here = Request.objects.create(collection_area=self.area, status='approved')
+        Request.objects.create(collection_area=self.area, status='verified', archived=True)
+        Request.objects.create(collection_area=other, status='approved')
+        Request.objects.create(cleanup_type='unsupported', location_name='Market', status='approved')
+
+        response = self.client.get('/api/requests/', {'collection_area': self.area.area_id}, **session_header(self.admin))
+
+        self.assertEqual([r['request_id'] for r in response.json()], [here.request_id])
 
 
 class BackupRestoreTests(TestCase):

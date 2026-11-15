@@ -81,6 +81,7 @@ export const USER_MANUALS = {
         'Fill in the optional details for the operator and workers: a description, the water body and its name, and any hazards.',
         'Switch between Pending, Approved, and Archived tabs to review submissions.',
         'Select an area to preview it on the map and see its details, size, how many requests were sent to it, and who last edited it.',
+        'Click "Requests" on an area to list the cleanup requests sent to it, with their status, date, requester, and what was collected. Filter by status, and click a request to open it.',
         'Click "Edit" on any area to change its name, colour, or details. Click "Redraw shape" to draw it again (the current shape stays on the map, dashed, for reference), or choose another barangay to move it there and draw it again. Edits keep the area\'s status.',
         'Approve it to make it available for barangays to attach to future requests, or archive it with a reason so the barangay can resubmit.',
       ],
