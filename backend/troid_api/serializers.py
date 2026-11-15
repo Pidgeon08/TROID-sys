@@ -1,6 +1,7 @@
 import base64
 import binascii
 import os
+import re
 
 from rest_framework import serializers
 from . import boundaries
@@ -248,12 +249,36 @@ class AuditLogSerializer(serializers.ModelSerializer):
 class CollectionAreaSerializer(serializers.ModelSerializer):
     # Only CENRO (admin) reviews areas; anyone else's values for these are ignored.
     REVIEW_FIELDS = ('status', 'decline_reason', 'reviewed_by', 'date_reviewed')
+    TEXT_FIELDS = ('name', 'description', 'water_body_name', 'hazards')
+    # How many cleanup requests were sent here; reshaping changes what their coverage is compared with.
+    request_count = serializers.SerializerMethodField()
+
+    def get_request_count(self, area):
+        count = getattr(area, 'request_count', None)
+        return count if count is not None else area.requests.count()
+
+    def validate_name(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError('Give the area a name.')
+        return value
+
+    def validate_color(self, value):
+        if value and not re.fullmatch(r'#[0-9a-fA-F]{6}', value):
+            raise serializers.ValidationError('Use a colour like #1b4de4.')
+        return value
 
     def validate(self, attrs):
         request = self.context.get('request')
         if getattr(getattr(request, 'user', None), 'role', None) != 'admin':
             for field in self.REVIEW_FIELDS:
                 attrs.pop(field, None)
+            if self.instance is not None:
+                # Only CENRO moves an area to another barangay.
+                attrs.pop('barangay', None)
+        for field in self.TEXT_FIELDS:
+            if isinstance(attrs.get(field), str):
+                attrs[field] = attrs[field].strip()
 
         area = self.instance
         # Renaming or recolouring an area leaves its shape alone, so only check a new or reshaped one.
@@ -282,9 +307,15 @@ class CollectionAreaSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = CollectionArea
-        fields = ['id', 'area_id', 'name', 'barangay', 'submitted_by', 'points', 'closed', 'color', 'status', 'decline_reason', 'reviewed_by', 'date_submitted', 'date_reviewed', 'archived']
+        fields = [
+            'id', 'area_id', 'name', 'barangay', 'submitted_by', 'points', 'closed', 'color',
+            'description', 'water_body_type', 'water_body_name', 'hazards',
+            'status', 'decline_reason', 'reviewed_by', 'date_submitted', 'date_reviewed', 'updated_by', 'date_updated',
+            'archived', 'request_count',
+        ]
+        read_only_fields = ['updated_by', 'date_updated']
         extra_kwargs = {
-            'area_id': {'required': False, 'allow_blank': True},
+            'area_id': {'read_only': True},
             'decline_reason': {'required': False, 'allow_blank': True},
             'reviewed_by': {'required': False, 'allow_blank': True},
             'barangay': {'required': False, 'allow_blank': True},

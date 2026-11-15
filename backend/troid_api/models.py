@@ -425,6 +425,15 @@ class CollectionArea(models.Model):
         ('approved', 'Approved'),
         ('declined', 'Declined'),
     ]
+    WATER_BODY_CHOICES = [
+        ('river', 'River'),
+        ('creek', 'Creek'),
+        ('coast', 'Coast or shoreline'),
+        ('estuary', 'Estuary or river mouth'),
+        ('canal', 'Drainage canal'),
+        ('pond', 'Pond or lagoon'),
+        ('other', 'Other'),
+    ]
     area_id = models.CharField(max_length=20, unique=True, blank=True)
     name = models.CharField(max_length=100)
     barangay = models.CharField(max_length=100, blank=True)
@@ -432,11 +441,18 @@ class CollectionArea(models.Model):
     points = models.JSONField(default=list)
     closed = models.BooleanField(default=True)
     color = models.CharField(max_length=7, default='#1b4de4', blank=True)
+    # Details for the operator and the workers who go there.
+    description = models.TextField(blank=True, default='')
+    water_body_type = models.CharField(max_length=20, choices=WATER_BODY_CHOICES, blank=True, default='')
+    water_body_name = models.CharField(max_length=100, blank=True, default='')
+    hazards = models.TextField(blank=True, default='')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     decline_reason = models.TextField(blank=True, default="")
     reviewed_by = models.CharField(max_length=100, blank=True, default="")
     date_submitted = models.DateTimeField(auto_now_add=True)
     date_reviewed = models.DateTimeField(null=True, blank=True)
+    updated_by = models.CharField(max_length=100, blank=True, default='')
+    date_updated = models.DateTimeField(null=True, blank=True)
     archived = models.BooleanField(default=False)
 
     def save(self, *args, **kwargs):

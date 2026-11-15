@@ -127,6 +127,13 @@ function metresBetween([lat1, lng1], [lat2, lng2]) {
   return 2 * 6371000 * Math.asin(Math.sqrt(a));
 }
 
+/** Length of a [[lat, lng], ...] line in metres. */
+export function pathLengthM(latLngs) {
+  let total = 0;
+  for (let i = 1; i < (latLngs?.length || 0); i++) total += metresBetween(latLngs[i - 1], latLngs[i]);
+  return total;
+}
+
 /**
  * Distance and time along the robot's trail, from its reports in time order, per robot.
  * Gaps longer than TRAIL_GAP_MS start a new run, so separate drives aren't joined up.

@@ -19,7 +19,7 @@ from django.contrib.auth.hashers import check_password, make_password
 from django.core.mail import send_mail
 from django.conf import settings
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Count, Q
 from django.utils import timezone
 
 try:
@@ -38,7 +38,7 @@ from .serializers import (
     SegregationRecordSerializer, AuditLogSerializer, HeatmapDataSerializer, LoginSerializer,
     CollectionAreaSerializer, NotificationSerializer, PriorityAreaSerializer, TrashReportSerializer, LetterUploadSerializer
 )
-from . import backup
+from . import backup, boundaries
 from .authentication import INACTIVE_STATUSES, CompanionTokenAuthentication, is_app_operator
 from .permissions import ADMIN, ANY_ROLE, MAYOR, PUBLIC, REQUESTERS, STAFF, HasRole, RoleViewSetMixin, require
 from .drives import active_drive, scheduled_request_ids, troid_counts
@@ -1410,7 +1410,7 @@ class CollectionAreaViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
     }
 
     def get_queryset(self):
-        queryset = CollectionArea.objects.all().order_by('-date_submitted')
+        queryset = CollectionArea.objects.annotate(request_count=Count('requests', distinct=True)).order_by('-date_submitted')
         if self.request.query_params.get('archived') == 'true':
             queryset = queryset.filter(archived=True)
         else:
@@ -1445,6 +1445,18 @@ class CollectionAreaViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
             serializer.save(status='pending')
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
+    def _check_own_barangay(self, area):
+        # A barangay or NGO account may only change its own barangay's areas; CENRO may change any.
+        user = self.request.user
+        if getattr(user, 'role', None) in REQUESTERS:
+            own = boundaries.canonical_barangay(getattr(user, 'location', '')) or getattr(user, 'location', '')
+            require(self.request, bool(own) and area.barangay == own, 'area belongs to another barangay')
+
+    def perform_update(self, serializer):
+        self._check_own_barangay(serializer.instance)
+        user = self.request.user
+        serializer.save(updated_by=getattr(user, 'name', '') or 'Admin', date_updated=timezone.now())
+
     def _actor_name(self, request):
         return request.data.get('reviewed_by') or (request.user.name if hasattr(request, 'user') and hasattr(request.user, 'name') else 'Admin')
 
@@ -1474,6 +1486,7 @@ class CollectionAreaViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
 
     def destroy(self, request, *args, **kwargs):
         area = self.get_object()
+        self._check_own_barangay(area)
         area.archived = True
         area.save()
         return Response(status=status.HTTP_204_NO_CONTENT)

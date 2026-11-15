@@ -449,6 +449,81 @@ class CollectionAreaBoundaryTests(TestCase):
         self.assertEqual(website_copy.read_bytes(), (Path(__file__).resolve().parent / 'data' / 'san_fernando_boundaries.json').read_bytes())
 
 
+class CollectionAreaEditTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.admin = make_user('admin')
+        self.barangay = make_user('barangay')
+        User.objects.filter(pk=self.barangay.pk).update(location='Poro')
+        self.area = CollectionArea.objects.create(
+            name='Shore', barangay='Poro', points=around(*IN_PORO), status='approved',
+        )
+
+    def patch(self, user, area=None, **data):
+        area = area or self.area
+        return self.client.patch(f'/api/collection-areas/{area.area_id}/', data, format='json', **session_header(user))
+
+    def test_cenro_edits_the_details_and_who_edited_is_kept(self):
+        response = self.patch(
+            self.admin, name='  Poro Shore  ', description='Rocky stretch by the pier',
+            water_body_type='coast', water_body_name='West Philippine Sea', hazards='Strong waves in the afternoon',
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.area.refresh_from_db()
+        self.assertEqual(
+            (self.area.name, self.area.water_body_type, self.area.hazards),
+            ('Poro Shore', 'coast', 'Strong waves in the afternoon'),
+        )
+        self.assertEqual(self.area.updated_by, self.admin.name)
+        self.assertIsNotNone(self.area.date_updated)
+        self.assertEqual(response.json()['request_count'], 0)
+
+    def test_bad_details_are_refused(self):
+        for field, value in (('name', '   '), ('water_body_type', 'ocean'), ('color', 'blue')):
+            with self.subTest(field=field):
+                response = self.patch(self.admin, **{field: value})
+                self.assertEqual(response.status_code, 400)
+                self.assertIn(field, response.json())
+
+    def test_cenro_redraws_an_area_and_moves_it_to_another_barangay(self):
+        moved = self.patch(self.admin, barangay='Catbangen', points=around(*IN_CATBANGEN), closed=True)
+        wrong_place = self.patch(self.admin, barangay='Poro')
+
+        self.assertEqual(moved.status_code, 200, moved.content)
+        self.area.refresh_from_db()
+        self.assertEqual((self.area.barangay, self.area.points), ('Catbangen', around(*IN_CATBANGEN)))
+        # The shape is still in Catbangen, so it can't be called Poro without being redrawn.
+        self.assertEqual(wrong_place.status_code, 400)
+
+    def test_a_barangay_account_cannot_move_its_area_to_another_barangay(self):
+        response = self.patch(self.barangay, barangay='Catbangen', name='Mine')
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.area.refresh_from_db()
+        self.assertEqual((self.area.barangay, self.area.name), ('Poro', 'Mine'))
+
+    @override_settings(API_AUTH_ENFORCED=True)
+    def test_a_barangay_account_changes_only_its_own_areas(self):
+        theirs = CollectionArea.objects.create(name='Theirs', barangay='Catbangen', points=around(*IN_CATBANGEN))
+
+        edit = self.patch(self.barangay, area=theirs, name='Taken')
+        archive = self.client.delete(f'/api/collection-areas/{theirs.area_id}/', **session_header(self.barangay))
+        own = self.patch(self.barangay, hazards='Slippery rocks')
+
+        self.assertEqual((edit.status_code, archive.status_code, own.status_code), (403, 403, 200))
+        theirs.refresh_from_db()
+        self.assertEqual((theirs.name, theirs.archived), ('Theirs', False))
+
+    def test_the_number_of_cleanups_sent_to_an_area_is_listed(self):
+        Request.objects.create(collection_area=self.area, status='approved')
+        Request.objects.create(collection_area=self.area, status='verified')
+
+        areas = self.client.get('/api/collection-areas/', **session_header(self.admin)).json()
+
+        self.assertEqual([a['request_count'] for a in areas], [2])
+
+
 class BackupRestoreTests(TestCase):
     def setUp(self):
         self.client = APIClient()
@@ -772,7 +847,9 @@ class EndpointRoleTests(TestCase):
         self.client = APIClient()
         self.users = {role: make_user(role) for role in ROLES}
         self.request_obj = Request.objects.create(email='requester@example.com')
-        self.area = CollectionArea.objects.create(name='Test Area')
+        # Barangay and NGO accounts may only change their own barangay's areas.
+        User.objects.filter(role__in=('barangay', 'ngo')).update(location='Poro')
+        self.area = CollectionArea.objects.create(name='Test Area', barangay='Poro')
 
     def assert_roles(self, method, path, allowed, data=None):
         for role, user in self.users.items():
