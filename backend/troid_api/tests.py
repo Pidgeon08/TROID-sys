@@ -16,7 +16,7 @@ from django.test import TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from . import bot_auth, mqtt_client
+from . import bot_auth, mqtt_client, views
 from .models import (
     AuditLog, Boat, CollectionArea, DeploymentSchedule, DetectionEvent, LetterFile, Notification, Operator, PriorityArea,
     Request, StatusHistory, User,
@@ -534,6 +534,57 @@ class CollectionAreaEditTests(TestCase):
         response = self.client.get('/api/requests/', {'collection_area': self.area.area_id}, **session_header(self.admin))
 
         self.assertEqual([r['request_id'] for r in response.json()], [here.request_id])
+
+
+class RealtimeNotificationTests(TestCase):
+    """Open pages refetch notifications as soon as they change, instead of waiting for the next poll."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.city_admin = make_user('mayorsoffice')
+        self.barangay = make_user('barangay')
+        self.sent = []
+        patcher = patch('troid_api.realtime._start', side_effect=lambda event, payload: self.sent.append((event, payload)))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_a_new_request_tells_the_city_admins_pages(self):
+        data = {
+            'request_id': 'REQ-LIVE', 'barangay': 'Poro', 'cleanup_type': 'unsupported', 'location_name': 'Near the bridge',
+            'letter': {'name': 'real.pdf', 'data': LetterUploadTests.PDF},
+        }
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post('/api/requests/', data, format='json', **session_header(self.barangay))
+
+        self.assertEqual(response.status_code, 201, response.content)
+        self.assertIn(('notifications.changed', {'recipients': [self.city_admin.pk]}), self.sent)
+
+    def test_only_user_ids_are_broadcast_never_the_notification(self):
+        req = Request.objects.create(email=self.barangay.email, request_id='REQ-SECRET')
+        with self.captureOnCommitCallbacks(execute=True):
+            views.notify_request_update(req, 'approved', 'Approved', 'Your private message')
+
+        self.assertEqual(self.sent, [('notifications.changed', {'recipients': [self.barangay.pk]})])
+        self.assertNotIn('private', str(self.sent))
+
+    def test_reading_notifications_updates_the_users_other_pages(self):
+        first = Notification.objects.create(recipient=self.barangay, title='One', message='m')
+        Notification.objects.create(recipient=self.barangay, title='Two', message='m')
+
+        with self.captureOnCommitCallbacks(execute=True):
+            self.client.post(f'/api/notifications/{first.pk}/mark_read/', **session_header(self.barangay))
+            self.client.post('/api/notifications/mark-all-read/', {}, format='json', **session_header(self.barangay))
+            # Nothing left unread, so nothing changes and nothing is sent.
+            self.client.post('/api/notifications/mark-all-read/', {}, format='json', **session_header(self.barangay))
+
+        self.assertEqual(self.sent, [('notifications.changed', {'recipients': [self.barangay.pk]})] * 2)
+
+    def test_nothing_is_sent_until_the_change_is_saved(self):
+        req = Request.objects.create(email=self.barangay.email)
+        with self.captureOnCommitCallbacks(execute=False) as callbacks:
+            views.notify_request_update(req, 'approved', 'Approved', 'Message')
+
+        self.assertEqual((len(callbacks), self.sent), (1, []))
 
 
 class BackupRestoreTests(TestCase):

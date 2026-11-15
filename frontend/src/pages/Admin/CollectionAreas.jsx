@@ -169,7 +169,7 @@ export default function CollectionAreas() {
   const { currentUser } = useOutletContext() || {};
   const [areas, setAreas] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState("Pending");
+  const [activeTab, setActiveTab] = useState("All");
   const [activeId, setActiveId] = useState(null);
   const [flyTo, setFlyTo] = useState(null);
   const [busyId, setBusyId] = useState(null);

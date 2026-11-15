@@ -4,16 +4,72 @@ import { useEffect, useRef } from 'react';
 // unless overridden for a deployed Worker, e.g. wss://troid-realtime.<sub>.workers.dev/ws
 const REALTIME_WS_URL = import.meta.env.VITE_REALTIME_WS_URL || 'ws://127.0.0.1:8787/ws';
 
+// One connection per tab, shared by everything listening (the notification bell, the sidebar,
+// the live maps), opened while anything listens and closed when the last listener leaves.
+const listeners = new Set();
+let socket = null;
+let reconnectTimer = null;
+let retryDelay = 1000;
+
+function connect() {
+  clearTimeout(reconnectTimer);
+  socket = new WebSocket(REALTIME_WS_URL);
+  const current = socket;
+
+  current.onmessage = (event) => {
+    let message;
+    try {
+      message = JSON.parse(event.data);
+    } catch {
+      return; // ignore malformed messages
+    }
+    listeners.forEach((listener) => {
+      try {
+        listener(message);
+      } catch (err) {
+        console.error('Realtime listener failed:', err);
+      }
+    });
+  };
+
+  current.onopen = () => {
+    retryDelay = 1000;
+    // Anything missed while disconnected is fetched again by whoever cares.
+    listeners.forEach((listener) => listener({ type: 'realtime.connected', payload: {} }));
+  };
+
+  current.onclose = () => {
+    if (socket !== current || listeners.size === 0) return;
+    reconnectTimer = setTimeout(connect, retryDelay);
+    retryDelay = Math.min(retryDelay * 2, 30000);
+  };
+
+  current.onerror = () => current.close();
+}
+
 /**
- * Subscribes to the Cloudflare Worker realtime relay (see cloudflare-ws/).
- * Calls `onMessage({ type, payload })` for every event pushed by the backend
- * (boat.heartbeat, boat.detection, boat.status, boat.offline — see
- * backend/troid_api/mqtt_client.py). Reconnects automatically with backoff;
- * silently gives up retrying while the tab is unmounted.
- *
- * This is a live-update nice-to-have, not a source of truth — callers should
- * keep their existing polling/fetch as the fallback in case the Worker isn't
- * running or reachable.
+ * Calls `listener({ type, payload })` for every event the backend pushes through the
+ * Cloudflare Worker relay (see cloudflare-ws/): boat.heartbeat, boat.detection, boat.status,
+ * boat.offline (backend/troid_api/mqtt_client.py) and notifications.changed
+ * (backend/troid_api/realtime.py). Returns a function that stops listening.
+ */
+export function subscribeRealtime(listener) {
+  listeners.add(listener);
+  if (!socket) connect();
+  return () => {
+    listeners.delete(listener);
+    if (listeners.size === 0 && socket) {
+      clearTimeout(reconnectTimer);
+      const closing = socket;
+      socket = null;
+      closing.close();
+    }
+  };
+}
+
+/**
+ * Hook form of subscribeRealtime. A live-update nice-to-have, not a source of truth —
+ * callers keep their polling/fetch as the fallback in case the Worker isn't reachable.
  */
 export function useRealtime(onMessage) {
   const onMessageRef = useRef(onMessage);
@@ -22,43 +78,5 @@ export function useRealtime(onMessage) {
     onMessageRef.current = onMessage;
   }, [onMessage]);
 
-  useEffect(() => {
-    let socket;
-    let reconnectTimer;
-    let closedByCleanup = false;
-    let retryDelay = 1000;
-
-    function connect() {
-      socket = new WebSocket(REALTIME_WS_URL);
-
-      socket.onmessage = (event) => {
-        try {
-          const message = JSON.parse(event.data);
-          onMessageRef.current?.(message);
-        } catch {
-          // ignore malformed messages
-        }
-      };
-
-      socket.onclose = () => {
-        if (closedByCleanup) return;
-        reconnectTimer = setTimeout(connect, retryDelay);
-        retryDelay = Math.min(retryDelay * 2, 30000);
-      };
-
-      socket.onerror = () => socket.close();
-
-      socket.onopen = () => {
-        retryDelay = 1000;
-      };
-    }
-
-    connect();
-
-    return () => {
-      closedByCleanup = true;
-      clearTimeout(reconnectTimer);
-      socket?.close();
-    };
-  }, []);
+  useEffect(() => subscribeRealtime((message) => onMessageRef.current?.(message)), []);
 }

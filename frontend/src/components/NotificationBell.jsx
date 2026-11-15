@@ -49,13 +49,17 @@ const NotificationBell = ({ currentUser, userType, variant = "light", requestId 
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const togglePanel = () => {
-    const next = !open;
-    setOpen(next);
-    if (next && currentUser?.id) {
-      api.notifications(currentUser.id).then(setNotifications).catch(() => {});
-    }
-  };
+  // The open list is fetched again whenever a notification arrives or is read, so it stays live.
+  useEffect(() => {
+    if (!open || !currentUser?.id) return undefined;
+    let cancelled = false;
+    api.notifications(currentUser.id)
+      .then((list) => { if (!cancelled && Array.isArray(list)) setNotifications(list); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [open, unread, currentUser?.id]);
+
+  const togglePanel = () => setOpen((wasOpen) => !wasOpen);
 
   const handleNotificationClick = async (notif) => {
     if (!notif.is_read) {

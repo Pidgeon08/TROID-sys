@@ -42,6 +42,7 @@ from . import backup, boundaries
 from .authentication import INACTIVE_STATUSES, CompanionTokenAuthentication, is_app_operator
 from .permissions import ADMIN, ANY_ROLE, MAYOR, PUBLIC, REQUESTERS, STAFF, HasRole, RoleViewSetMixin, require
 from .drives import active_drive, scheduled_request_ids, troid_counts
+from .realtime import notifications_changed
 from .priority import check_and_schedule_priority_followup
 from .throttles import CompanionLoginEmailThrottle, CompanionLoginIPThrottle
 
@@ -144,6 +145,7 @@ def notify_request_update(req, notif_type, title, message):
             title=title,
             message=message,
         )
+        notifications_changed([recipient.pk])
     if req.email:
         try:
             send_mail(
@@ -160,10 +162,12 @@ def notify_request_update(req, notif_type, title, message):
 def notify_city_admins(req, title):
     """Tells every active City Admin that a request is waiting on their approval."""
     message = f'Request {req.request_id} from {req.barangay or req.requested_by_name or "a requester"} needs your approval.'
+    city_admins = list(User.objects.filter(role='mayorsoffice', status='active'))
     Notification.objects.bulk_create(
         Notification(recipient=city_admin, request=req, notif_type='awaiting_approval', title=title, message=message)
-        for city_admin in User.objects.filter(role='mayorsoffice', status='active')
+        for city_admin in city_admins
     )
+    notifications_changed([city_admin.pk for city_admin in city_admins])
 
 
 @api_view(['GET'])
@@ -1405,12 +1409,15 @@ class NotificationViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
         notif = self.get_object()
         notif.is_read = True
         notif.save()
+        # The user's other tabs and devices clear the dot too.
+        notifications_changed([notif.recipient_id])
         return Response({'is_read': True})
 
     @action(detail=False, methods=['post'], url_path='mark-all-read')
     def mark_all_read(self, request):
         user_id = own_user_id(request, request.data.get('user_id'))
-        Notification.objects.filter(recipient_id=user_id, is_read=False).update(is_read=True)
+        if Notification.objects.filter(recipient_id=user_id, is_read=False).update(is_read=True):
+            notifications_changed([user_id])
         return Response({'status': 'ok'})
 
 
