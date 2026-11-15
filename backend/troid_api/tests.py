@@ -18,8 +18,8 @@ from rest_framework.test import APIClient
 
 from . import bot_auth, mqtt_client
 from .models import (
-    AuditLog, Boat, CollectionArea, DeploymentSchedule, DetectionEvent, LetterFile, Notification, Operator, Request,
-    StatusHistory, User,
+    AuditLog, Boat, CollectionArea, DeploymentSchedule, DetectionEvent, LetterFile, Notification, Operator, PriorityArea,
+    Request, StatusHistory, User,
 )
 
 
@@ -822,6 +822,38 @@ class HeatmapCoverageDataTests(TestCase):
         all_areas = self.client.get('/api/collection-areas/', {'status': 'approved'}, **session_header(self.admin)).json()
         self.assertEqual(sorted(a['name'] for a in all_areas), ['Area', unsupported_area.name, unused_area.name])
 
+    def test_barangay_and_ngo_accounts_only_see_their_own_barangays_points(self):
+        elsewhere = Request.objects.create(email='other@example.com', status='completed', barangay='Catbangen')
+        self.detect(16.6166, 120.2866, timezone.now(), request=self.req)
+        self.detect(16.6080, 120.3125, timezone.now(), request=elsewhere)
+        self.detect(16.0, 120.0, timezone.now())
+        for role in ('barangay', 'ngo'):
+            with self.subTest(role=role):
+                user = make_user(role)
+                User.objects.filter(pk=user.pk).update(location='poro')
+                points = self.client.get(
+                    '/api/heatmap/', {'barangay': 'Catbangen'}, **session_header(user),
+                ).json()
+                self.assertEqual([p['request'] for p in points], [self.req.request_id])
+
+    def test_an_account_with_no_barangay_sees_no_points(self):
+        self.detect(16.6166, 120.2866, timezone.now(), request=self.req)
+        user = make_user('ngo')
+
+        self.assertEqual(self.client.get('/api/heatmap/', **session_header(user)).json(), [])
+
+    def test_barangay_accounts_see_only_their_own_priority_flag(self):
+        PriorityArea.objects.create(barangay='Poro', total_bags=40)
+        PriorityArea.objects.create(barangay='Catbangen', total_bags=60)
+        user = make_user('barangay')
+        User.objects.filter(pk=user.pk).update(location='Poro')
+
+        mine = self.client.get('/api/priority-areas/', **session_header(user)).json()
+        everyone = self.client.get('/api/priority-areas/', **session_header(self.admin)).json()
+
+        self.assertEqual([p['barangay'] for p in mine], ['Poro'])
+        self.assertEqual(len(everyone), 2)
+
     def test_heatmap_points_name_their_request(self):
         self.detect(16.6166, 120.2866, timezone.now(), request=self.req)
         self.detect(16.0, 120.0, timezone.now())
@@ -920,7 +952,8 @@ class EndpointRoleTests(TestCase):
         self.assert_roles('delete', f'/api/collection-areas/{aid}/', REQUESTER_ROLES)
 
     def test_records_reports_and_logs(self):
-        for path in ('/api/priority-areas/', '/api/landfill-records/', '/api/recycling-records/',
+        self.assert_roles('get', '/api/priority-areas/', REQUESTER_ROLES)
+        for path in ('/api/landfill-records/', '/api/recycling-records/',
                      '/api/segregation-records/', '/api/heatmap-data/', '/api/audit-logs/'):
             self.assert_roles('get', path, ('admin',))
         self.assert_roles('post', '/api/segregation-records/', REQUESTER_ROLES, {})

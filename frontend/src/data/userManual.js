@@ -12,7 +12,7 @@ export const USER_MANUALS = {
       keywords: ['overview', 'home', 'stats', 'priority areas', 'hotspots'],
       steps: [
         'Check the "Trash Collected" and "Cleanup Drives Done" cards for the current month across all barangays. Hover over a graph to see the figure for each day.',
-        'The Collective Hotspots map shows where waste is concentrated — switch between Today/Weekly/Monthly or pick a custom date range.',
+        'The Collective Hotspots map shows where TROID detected trash — switch between Today/Weekly/Monthly or pick a custom date range, and switch the layer to Waste Density, Trash Collected, or Bot Pathing.',
         'The Priority Areas panel lists barangays TROID has automatically flagged for a follow-up drive based on recent collection volume, along with which bot was booked.',
         'Most Trash Collected and Recent Activities give quick links into Reports and Requests for more detail.',
       ],
@@ -169,11 +169,14 @@ export const USER_MANUALS = {
       id: 'dashboard',
       title: 'Dashboard',
       path: '/barangay/dashboard',
-      description: 'An overview of your barangay\'s submitted requests and their progress.',
-      keywords: ['overview', 'home', 'stats'],
+      description: 'Cleanup activity in the barangay your account is assigned to.',
+      keywords: ['overview', 'home', 'stats', 'hotspots', 'priority area', 'trash collected'],
       steps: [
-        'Check the stat cards for how many of your requests are pending, approved, or completed.',
-        'Use "View all" to jump into My Requests or Collection Areas for more detail.',
+        'Everything on the dashboard is for the barangay your account is assigned to; NGO accounts see the barangay they are assigned to. If none is set, ask CENRO to set it in User Management.',
+        'Check the "Trash Collected" and "Cleanup Drives Done" cards for the current month. Hover over a graph to see the figure for each day.',
+        'The Waste Hotspots map shows where TROID detected trash in your barangay — switch between Today/Weekly/Monthly or pick a custom date range, and switch the layer to Waste Density, Trash Collected, or Bot Pathing.',
+        'The Priority Area panel shows whether TROID has flagged your barangay for a follow-up drive. Most Trash Collected ranks your collection areas by bags collected.',
+        'Recent Activities and Recent Requests list the latest requests for your barangay; click a request to open it, or "View all" to go to My Requests.',
       ],
     },
     {

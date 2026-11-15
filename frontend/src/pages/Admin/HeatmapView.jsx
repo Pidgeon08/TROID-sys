@@ -1,9 +1,7 @@
-import { MapContainer, TileLayer, useMap, Polygon, Polyline, Circle, CircleMarker, Tooltip, ZoomControl } from 'react-leaflet';
+import { MapContainer, TileLayer, useMap, Polygon, Circle, CircleMarker, ZoomControl } from 'react-leaflet';
 import { TILE_URL, TILE_ATTRIBUTION } from '../../services/mapTiles';
 import 'leaflet/dist/leaflet.css';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import L from 'leaflet';
-import 'leaflet.heat';
 import {
   Calendar, ArrowRightLeft, Map as MapIcon, ListFilter, X, Target, Route, Layers, Bot, MapPin, Info,
 } from 'lucide-react';
@@ -11,8 +9,10 @@ import { api } from '../../services/api';
 import { SearchBar } from '../../components/ui/SearchBar';
 import { useRealtime } from '../../hooks/useRealtime';
 import {
-  areaCoverage, splitByArea, trailStats, trailRuns, isMeasurableArea, formatArea, formatDistance, formatDuration, TRAIL_GAP_MS,
+  areaCoverage, splitByArea, trailStats, isMeasurableArea, formatArea, formatDistance, formatDuration, TRAIL_GAP_MS,
 } from '../../utils/coverage';
+import { HeatmapLayer, PathLayer } from '../../components/MapLayers';
+import { MAP_LAYERS, PATHING, LEGEND_CLASSES, PATH_COLORS, PATH_START, formatClock } from '../../constants/mapLayers';
 
 // Default map view when there is nothing to show yet: San Fernando, La Union.
 const SAN_FERNANDO_CENTER = [16.6195, 120.314];
@@ -22,118 +22,6 @@ const MAX_COVERAGE_CIRCLES = 1500;
 const BLUE = '#1b4de4';
 const COVERED = '#10b981';
 const OUTSIDE = '#f59e0b';
-
-// Bot Pathing is drawn as nodes along the robot's path; the other layers are heat.
-const MAP_LAYERS = ['Waste Density', 'Bot Pathing', 'Trash Collected'];
-const PATHING = 'Bot Pathing';
-const HEAT_GRADIENTS = {
-  'Waste Density': { 0.4: 'blue', 0.6: 'cyan', 0.7: 'lime', 0.8: 'yellow', 1.0: 'red' },
-  'Trash Collected': { 0.0: '#cbd5e1', 0.5: '#64748b', 1.0: '#0f172a' },
-};
-const LEGEND_CLASSES = {
-  'Waste Density': 'bg-gradient-to-r from-blue-500 via-cyan-400 via-emerald-400 via-yellow-400 to-red-500',
-  'Trash Collected': 'bg-gradient-to-r from-slate-300 via-slate-500 to-slate-900',
-};
-// One colour per robot on the Bot Pathing layer.
-const PATH_COLORS = ['#1b4de4', '#7c3aed', '#db2777', '#0891b2', '#ea580c', '#4d7c0f'];
-const PATH_START = '#10b981';
-
-/** Leaflet.heat overlay. Waits until the map has a size so it never draws into a 0×0 canvas. */
-function HeatmapLayer({ points, type }) {
-  const map = useMap();
-
-  useEffect(() => {
-    let heat;
-    let timer;
-    const init = () => {
-      const size = map.getSize();
-      if (!size || size.x === 0 || size.y === 0) {
-        timer = setTimeout(init, 50);
-        return;
-      }
-      map.invalidateSize();
-      const valid = (points || []).filter((p) => Number.isFinite(p?.[0]) && Number.isFinite(p?.[1]) && !(p[0] === 0 && p[1] === 0));
-      if (valid.length === 0) return;
-      try {
-        heat = L.heatLayer(valid, { radius: 35, blur: 25, maxZoom: 17, gradient: HEAT_GRADIENTS[type] || HEAT_GRADIENTS['Waste Density'] }).addTo(map);
-      } catch (err) {
-        console.error('Heatmap render error:', err);
-      }
-    };
-    init();
-    return () => {
-      if (timer) clearTimeout(timer);
-      if (heat) {
-        try { map.removeLayer(heat); } catch { /* map already gone */ }
-      }
-    };
-  }, [map, points, type]);
-
-  return null;
-}
-
-/**
- * Bot Pathing: each point the robot reported is a node, joined in time order, one colour per robot.
- * A run starts with a green node and ends with a larger node; hover a node for its time and count.
- */
-function PathLayer({ reports }) {
-  const runs = useMemo(() => trailRuns(reports), [reports]);
-  const colorOf = useMemo(() => {
-    const boats = [...new Set(runs.map((r) => r.boat))];
-    return (boat) => PATH_COLORS[boats.indexOf(boat) % PATH_COLORS.length];
-  }, [runs]);
-
-  return runs.map((run, r) => {
-    const color = colorOf(run.boat);
-    const last = run.nodes.length - 1;
-    return (
-      <PathRun key={`${run.boat}-${run.nodes[0].time}-${r}`} run={run} color={color} last={last} />
-    );
-  });
-}
-
-function PathRun({ run, color, last }) {
-  return (
-    <>
-      {run.nodes.length > 1 && (
-        <Polyline
-          positions={run.nodes.map((n) => n.at)}
-          pathOptions={{ color, weight: 3, opacity: 0.6, lineJoin: 'round' }}
-          interactive={false}
-        />
-      )}
-      {run.nodes.map((node, i) => {
-        const isStart = i === 0;
-        const isEnd = i === last && last > 0;
-        const items = node.report.trash_count || 0;
-        return (
-          <CircleMarker
-            key={`${node.time}-${i}`}
-            center={node.at}
-            radius={isStart || isEnd ? 7 : 5}
-            pathOptions={{
-              color: isStart ? PATH_START : color,
-              weight: 2,
-              fillColor: isStart ? PATH_START : isEnd ? color : '#ffffff',
-              fillOpacity: 1,
-            }}
-          >
-            <Tooltip direction="top" offset={[0, -6]}>
-              <div className="text-[11px] leading-snug">
-                <div className="font-semibold">
-                  {run.boat ? `${run.boat} · ` : ''}Point {i + 1} of {run.nodes.length}
-                  {isStart ? ' (start)' : isEnd ? ' (latest)' : ''}
-                </div>
-                <div>{formatClock(node.time)}</div>
-                <div>{items} item{items === 1 ? '' : 's'} detected</div>
-              </div>
-            </Tooltip>
-          </CircleMarker>
-        );
-      })}
-    </>
-  );
-}
 
 /** Moves the map to `bounds` once per `fitKey`, so the 5-second refresh doesn't keep pulling it back. */
 function FitBounds({ fitKey, bounds }) {
@@ -198,11 +86,6 @@ function boundsOf(points) {
 function formatPct(pct) {
   if (pct > 0 && pct < 0.1) return '<0.1%';
   return `${pct < 10 ? pct.toFixed(1) : Math.round(pct)}%`;
-}
-
-function formatClock(ms) {
-  if (ms === null || ms === undefined) return '—';
-  return new Date(ms).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
 
 function Panel({ icon: Icon, title, aside, children }) {

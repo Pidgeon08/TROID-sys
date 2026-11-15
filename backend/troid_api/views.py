@@ -118,6 +118,12 @@ def record_audit(request, **fields):
     )
 
 
+def own_barangay(user):
+    """The barangay a barangay or NGO account is assigned to, as officially named ('' if none)."""
+    location = (getattr(user, 'location', '') or '').strip()
+    return boundaries.canonical_barangay(location) or location
+
+
 def own_user_id(request, requested_id):
     """Signed-in callers only ever see their own notifications; anonymous
     callers (report-only phase) keep the old ?user_id= behavior."""
@@ -760,6 +766,11 @@ def get_heatmap_data(request):
     category = request.query_params.get('category')
     time_filter = request.query_params.get('time_filter', 'today')
     barangay = request.query_params.get('barangay')
+    if getattr(request.user, 'role', None) in REQUESTERS:
+        # Barangay and NGO accounts only see their assigned barangay's cleanups.
+        barangay = own_barangay(request.user)
+        if not barangay:
+            return Response([])
 
     detections = DetectionEvent.objects.filter(is_verified=True).select_related('boat', 'request')
 
@@ -1455,7 +1466,7 @@ class CollectionAreaViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
         # A barangay or NGO account may only change its own barangay's areas; CENRO may change any.
         user = self.request.user
         if getattr(user, 'role', None) in REQUESTERS:
-            own = boundaries.canonical_barangay(getattr(user, 'location', '')) or getattr(user, 'location', '')
+            own = own_barangay(user)
             require(self.request, bool(own) and area.barangay == own, 'area belongs to another barangay')
 
     def perform_update(self, serializer):
@@ -1504,9 +1515,16 @@ class DeploymentScheduleViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
 
 
 class PriorityAreaViewSet(RoleViewSetMixin, viewsets.ReadOnlyModelViewSet):
-    read_roles = ADMIN
+    # Barangay and NGO accounts see only whether their own barangay was flagged.
+    read_roles = ADMIN + REQUESTERS
     queryset = PriorityArea.objects.order_by('-identified_at')
     serializer_class = PriorityAreaSerializer
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        if getattr(self.request.user, 'role', None) in REQUESTERS:
+            return queryset.filter(barangay__iexact=own_barangay(self.request.user) or '-')
+        return queryset
 
 
 class LandfillRecordViewSet(RoleViewSetMixin, viewsets.ReadOnlyModelViewSet):
