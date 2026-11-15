@@ -132,6 +132,7 @@ export const api = {
     if (params.barangay) qs.set('barangay', params.barangay);
     if (params.status) qs.set('status', params.status);
     if (params.archived) qs.set('archived', 'true');
+    if (params.troid_supported) qs.set('troid_supported', 'true');
     const q = qs.toString();
     return api.get(`/collection-areas/${q ? `?${q}` : ''}`);
   },

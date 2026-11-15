@@ -165,6 +165,8 @@ export function mapRequest(raw) {
     })),
     botId: raw.bot_id || null,
     operator: raw.operator || null,
+    // 'troid_supported' cleanups have a collection area; 'unsupported' ones only a location.
+    cleanupType: raw.cleanup_type || 'troid_supported',
     collectionArea: raw.collection_area_detail
       ? { id: raw.collection_area_detail.id, areaId: raw.collection_area_detail.area_id, name: raw.collection_area_detail.name }
       : null,

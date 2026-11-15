@@ -138,7 +138,7 @@ class LetterUploadTests(TestCase):
         self.user = make_user('barangay')
 
     def create(self, letter=None):
-        data = {'request_type': 'Cleanup', 'request_id': 'REQ-TEST'}
+        data = {'request_type': 'Cleanup', 'request_id': 'REQ-TEST', 'cleanup_type': 'unsupported', 'location_name': 'Near the bridge'}
         if letter:
             data['letter'] = letter
         return self.client.post('/api/requests/', data, format='json', **session_header(self.user))
@@ -209,6 +209,8 @@ class LetterUploadTests(TestCase):
     def test_clients_cannot_claim_a_letter_they_did_not_upload(self):
         data = {
             'request_id': 'REQ-TEST',
+            'cleanup_type': 'unsupported',
+            'location_name': 'Near the bridge',
             'letter_file_name': 'claimed.docx',
             'letter_size': '9 MB',
             'letter_content_type': 'application/msword',
@@ -230,6 +232,90 @@ class LetterUploadTests(TestCase):
         self.assertNotIn(self.PDF, listing.content.decode())
 
 
+class RequestCleanupTypeTests(TestCase):
+    """TROID-supported cleanups choose a collection area; unsupported ones only give a location."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user = make_user('barangay')
+        self.admin = make_user('admin')
+        self.area = CollectionArea.objects.create(name='Bridge', barangay='Poro', status='approved')
+
+    def submit(self, **data):
+        body = {'barangay': 'Poro', 'letter': {'name': 'real.pdf', 'data': LetterUploadTests.PDF}, **data}
+        return self.client.post('/api/requests/', body, format='json', **session_header(self.user))
+
+    def test_a_troid_supported_cleanup_needs_a_collection_area(self):
+        for data in ({}, {'cleanup_type': 'troid_supported'}, {'cleanup_type': 'troid_supported', 'location_name': 'Bridge'}):
+            with self.subTest(data=data):
+                response = self.submit(**data)
+
+                self.assertEqual(response.status_code, 400)
+                self.assertIn('collection_area', response.json())
+        self.assertFalse(Request.objects.exists())
+
+        response = self.submit(cleanup_type='troid_supported', collection_area=self.area.id)
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()['cleanup_type'], 'troid_supported')
+        self.assertEqual(response.json()['collection_area'], self.area.id)
+
+    def test_an_unsupported_cleanup_only_asks_for_its_location(self):
+        response = self.submit(cleanup_type='unsupported', location_name='   ')
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('location_name', response.json())
+
+        response = self.submit(cleanup_type='unsupported', location_name=' Beside the bridge ', collection_area=self.area.id)
+
+        self.assertEqual(response.status_code, 201)
+        req = Request.objects.get()
+        self.assertEqual((req.cleanup_type, req.location_name, req.collection_area), ('unsupported', 'Beside the bridge', None))
+
+    def test_status_changes_are_not_held_to_the_rule(self):
+        req = Request.objects.create(status='pending_admin_approval', barangay='Poro')
+
+        response = self.client.patch(
+            f'/api/requests/{req.request_id}/', {'notes': 'Seen'}, format='json', **session_header(self.admin),
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_a_deployment_follows_the_requests_cleanup_type(self):
+        boat = Boat.objects.create(name='Bot')
+        unsupported = Request.objects.create(cleanup_type='unsupported', location_name='Bridge', status='approved')
+        supported = Request.objects.create(collection_area=self.area, status='approved')
+        for day, req, sent, saved in (
+            ('2026-12-01', unsupported, 'troid_supported', 'unsupported'),
+            ('2026-12-02', supported, 'unsupported', 'troid_supported'),
+        ):
+            with self.subTest(request=req.cleanup_type):
+                response = self.client.post('/api/deployment-schedules/', {
+                    'bot': boat.id, 'day': day, 'status': 'scheduled', 'label': '9:00 AM',
+                    'request_id': req.request_id, 'cleanup_type': sent,
+                }, format='json', **session_header(self.admin))
+
+                self.assertEqual(response.status_code, 201)
+                self.assertEqual(response.json()['cleanup_type'], saved)
+
+    def test_existing_requests_take_their_type_from_their_deployments(self):
+        from django.apps import apps
+        migration = importlib.import_module('troid_api.migrations.0043_request_cleanup_type')
+        boat = Boat.objects.create(name='Bot')
+        manual = Request.objects.create(status='completed')
+        mixed = Request.objects.create(status='completed')
+        unscheduled = Request.objects.create(status='completed')
+        DeploymentSchedule.objects.create(bot=boat, day='2026-10-01', request_id=manual.request_id, cleanup_type='unsupported')
+        DeploymentSchedule.objects.create(bot=boat, day='2026-10-02', request_id=mixed.request_id, cleanup_type='unsupported')
+        DeploymentSchedule.objects.create(bot=boat, day='2026-10-03', request_id=mixed.request_id, cleanup_type='troid_supported')
+
+        migration.copy_cleanup_type_from_schedules(apps, None)
+
+        types = dict(Request.objects.values_list('request_id', 'cleanup_type'))
+        self.assertEqual(types[manual.request_id], 'unsupported')
+        self.assertEqual(types[mixed.request_id], 'troid_supported')
+        self.assertEqual(types[unscheduled.request_id], 'troid_supported')
+
+
 class CityAdminNotificationTests(TestCase):
     def setUp(self):
         self.client = APIClient()
@@ -245,7 +331,10 @@ class CityAdminNotificationTests(TestCase):
         return Request.objects.create(status='parked', parked_from_status=returns_to, barangay='Poro')
 
     def test_a_new_request_notifies_active_city_admins_only(self):
-        data = {'request_id': 'REQ-TEST', 'barangay': 'Poro', 'letter': {'name': 'real.pdf', 'data': LetterUploadTests.PDF}}
+        data = {
+            'request_id': 'REQ-TEST', 'barangay': 'Poro', 'cleanup_type': 'unsupported', 'location_name': 'Near the bridge',
+            'letter': {'name': 'real.pdf', 'data': LetterUploadTests.PDF},
+        }
 
         response = self.client.post('/api/requests/', data, format='json', **session_header(self.barangay))
 
@@ -600,6 +689,51 @@ class HeatmapCoverageDataTests(TestCase):
             [(16.6165, 120.2865), (16.6166, 120.2866)],
         )
         self.assertEqual(drive['collection_area']['points'], self.area.points)
+
+    def comparison(self):
+        response = self.client.get('/api/requests/post-cleanup-comparison/', **session_header(self.admin))
+        self.assertEqual(response.status_code, 200)
+        return {d['request_id']: d for d in response.json()}
+
+    def test_only_troid_supported_drives_carry_their_collection_area(self):
+        unsupported = Request.objects.create(
+            email='other@example.com', status='completed', barangay='Poro', cleanup_type='unsupported',
+            location_name='Near the bridge', collection_area=self.area, trash_categories={'Plastic': 1},
+        )
+
+        drives = self.comparison()
+
+        self.assertEqual(drives[self.req.request_id]['cleanup_type'], 'troid_supported')
+        self.assertEqual(drives[self.req.request_id]['collection_area']['id'], self.area.id)
+        self.assertEqual(drives[unsupported.request_id]['cleanup_type'], 'unsupported')
+        self.assertIsNone(drives[unsupported.request_id]['collection_area'])
+
+    def test_a_drive_the_robot_reported_from_counts_as_troid_supported(self):
+        self.detect(16.6166, 120.2866, timezone.now(), request=self.req)
+
+        drive = self.comparison()[self.req.request_id]
+
+        self.assertEqual(drive['cleanup_type'], 'troid_supported')
+        self.assertEqual(drive['collection_area']['id'], self.area.id)
+
+    def test_collection_areas_can_be_limited_to_troid_supported_cleanups(self):
+        def area(name):
+            return CollectionArea.objects.create(name=name, barangay='Poro', closed=True, status='approved', points=self.area.points)
+
+        unsupported_area, unused_area = area('Unsupported'), area('Unused')
+        Request.objects.create(
+            email='u@example.com', status='completed', cleanup_type='unsupported', location_name='Bridge',
+            collection_area=unsupported_area,
+        )
+
+        response = self.client.get(
+            '/api/collection-areas/', {'status': 'approved', 'troid_supported': 'true'}, **session_header(self.admin),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([a['name'] for a in response.json()], ['Area'])
+        all_areas = self.client.get('/api/collection-areas/', {'status': 'approved'}, **session_header(self.admin)).json()
+        self.assertEqual(sorted(a['name'] for a in all_areas), ['Area', unsupported_area.name, unused_area.name])
 
     def test_heatmap_points_name_their_request(self):
         self.detect(16.6166, 120.2866, timezone.now(), request=self.req)

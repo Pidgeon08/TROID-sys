@@ -141,9 +141,30 @@ class RequestSerializer(serializers.ModelSerializer):
             'name': obj.collection_area.name,
         }
 
+    def validate(self, attrs):
+        # TROID-supported cleanups are sent to a collection area; unsupported (manual) ones only
+        # give their location. Checked on new requests and whenever either choice changes.
+        if self.instance is not None and not {'cleanup_type', 'collection_area', 'location_name'} & attrs.keys():
+            return attrs
+        current = self.instance
+        cleanup_type = attrs.get('cleanup_type', getattr(current, 'cleanup_type', 'troid_supported'))
+        area = attrs['collection_area'] if 'collection_area' in attrs else getattr(current, 'collection_area', None)
+        location = (attrs.get('location_name', getattr(current, 'location_name', '')) or '').strip()
+        if 'location_name' in attrs:
+            attrs['location_name'] = location
+        if cleanup_type == 'unsupported':
+            if not location:
+                raise serializers.ValidationError({'location_name': 'Enter where the cleanup will take place.'})
+            attrs['collection_area'] = None
+        elif area is None:
+            raise serializers.ValidationError(
+                {'collection_area': 'Choose a collection area. TROID-supported cleanups are sent to one.'}
+            )
+        return attrs
+
     class Meta:
         model = Request
-        fields = ['id', 'request_id', 'request_type', 'status', 'date_submitted', 'requested_by_name', 'requested_by_role', 'requested_by_barangay', 'contact', 'email', 'location_name', 'barangay', 'municipality', 'province', 'preferred_date', 'preferred_time', 'notes', 'decline_reason', 'parked_from_status', 'letter_file_name', 'letter_size', 'letter_content_type', 'bot_id', 'operator', 'collection_area', 'collection_area_detail', 'bags', 'weight_kg', 'non_usable_kg', 'recyclable_kg', 'session_completed_at', 'trash_categories', 'verified_categories', 'verification_notes', 'verified_at', 'archived', 'status_history', 'photos']
+        fields = ['id', 'request_id', 'request_type', 'cleanup_type', 'status', 'date_submitted', 'requested_by_name', 'requested_by_role', 'requested_by_barangay', 'contact', 'email', 'location_name', 'barangay', 'municipality', 'province', 'preferred_date', 'preferred_time', 'notes', 'decline_reason', 'parked_from_status', 'letter_file_name', 'letter_size', 'letter_content_type', 'bot_id', 'operator', 'collection_area', 'collection_area_detail', 'bags', 'weight_kg', 'non_usable_kg', 'recyclable_kg', 'session_completed_at', 'trash_categories', 'verified_categories', 'verification_notes', 'verified_at', 'archived', 'status_history', 'photos']
         extra_kwargs = {
             'request_id': {'required': False, 'allow_blank': True},
             'letter_file_name': {'read_only': True},
@@ -164,6 +185,15 @@ class RequestSerializer(serializers.ModelSerializer):
         }
 
 class DeploymentScheduleSerializer(serializers.ModelSerializer):
+    def validate(self, attrs):
+        # A deployment for a request is the cleanup type the request was made as.
+        request_id = attrs.get('request_id', getattr(self.instance, 'request_id', None))
+        if request_id:
+            cleanup_type = Request.objects.filter(request_id=request_id).values_list('cleanup_type', flat=True).first()
+            if cleanup_type:
+                attrs['cleanup_type'] = cleanup_type
+        return attrs
+
     class Meta:
         model = DeploymentSchedule
         fields = ['id', 'bot', 'day', 'status', 'label', 'zone', 'request_id', 'cleanup_type']

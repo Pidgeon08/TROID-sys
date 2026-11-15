@@ -19,6 +19,7 @@ from django.contrib.auth.hashers import check_password, make_password
 from django.core.mail import send_mail
 from django.conf import settings
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 try:
@@ -1283,21 +1284,17 @@ class RequestViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
         """For each finished cleanup drive, compare what TROID counted against the filed
         trash report. Cleanups from before the robot's counts were recorded have no
         detections: for those the old report and CENRO's verified figures are compared.
-        Unsupported cleanups have no bot involved, so the report is just the user's count."""
+        Unsupported cleanups have no bot involved, so the report is just the user's count,
+        and only TROID-supported drives carry a collection area to compare coverage with."""
         reqs = Request.objects.filter(
             archived=False, status__in=['completed', 'segregated', 'verified']
         ).exclude(trash_categories={}).select_related('collection_area', 'bot_id').prefetch_related('detection_events')
 
-        schedules_by_request = {
-            s.request_id: s.cleanup_type
-            for s in DeploymentSchedule.objects.filter(request_id__in=[r.request_id for r in reqs])
-        }
-
         results = []
         for req in reqs:
-            cleanup_type = schedules_by_request.get(req.request_id, 'unsupported')
-
             events = sorted(req.detection_events.all(), key=lambda e: e.timestamp)
+            # A drive the robot reported from was TROID-supported, whatever the request says.
+            cleanup_type = 'troid_supported' if events else req.cleanup_type
             counted = troid_counts(events)
             if counted:
                 troid_categories = counted
@@ -1315,7 +1312,7 @@ class RequestViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
                 longitude = req.bot_id.last_longitude
 
             collection_area = None
-            if req.collection_area:
+            if req.collection_area and cleanup_type == 'troid_supported':
                 collection_area = {
                     'id': req.collection_area.id,
                     'area_id': req.collection_area.area_id,
@@ -1329,6 +1326,7 @@ class RequestViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
                 'request_id': req.request_id,
                 'barangay': req.barangay or req.location_name,
                 'status': req.status,
+                'cleanup_type': cleanup_type,
                 'date_submitted': req.date_submitted,
                 'latitude': latitude,
                 'longitude': longitude,
@@ -1418,6 +1416,11 @@ class CollectionAreaViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
         status_param = self.request.query_params.get('status')
         if status_param:
             queryset = queryset.filter(status=status_param)
+        if self.request.query_params.get('troid_supported') == 'true':
+            # Areas a TROID-supported cleanup was sent to (the Heatmap compares coverage with these).
+            queryset = queryset.filter(
+                Q(requests__cleanup_type='troid_supported') | Q(requests__detection_events__isnull=False)
+            ).distinct()
         return queryset
 
     def create(self, request, *args, **kwargs):

@@ -1,4 +1,4 @@
-import { MapContainer, TileLayer, useMap, Polygon, Circle, CircleMarker, ZoomControl } from 'react-leaflet';
+import { MapContainer, TileLayer, useMap, Polygon, Polyline, Circle, CircleMarker, Tooltip, ZoomControl } from 'react-leaflet';
 import { TILE_URL, TILE_ATTRIBUTION } from '../../services/mapTiles';
 import 'leaflet/dist/leaflet.css';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -11,7 +11,7 @@ import { api } from '../../services/api';
 import { SearchBar } from '../../components/ui/SearchBar';
 import { useRealtime } from '../../hooks/useRealtime';
 import {
-  areaCoverage, splitByArea, trailStats, isMeasurableArea, formatArea, formatDistance, formatDuration, TRAIL_GAP_MS,
+  areaCoverage, splitByArea, trailStats, trailRuns, isMeasurableArea, formatArea, formatDistance, formatDuration, TRAIL_GAP_MS,
 } from '../../utils/coverage';
 
 // Default map view when there is nothing to show yet: San Fernando, La Union.
@@ -23,16 +23,20 @@ const BLUE = '#1b4de4';
 const COVERED = '#10b981';
 const OUTSIDE = '#f59e0b';
 
+// Bot Pathing is drawn as nodes along the robot's path; the other layers are heat.
+const MAP_LAYERS = ['Waste Density', 'Bot Pathing', 'Trash Collected'];
+const PATHING = 'Bot Pathing';
 const HEAT_GRADIENTS = {
   'Waste Density': { 0.4: 'blue', 0.6: 'cyan', 0.7: 'lime', 0.8: 'yellow', 1.0: 'red' },
-  'Bot Pathing': { 0.0: '#0ea5e9', 0.5: '#22d3ee', 1.0: '#1e40af' },
   'Trash Collected': { 0.0: '#cbd5e1', 0.5: '#64748b', 1.0: '#0f172a' },
 };
 const LEGEND_CLASSES = {
   'Waste Density': 'bg-gradient-to-r from-blue-500 via-cyan-400 via-emerald-400 via-yellow-400 to-red-500',
-  'Bot Pathing': 'bg-gradient-to-r from-sky-500 via-cyan-400 to-blue-800',
   'Trash Collected': 'bg-gradient-to-r from-slate-300 via-slate-500 to-slate-900',
 };
+// One colour per robot on the Bot Pathing layer.
+const PATH_COLORS = ['#1b4de4', '#7c3aed', '#db2777', '#0891b2', '#ea580c', '#4d7c0f'];
+const PATH_START = '#10b981';
 
 /** Leaflet.heat overlay. Waits until the map has a size so it never draws into a 0×0 canvas. */
 function HeatmapLayer({ points, type }) {
@@ -66,6 +70,69 @@ function HeatmapLayer({ points, type }) {
   }, [map, points, type]);
 
   return null;
+}
+
+/**
+ * Bot Pathing: each point the robot reported is a node, joined in time order, one colour per robot.
+ * A run starts with a green node and ends with a larger node; hover a node for its time and count.
+ */
+function PathLayer({ reports }) {
+  const runs = useMemo(() => trailRuns(reports), [reports]);
+  const colorOf = useMemo(() => {
+    const boats = [...new Set(runs.map((r) => r.boat))];
+    return (boat) => PATH_COLORS[boats.indexOf(boat) % PATH_COLORS.length];
+  }, [runs]);
+
+  return runs.map((run, r) => {
+    const color = colorOf(run.boat);
+    const last = run.nodes.length - 1;
+    return (
+      <PathRun key={`${run.boat}-${run.nodes[0].time}-${r}`} run={run} color={color} last={last} />
+    );
+  });
+}
+
+function PathRun({ run, color, last }) {
+  return (
+    <>
+      {run.nodes.length > 1 && (
+        <Polyline
+          positions={run.nodes.map((n) => n.at)}
+          pathOptions={{ color, weight: 3, opacity: 0.6, lineJoin: 'round' }}
+          interactive={false}
+        />
+      )}
+      {run.nodes.map((node, i) => {
+        const isStart = i === 0;
+        const isEnd = i === last && last > 0;
+        const items = node.report.trash_count || 0;
+        return (
+          <CircleMarker
+            key={`${node.time}-${i}`}
+            center={node.at}
+            radius={isStart || isEnd ? 7 : 5}
+            pathOptions={{
+              color: isStart ? PATH_START : color,
+              weight: 2,
+              fillColor: isStart ? PATH_START : isEnd ? color : '#ffffff',
+              fillOpacity: 1,
+            }}
+          >
+            <Tooltip direction="top" offset={[0, -6]}>
+              <div className="text-[11px] leading-snug">
+                <div className="font-semibold">
+                  {run.boat ? `${run.boat} · ` : ''}Point {i + 1} of {run.nodes.length}
+                  {isStart ? ' (start)' : isEnd ? ' (latest)' : ''}
+                </div>
+                <div>{formatClock(node.time)}</div>
+                <div>{items} item{items === 1 ? '' : 's'} detected</div>
+              </div>
+            </Tooltip>
+          </CircleMarker>
+        );
+      })}
+    </>
+  );
 }
 
 /** Moves the map to `bounds` once per `fitKey`, so the 5-second refresh doesn't keep pulling it back. */
@@ -159,6 +226,19 @@ function Stat({ label, value, tone = 'text-slate-900' }) {
       <dt className="text-[11px] font-medium text-slate-500">{label}</dt>
       <dd className={`mt-0.5 text-sm font-semibold tabular-nums truncate ${tone}`}>{value}</dd>
     </div>
+  );
+}
+
+function CleanupTypeBadge({ type, className = '' }) {
+  const supported = type === 'troid_supported';
+  return (
+    <span
+      className={`inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+        supported ? 'bg-blue-50 text-[#1b4de4]' : 'bg-slate-100 text-slate-500'
+      } ${className}`}
+    >
+      {supported ? 'TROID supported' : 'Unsupported'}
+    </span>
   );
 }
 
@@ -298,8 +378,28 @@ function MapLegend({ type, area, showCoverage, radiusM }) {
   return (
     <div className="absolute left-3 bottom-3 z-[400] w-56 rounded-xl bg-white/95 border border-slate-200 shadow-sm px-3 py-2.5 text-[11px] text-slate-600">
       <div className="font-semibold text-slate-700">{type}</div>
-      <div className={`mt-1.5 h-1.5 rounded-full ${LEGEND_CLASSES[type] || LEGEND_CLASSES['Waste Density']}`} />
-      <div className="mt-1 flex justify-between text-slate-400"><span>Low</span><span>High</span></div>
+      {type === PATHING ? (
+        <ul className="mt-1.5 flex flex-col gap-1">
+          <li className="flex items-center gap-2">
+            <span className="w-3 h-3 rounded-full border-2" style={{ borderColor: PATH_START, background: PATH_START }} />
+            Start of a run
+          </li>
+          <li className="flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full border-2 bg-white" style={{ borderColor: PATH_COLORS[0] }} />
+            Point reported
+          </li>
+          <li className="flex items-center gap-2">
+            <span className="w-3 h-3 rounded-full" style={{ background: PATH_COLORS[0] }} />
+            Latest point
+          </li>
+          <li className="text-slate-400">One colour per robot. Hover a point for details.</li>
+        </ul>
+      ) : (
+        <>
+          <div className={`mt-1.5 h-1.5 rounded-full ${LEGEND_CLASSES[type] || LEGEND_CLASSES['Waste Density']}`} />
+          <div className="mt-1 flex justify-between text-slate-400"><span>Low</span><span>High</span></div>
+        </>
+      )}
       {area && (
         <ul className="mt-2 pt-2 border-t border-slate-100 flex flex-col gap-1">
           <li className="flex items-center gap-2">
@@ -324,7 +424,7 @@ function MapLegend({ type, area, showCoverage, radiusM }) {
   );
 }
 
-function CoverageMap({ heatPoints, heatType, area, coveragePoints, radiusM, showCoverage, fitKey, emptyText }) {
+function CoverageMap({ heatPoints, heatType, reports, area, coveragePoints, radiusM, showCoverage, fitKey, emptyText }) {
   const bounds = area?.points?.length ? area.points : boundsOf(heatPoints);
   return (
     <div className="relative h-[460px] lg:h-[600px] rounded-2xl overflow-hidden border border-slate-200 bg-slate-50">
@@ -336,8 +436,9 @@ function CoverageMap({ heatPoints, heatType, area, coveragePoints, radiusM, show
       >
         <TileLayer url={TILE_URL} attribution={TILE_ATTRIBUTION} />
         <FitBounds fitKey={fitKey} bounds={bounds} />
-        <HeatmapLayer points={heatPoints} type={heatType} />
+        {heatType !== PATHING && <HeatmapLayer points={heatPoints} type={heatType} />}
         <CoverageOverlay area={area} points={coveragePoints} radiusM={radiusM} showCoverage={showCoverage} />
+        {heatType === PATHING && <PathLayer reports={reports} />}
         <ZoomControl position="bottomright" />
       </MapContainer>
       <MapLegend type={heatType} area={area} showCoverage={showCoverage} radiusM={radiusM} />
@@ -391,7 +492,8 @@ const HeatmapView = () => {
       .then((data) => { if (!cancelled) setComparisonData(Array.isArray(data) ? data : []); })
       .catch((err) => console.error('Failed to fetch post-cleanup comparison data:', err))
       .finally(() => { if (!cancelled) setComparisonLoading(false); });
-    api.collectionAreas({ status: 'approved' })
+    // Only areas a TROID-supported cleanup was sent to: unsupported cleanups had no robot to compare.
+    api.collectionAreas({ status: 'approved', troid_supported: true })
       .then((data) => { if (!cancelled) setAreas(Array.isArray(data) ? data : []); })
       .catch((err) => console.error('Failed to fetch collection areas:', err));
     return () => { cancelled = true; };
@@ -579,7 +681,7 @@ const HeatmapView = () => {
               {knownCategories.map((c) => <option key={c} value={c}>{c.replace(/_/g, ' ')}</option>)}
             </select>
             <select value={heatmapType} onChange={(e) => setHeatmapType(e.target.value)} className={selectClass} aria-label="Map layer">
-              {Object.keys(HEAT_GRADIENTS).map((t) => <option key={t} value={t}>{t}</option>)}
+              {MAP_LAYERS.map((t) => <option key={t} value={t}>{t}</option>)}
             </select>
             <label className="flex items-center gap-2 lg:ml-auto">
               <span className="flex items-center gap-1 text-xs font-semibold text-slate-500">
@@ -587,7 +689,7 @@ const HeatmapView = () => {
                 Compare with
               </span>
               <select value={compareAreaId} onChange={(e) => setCompareAreaId(e.target.value)} className={`${selectClass} max-w-[240px]`}>
-                <option value="">No collection area</option>
+                <option value="">{areasByBarangay.length === 0 ? 'No TROID-supported areas yet' : 'No collection area'}</option>
                 {areasByBarangay.map(([barangay, list]) => (
                   <optgroup key={barangay} label={barangay}>
                     {list.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
@@ -601,6 +703,7 @@ const HeatmapView = () => {
             <CoverageMap
               heatPoints={heatPoints}
               heatType={heatmapType}
+              reports={detections}
               area={compareArea}
               coveragePoints={heatPoints}
               radiusM={radiusM}
@@ -616,7 +719,7 @@ const HeatmapView = () => {
                 onRadiusChange={setRadiusM}
                 showCoverage={showCoverage}
                 onToggleCoverage={setShowCoverage}
-                emptyText='Choose a collection area under "Compare with" to see how much of it TROID covered in this period.'
+                emptyText='Choose a collection area under "Compare with" to see how much of it TROID covered in this period. Only areas a TROID-supported cleanup was sent to are listed.'
               />
               <TrailPanel trail={liveTrail} count={detections.length} />
               <CategoryPanel categories={liveCategories} total={liveTotal} />
@@ -633,11 +736,15 @@ const HeatmapView = () => {
                 <span className="font-semibold text-slate-900">{selectedDrive.request_id}</span>
                 {selectedDrive.barangay ? ` · ${selectedDrive.barangay}` : ''}
                 {selectedDrive.collection_area ? ` · ${selectedDrive.collection_area.name}` : ''}
+                <CleanupTypeBadge type={selectedDrive.cleanup_type} className="ml-2" />
               </span>
             ) : (
               <span className="text-sm text-slate-500">All completed cleanup drives. Select one to compare its collection area.</span>
             )}
             <div className="flex items-center gap-2">
+              <select value={heatmapType} onChange={(e) => setHeatmapType(e.target.value)} className={selectClass} aria-label="Map layer">
+                {MAP_LAYERS.map((t) => <option key={t} value={t}>{t}</option>)}
+              </select>
               {selectedDrive && (
                 <button
                   type="button"
@@ -670,7 +777,8 @@ const HeatmapView = () => {
             <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_340px] gap-4 items-start">
               <CoverageMap
                 heatPoints={driveHeatPoints}
-                heatType="Waste Density"
+                heatType={heatmapType}
+                reports={driveDetections}
                 area={isMeasurableArea(driveArea) ? driveArea : null}
                 coveragePoints={driveHeatPoints}
                 radiusM={radiusM}
@@ -687,9 +795,11 @@ const HeatmapView = () => {
                   showCoverage={showCoverage}
                   onToggleCoverage={setShowCoverage}
                   emptyText={
-                    selectedDrive
-                      ? 'This request has no collection area attached, so there is nothing to compare its coverage with.'
-                      : 'Select a request to compare where TROID went with the collection area it was sent to.'
+                    !selectedDrive
+                      ? 'Select a TROID-supported request to compare where TROID went with the collection area it was sent to.'
+                      : selectedDrive.cleanup_type !== 'troid_supported'
+                        ? 'This was an unsupported cleanup: no robot went, so there is no collection area to compare.'
+                        : 'This request has no collection area attached, so there is nothing to compare its coverage with.'
                   }
                 />
                 {selectedDrive && <TrailPanel trail={driveTrail} count={driveDetections.length} />}
@@ -798,6 +908,7 @@ const HeatmapView = () => {
                       <th className="py-2 pr-4 font-medium">Request</th>
                       <th className="py-2 pr-4 font-medium">Barangay</th>
                       <th className="py-2 pr-4 font-medium">Date</th>
+                      <th className="py-2 pr-4 font-medium">Cleanup</th>
                       <th className="py-2 pr-4 font-medium">Area</th>
                       <th className="py-2 pr-4 font-medium text-right">Points</th>
                       <th className="py-2 pr-4 font-medium text-right">TROID</th>
@@ -823,6 +934,7 @@ const HeatmapView = () => {
                           <td className="py-2.5 pr-4 text-slate-500">
                             {d.date_submitted ? new Date(d.date_submitted).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
                           </td>
+                          <td className="py-2.5 pr-4"><CleanupTypeBadge type={d.cleanup_type} /></td>
                           <td className="py-2.5 pr-4 text-slate-500">{d.collection_area?.name || '—'}</td>
                           <td className="py-2.5 pr-4 text-right text-slate-500 tabular-nums">{(d.detections || []).length}</td>
                           <td className="py-2.5 pr-4 text-right font-semibold text-[#1b4de4] tabular-nums">{d.troid_total}</td>

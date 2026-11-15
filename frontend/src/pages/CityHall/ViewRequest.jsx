@@ -172,13 +172,17 @@ export default function CityHallViewRequest() {
                       <div className="text-sm">
                         {request.location?.name && (
                           <p className="font-semibold text-slate-800">
-                            <span className="font-normal text-slate-500">Landmark: </span>{request.location.name}
+                            <span className="font-normal text-slate-500">{request.cleanupType === 'unsupported' ? 'Location: ' : 'Landmark: '}</span>{request.location.name}
                           </p>
                         )}
                         <p className="text-slate-500 mt-0.5">{request.location?.barangay}</p>
                         <p className="text-slate-500">{request.location?.municipality}</p>
                         <p className="text-slate-500">{request.location?.province}</p>
                       </div>
+                    </div>
+                    <div className="mt-3 pt-3 border-t border-slate-100 text-sm">
+                      <p className="text-xs text-slate-400 mb-0.5">Cleanup Type</p>
+                      <p className="font-medium text-slate-800">{request.cleanupType === 'unsupported' ? 'Unsupported' : 'TROID Supported'}</p>
                     </div>
                     {request.collectionArea && (
                       <div className="mt-3 pt-3 border-t border-slate-100 text-sm">

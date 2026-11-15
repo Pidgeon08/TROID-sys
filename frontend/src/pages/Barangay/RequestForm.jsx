@@ -14,12 +14,21 @@ import {
   ChevronLeft,
   ChevronRight,
   Layers,
+  Bot,
+  Users,
 } from "lucide-react";
 import api from "../../services/api";
+import { BARANGAYS } from "../../utils/barangayBoundaries";
 import { formatFileSize, formatTime12h } from "../../constants/requests";
 import LetterDropzone from "../../components/LetterDropzone";
 
 const REQUEST_TYPE = "Cleanup";
+
+// TROID-supported cleanups are sent to a collection area; unsupported (manual) ones only give a location.
+const CLEANUP_TYPES = [
+  { value: "troid_supported", label: "TROID Supported", hint: "A TROID bot cleans one of the collection areas", icon: Bot },
+  { value: "unsupported", label: "Unsupported", hint: "A manual cleanup with no bot; give its location", icon: Users },
+];
 
 const DAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -208,6 +217,7 @@ function RequestForm({ currentUser, forCenro = false }) {
   const areasPath = forCenro ? "/admin/collection-areas" : "/barangay/areas";
 
   const [formData, setFormData] = useState({
+    cleanupType: "troid_supported",
     barangay: "",
     location: "",
     collectionAreaId: "",
@@ -330,15 +340,21 @@ function RequestForm({ currentUser, forCenro = false }) {
       ? `${getWeekDays(ttAnchor)[0].toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${getWeekDays(ttAnchor)[6].toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`
       : `${MONTHS[ttAnchor.getMonth()]} ${ttAnchor.getFullYear()}`;
 
-  // A request needs a collection area, so CENRO can only pick barangays that have one.
-  const barangayOptions = forCenro ? [...new Set(collectionAreas.map((a) => a.barangay).filter(Boolean))].sort() : [];
+  const isTroid = formData.cleanupType === "troid_supported";
+  // A TROID-supported request needs a collection area, so CENRO can only pick barangays that have one.
+  const barangayOptions = !forCenro
+    ? []
+    : isTroid
+      ? [...new Set(collectionAreas.map((a) => a.barangay).filter(Boolean))].sort()
+      : BARANGAYS;
   const requestBarangay = forCenro ? formData.barangay : barangayLocation;
   const areaOptions = forCenro ? collectionAreas.filter((a) => a.barangay === formData.barangay) : collectionAreas;
   const selectedCollectionArea = areaOptions.find((a) => String(a.id) === String(formData.collectionAreaId));
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    if ((forCenro && !formData.barangay) || !formData.collectionAreaId || !formData.date || !formData.time) {
+    const placeMissing = isTroid ? !formData.collectionAreaId : !formData.location.trim();
+    if ((forCenro && !formData.barangay) || placeMissing || !formData.date || !formData.time) {
       alert("Please fill in all required fields.");
       return;
     }
@@ -367,8 +383,9 @@ function RequestForm({ currentUser, forCenro = false }) {
         requested_by_role: currentUser?.role || (forCenro ? "admin" : "barangay"),
         requested_by_barangay: requestBarangay,
         email: currentUser?.email || `${barangayName.toLowerCase().replace(/\s+/g, '')}@barangay.gov.ph`,
-        location_name: formData.location,
-        collection_area: formData.collectionAreaId,
+        cleanup_type: formData.cleanupType,
+        location_name: formData.location.trim(),
+        collection_area: isTroid ? formData.collectionAreaId : null,
         barangay: requestBarangay,
         municipality: "",
         province: "",
@@ -413,6 +430,40 @@ function RequestForm({ currentUser, forCenro = false }) {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-6">
           <form onSubmit={handleSubmit} className="space-y-5">
+            <fieldset>
+              <legend className="block text-xs font-semibold text-slate-500 mb-1.5">Cleanup Type</legend>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {CLEANUP_TYPES.map(({ value, label, hint, icon: Icon }) => {
+                  const active = formData.cleanupType === value;
+                  return (
+                    <label
+                      key={value}
+                      className={`flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-blue-500/40 ${
+                        active ? "border-[#1b4de4] bg-blue-50/60" : "border-slate-200 bg-white hover:border-slate-300"
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="cleanupType"
+                        value={value}
+                        checked={active}
+                        onChange={() => {
+                          // The barangay list and the place fields differ by type, so start those over.
+                          if (!active) setFormData({ ...formData, cleanupType: value, barangay: "", collectionAreaId: "" });
+                        }}
+                        className="sr-only"
+                      />
+                      <Icon size={18} className={active ? "mt-0.5 text-[#1b4de4]" : "mt-0.5 text-slate-400"} />
+                      <span>
+                        <span className={`block text-sm font-semibold ${active ? "text-slate-900" : "text-slate-700"}`}>{label}</span>
+                        <span className="block text-xs text-slate-500 mt-0.5">{hint}</span>
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            </fieldset>
+
             {forCenro && (
               <div>
                 <label htmlFor="request-barangay" className="block text-xs font-semibold text-slate-500 mb-1.5">Barangay</label>
@@ -426,7 +477,11 @@ function RequestForm({ currentUser, forCenro = false }) {
                     required
                   >
                     <option value="" disabled>
-                      {collectionAreasLoading ? "Loading barangays..." : barangayOptions.length === 0 ? "No approved collection areas yet" : "Select a barangay"}
+                      {isTroid && collectionAreasLoading
+                        ? "Loading barangays..."
+                        : barangayOptions.length === 0
+                          ? "No approved collection areas yet"
+                          : "Select a barangay"}
                     </option>
                     {barangayOptions.map((b) => (
                       <option key={b} value={b}>{b}</option>
@@ -434,10 +489,13 @@ function RequestForm({ currentUser, forCenro = false }) {
                   </select>
                   <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
                 </div>
-                <p className="text-[11px] text-slate-400 mt-1.5">Only barangays with an approved collection area are listed.</p>
+                {isTroid && (
+                  <p className="text-[11px] text-slate-400 mt-1.5">Only barangays with an approved collection area are listed.</p>
+                )}
               </div>
             )}
 
+            {isTroid && (
             <div>
               <label className="block text-xs font-semibold text-slate-500 mb-1.5">Collection Area</label>
               <div className="relative">
@@ -474,21 +532,31 @@ function RequestForm({ currentUser, forCenro = false }) {
                 </p>
               )}
             </div>
+            )}
 
             <div>
-              <label className="block text-xs font-semibold text-slate-500 mb-1.5">Landmark (Optional)</label>
+              <label htmlFor="request-location" className="block text-xs font-semibold text-slate-500 mb-1.5">
+                {isTroid ? "Landmark (Optional)" : "Location"}
+              </label>
               <div className="relative">
                 <MapPin size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                 <input
+                  id="request-location"
                   type="text"
                   name="location"
                   value={formData.location}
                   onChange={handleChange}
-                  placeholder="e.g., Beside the barangay hall, near the bridge"
+                  required={!isTroid}
+                  maxLength={100}
+                  placeholder={isTroid ? "e.g., Beside the barangay hall, near the bridge" : "e.g., Poro Point shoreline, behind the public market"}
                   className="w-full rounded-lg border border-slate-200 bg-white py-2.5 pl-9 pr-3 text-sm text-slate-700 placeholder:text-slate-400 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
                 />
               </div>
-              <p className="text-[11px] text-slate-400 mt-1.5">A guide only, for the operator and the workers accompanying them.</p>
+              <p className="text-[11px] text-slate-400 mt-1.5">
+                {isTroid
+                  ? "A guide only, for the operator and the workers accompanying them."
+                  : "Where the cleanup will take place, so CENRO and the workers can find it."}
+              </p>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -556,7 +624,7 @@ function RequestForm({ currentUser, forCenro = false }) {
                   <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
                 </div>
                 <p className="text-[11px] text-slate-400 mt-1.5">
-                  Approximate time you'd like the TROID bot to arrive.
+                  {isTroid ? "Approximate time you'd like the TROID bot to arrive." : "Approximate time you'd like the cleanup to start."}
                 </p>
               </div>
             </div>
@@ -605,7 +673,7 @@ function RequestForm({ currentUser, forCenro = false }) {
 
             <button
               type="submit"
-              disabled={isSubmitting || (!collectionAreasLoading && collectionAreas.length === 0)}
+              disabled={isSubmitting || (isTroid && !collectionAreasLoading && collectionAreas.length === 0)}
               className="w-full flex items-center justify-center gap-2 rounded-lg bg-[#1b4de4] py-3 px-4 text-sm font-medium text-white hover:bg-[#153eb8] transition-colors disabled:opacity-50"
             >
               <Send size={16} />
@@ -667,11 +735,17 @@ function RequestForm({ currentUser, forCenro = false }) {
             </div>
             <div className="p-6 space-y-3 max-h-[60vh] overflow-y-auto">
               <div className="flex items-center justify-between py-2 text-sm border-b border-slate-50">
-                <span className="text-slate-500">Collection Area</span>
-                <span className="font-medium text-slate-800 text-right">{selectedCollectionArea?.name || '—'}</span>
+                <span className="text-slate-500">Cleanup Type</span>
+                <span className="font-medium text-slate-800 text-right">{isTroid ? "TROID Supported" : "Unsupported"}</span>
               </div>
+              {isTroid && (
+                <div className="flex items-center justify-between py-2 text-sm border-b border-slate-50">
+                  <span className="text-slate-500">Collection Area</span>
+                  <span className="font-medium text-slate-800 text-right">{selectedCollectionArea?.name || '—'}</span>
+                </div>
+              )}
               <div className="flex items-center justify-between py-2 text-sm border-b border-slate-50">
-                <span className="text-slate-500">Landmark</span>
+                <span className="text-slate-500">{isTroid ? "Landmark" : "Location"}</span>
                 <span className="font-medium text-slate-800 text-right">{formData.location || '—'}</span>
               </div>
               <div className="flex items-center justify-between py-2 text-sm border-b border-slate-50">

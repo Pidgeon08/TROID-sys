@@ -63,7 +63,7 @@ export const USER_MANUALS = {
       description: 'Review barangay cleanup requests, send your own, and file trash reports.',
       keywords: ['cleanup request', 'approve', 'verify', 'trash report', 'pending', 'send request'],
       steps: [
-        'Click "Send Request" to request a cleanup yourself. It is the same form barangays use: choose the barangay and one of its approved collection areas, pick a date from the bot timetable (at least 7 days ahead) and a time, and attach the letter of request.',
+        'Click "Send Request" to request a cleanup yourself. It is the same form barangays use: choose TROID Supported (pick the barangay and one of its approved collection areas) or Unsupported (pick the barangay and type the location), pick a date from the bot timetable (at least 7 days ahead) and a time, and attach the letter of request.',
         'Use the tabs to filter by status — Pending Admin, Approved, Ongoing, Unscheduled, Verified, Parked.',
         'Open a request to review it: approve/decline, and once the cleanup is done, with or without a robot, click "Mark Session Completed" and fill in the required Trash Collection Report (per-category counts, bags, and weights).',
         'For TROID-supported cleanups, the Trash by category fields are filled in with what the robot counted. Each shows "TROID counted" beside its label, and the numbers can be edited before filing.',
@@ -92,7 +92,7 @@ export const USER_MANUALS = {
       steps: [
         'Click "Create Schedule" and pick an approved request — requests from a barangay flagged as a Priority Area are marked with an amber warning icon and shown first.',
         'Choose a date, time slot, bot(s), and operator(s); the system blocks bots that are already booked that day.',
-        'Set the Cleanup Type: TROID Supported cleanups get a filed report treated as bot-detected data; Unsupported ones do not.',
+        'The Cleanup Type comes from the request: TROID Supported cleanups are sent to a collection area and their filed report is treated as bot-detected data; Unsupported ones only have a location and need no bot or operator.',
         'Existing entries can be reopened to reschedule or reassign.',
       ],
     },
@@ -103,7 +103,8 @@ export const USER_MANUALS = {
       description: 'See where TROID found trash, how much of a collection area it covered, and compare TROID vs. reported totals per drive.',
       keywords: ['coverage', 'area covered', 'post-cleanup comparison', 'collection area', 'map', 'distance'],
       steps: [
-        'Live Heat Map shows waste density, bot pathing, or trash collected. Filter it by time (today, 7 days, 30 days, or a custom range) and by category.',
+        'Live Heat Map shows waste density or trash collected as heat. Filter it by time (today, 7 days, 30 days, or a custom range) and by category.',
+        'Switch the layer to Bot Pathing to see the robot\'s route as points joined in order, one colour per robot. Each run starts at a green point and ends at a larger point; hover a point to see when it was reported and how many items were detected there.',
         'Choose a collection area under "Compare with" to see how much of it TROID covered. Each point the robot reported counts as covering the chosen reach (5–30 m) around it; points outside the area are marked in amber.',
         'Bot trail shows the distance and active time between the robot\'s points, and when the first and last points came in.',
         'Switch to Post-Cleanup Comparison and use "Select request" to pick a completed drive. The map shows where TROID went against that request\'s collection area, next to TROID-detected vs. reported totals per category.',
@@ -203,7 +204,8 @@ export const USER_MANUALS = {
       description: 'File a new cleanup request for the City Admin and CENRO to review.',
       keywords: ['new request', 'submit', 'send request', 'cleanup'],
       steps: [
-        'Fill in the request details — landmark, preferred date/time, and notes — and attach a collection area if you\'ve already had one approved.',
+        'Choose the Cleanup Type. TROID Supported sends a TROID bot to one of your approved collection areas (the landmark is optional). Unsupported is a manual cleanup with no bot: type its location instead.',
+        'Pick a preferred date from the bot timetable and a time, and attach the letter of request.',
         'Submit it; it first goes to the City Admin for approval, then to CENRO for scheduling.',
         'Track its progress afterward in My Requests.',
       ],

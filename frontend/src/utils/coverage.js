@@ -133,33 +133,52 @@ function metresBetween([lat1, lng1], [lat2, lng2]) {
  * @param reports  [{ latitude, longitude, timestamp, boat? }, ...]
  */
 export function trailStats(reports) {
-  const byBoat = new Map();
-  for (const r of reports || []) {
-    const time = new Date(r.timestamp).getTime();
-    if (!Number.isFinite(r.latitude) || !Number.isFinite(r.longitude) || !Number.isFinite(time)) continue;
-    const key = r.boat ?? '';
-    if (!byBoat.has(key)) byBoat.set(key, []);
-    byBoat.get(key).push({ at: [r.latitude, r.longitude], time });
-  }
-
+  const runs = trailRuns(reports);
   let distanceM = 0;
   let activeMs = 0;
   let first = null;
   let last = null;
-  for (const list of byBoat.values()) {
-    list.sort((a, b) => a.time - b.time);
-    for (let i = 0; i < list.length; i++) {
-      const { time } = list[i];
+  for (const { nodes } of runs) {
+    for (let i = 0; i < nodes.length; i++) {
+      const { time } = nodes[i];
       if (first === null || time < first) first = time;
       if (last === null || time > last) last = time;
       if (i === 0) continue;
-      const gap = time - list[i - 1].time;
-      if (gap > TRAIL_GAP_MS) continue;
-      activeMs += gap;
-      distanceM += metresBetween(list[i - 1].at, list[i].at);
+      activeMs += time - nodes[i - 1].time;
+      distanceM += metresBetween(nodes[i - 1].at, nodes[i].at);
     }
   }
-  return { distanceM, activeMs, first, last, robots: byBoat.size };
+  return { distanceM, activeMs, first, last, robots: new Set(runs.map((r) => r.boat)).size };
+}
+
+/**
+ * The robot's reports as runs to draw as a path: per robot, in time order, split where
+ * two reports are more than TRAIL_GAP_MS apart.
+ * @returns [{ boat, nodes: [{ at: [lat, lng], time, report }] }]
+ */
+export function trailRuns(reports) {
+  const byBoat = new Map();
+  for (const report of reports || []) {
+    const time = new Date(report.timestamp).getTime();
+    if (!Number.isFinite(report.latitude) || !Number.isFinite(report.longitude) || !Number.isFinite(time)) continue;
+    const key = report.boat ?? '';
+    if (!byBoat.has(key)) byBoat.set(key, []);
+    byBoat.get(key).push({ at: [report.latitude, report.longitude], time, report });
+  }
+
+  const runs = [];
+  for (const [boat, list] of byBoat) {
+    list.sort((a, b) => a.time - b.time);
+    let run = null;
+    for (const node of list) {
+      if (!run || node.time - run.nodes[run.nodes.length - 1].time > TRAIL_GAP_MS) {
+        run = { boat, nodes: [] };
+        runs.push(run);
+      }
+      run.nodes.push(node);
+    }
+  }
+  return runs;
 }
 
 export function formatArea(m2) {

@@ -182,8 +182,15 @@ class Request(models.Model):
         ('pending_verification', 'Pending Verification'),
         ('verified', 'Verified'),
     ]
+    CLEANUP_TYPE_CHOICES = [
+        ('troid_supported', 'TROID Supported'),
+        ('unsupported', 'Unsupported'),
+    ]
     request_id = models.CharField(max_length=20, unique=True, blank=True)
     request_type = models.CharField(max_length=50, default='Cleanup')
+    # Chosen by the requester: a TROID-supported cleanup is sent to a collection area,
+    # an unsupported (manual) one only gives its location. Deployments follow it.
+    cleanup_type = models.CharField(max_length=20, choices=CLEANUP_TYPE_CHOICES, default='troid_supported')
     status = models.CharField(max_length=30, choices=STATUS_CHOICES, default='pending_mayor_approval')
     date_submitted = models.DateTimeField(auto_now_add=True)
     requested_by_name = models.CharField(max_length=100, blank=True)

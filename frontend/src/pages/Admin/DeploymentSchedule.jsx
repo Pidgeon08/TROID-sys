@@ -160,6 +160,13 @@ function ScheduleModal({ bots, operators, approvedRequests, priorityBarangays = 
     setIsRequestListOpen(false);
     const req = approvedRequests.find((r) => r.id === id);
     setZone(req ? requestBarangay(req) : '');
+    // The requester chose the cleanup type; an unsupported cleanup has no bot or operator.
+    const type = req?.cleanupType || 'troid_supported';
+    setCleanupType(type);
+    if (type === 'unsupported') {
+      setSelectedBots([]);
+      setSelectedOperators([]);
+    }
     if (req?.preferredDate) {
       handleDateChange({ target: { value: req.preferredDate } });
     }
@@ -423,18 +430,13 @@ function ScheduleModal({ bots, operators, approvedRequests, priorityBarangays = 
             )}
           </div>
           <div>
-            <label className="block text-xs font-semibold text-slate-500 mb-1.5">Cleanup Type</label>
-            <div className="relative">
-              <select
-                value={cleanupType}
-                onChange={(e) => setCleanupType(e.target.value)}
-                className="w-full rounded-lg border border-slate-200 bg-white py-2.5 px-3 text-sm text-slate-700 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30 appearance-none"
-              >
-                <option value="troid_supported">TROID Supported</option>
-                <option value="unsupported">Unsupported</option>
-              </select>
-              <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+            <p className="block text-xs font-semibold text-slate-500 mb-1.5">Cleanup Type</p>
+            <div className="w-full rounded-lg border border-slate-200 bg-slate-50 py-2.5 px-3 text-sm text-slate-700">
+              {selectedRequestId ? (isUnsupported ? 'Unsupported' : 'TROID Supported') : '—'}
             </div>
+            <p className="mt-1.5 text-[11px] text-slate-400">
+              {selectedRequestId ? 'Set by the request.' : 'Set by the request you select.'}
+            </p>
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div className={isUnsupported || !hasTimeSlot ? "opacity-40 pointer-events-none transition-opacity" : "transition-opacity"}>
@@ -707,6 +709,7 @@ export default function DeploymentSchedule() {
         },
         preferredDate: r.preferred_date || '',
         preferredTime: r.preferred_time || '',
+        cleanupType: r.cleanup_type || 'troid_supported',
       }));
 
       const scheduleMap = {};
