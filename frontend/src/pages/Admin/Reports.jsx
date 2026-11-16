@@ -20,20 +20,22 @@ import jsPDF from 'jspdf';
 import * as XLSX from 'xlsx-js-style';
 import api from '../../services/api';
 import { logAudit } from '../../services/auditLog';
+import ReportFilters from '../../components/ReportFilters';
+import { openReportPreview } from '../../utils/reportPreview';
 import { REQUEST_STATUS_STYLES, manilaDate } from '../../constants/requests';
 import {
-  addDays, collectionsIn, compareGroups, comparisonRows, formatChange, formatDay, formatMetric,
-  hotspotsIn, reportPeriod, requestBarangay, summarize, toCollections, trendSeries, wasteBreakdown,
+  COMPARE_OPTIONS, HISTORY_COUNTS, HISTORY_UNITS, addDays, collectionHistory, collectionsIn, compareGroups,
+  comparisonRows, formatChange, formatDay, formatMetric, noComparisonReason, priorityIn, reportPeriod,
+  requestBarangay, summarize, toCollections, trendSeries, wasteBreakdown, withComparison,
 } from '../../utils/reportData';
 
 const CARD = "bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] print:shadow-none print:border-slate-300 print:break-inside-avoid";
-const INPUT = "w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-medium text-slate-700 hover:border-slate-300 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300";
 const CURRENT_COLOR = "#3B82F6";
 const PREVIOUS_COLOR = "#94A3B8";
 
 const defaultFilters = () => {
   const today = manilaDate(new Date());
-  return { dateFrom: addDays(today, -29), dateTo: today, barangay: "" };
+  return { dateFrom: addDays(today, -29), dateTo: today, barangay: "", compare: "previous", compareFrom: "", compareTo: "" };
 };
 
 const generatedOn = () => new Date().toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -199,32 +201,44 @@ const Reports = () => {
   const [draft, setDraft] = useState(defaultFilters);
   const [applied, setApplied] = useState(defaultFilters);
   const [trendGranularity, setTrendGranularity] = useState("Daily");
-  const [data, setData] = useState({ requests: [], boats: [], operators: [], priorityAreas: [] });
+  // The history table: calendar months or Monday–Sunday weeks, and how many of them.
+  const [history, setHistory] = useState({ unit: "month", count: 6 });
+  const [data, setData] = useState({ requests: [], boats: [], operators: [] });
+  // Priority collection areas as they stood at the end of a day: { 'YYYY-MM-DD': [...] }.
+  const [priorityByDay, setPriorityByDay] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  // Set when the browser blocked the preview tab.
+  const [previewBlocked, setPreviewBlocked] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    // Robot, operator and hotspot names only add detail, so the report still loads without them.
-    Promise.allSettled([api.requests(), api.boats(), api.operators(), api.priorityAreas()])
-      .then(([requests, boats, operators, priorityAreas]) => {
+    // Robot and operator names only add detail, so the report still loads without them.
+    Promise.allSettled([api.requests(), api.boats(), api.operators()])
+      .then(([requests, boats, operators]) => {
         if (cancelled) return;
         const list = (result) => (result.status === "fulfilled" && Array.isArray(result.value) ? result.value : []);
         if (requests.status === "rejected") {
           console.error('Failed to fetch report data:', requests.reason);
           setError("The report data could not be loaded. Refresh the page to try again.");
         }
-        setData({ requests: list(requests), boats: list(boats), operators: list(operators), priorityAreas: list(priorityAreas) });
+        setData({ requests: list(requests), boats: list(boats), operators: list(operators) });
       })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, []);
 
-  const { dateFrom, dateTo, barangay: selectedBarangay } = applied;
-  const period = useMemo(() => reportPeriod(dateFrom, dateTo), [dateFrom, dateTo]);
+  const { dateFrom, dateTo, barangay: selectedBarangay, compare, compareFrom, compareTo } = applied;
+  // The report's period, with what it is compared with as period.previous.
+  const period = useMemo(
+    () => withComparison(reportPeriod(dateFrom, dateTo), compare, { from: compareFrom, to: compareTo }),
+    [dateFrom, dateTo, compare, compareFrom, compareTo]
+  );
   const comparing = Boolean(period.previous);
+  // Short name of the comparison for legends and headings ("Same dates last month").
+  const compareName = comparing ? (period.compareMode === "custom" ? period.previous.label : COMPARE_OPTIONS[period.compareMode]) : "";
   const areaLabel = selectedBarangay || "All Areas";
-  const draftChanged = draft.dateFrom !== dateFrom || draft.dateTo !== dateTo || draft.barangay !== selectedBarangay;
+  const draftChanged = Object.keys(draft).some((key) => draft[key] !== applied[key]);
 
   const collections = useMemo(
     () => toCollections(data.requests, { boats: data.boats, operators: data.operators }),
@@ -236,11 +250,31 @@ const Reports = () => {
     [collections, period, selectedBarangay]
   );
 
+  // A collection area is a priority when its last 30 days bring in more bags per cleanup than
+  // the 30 before; the report counts the priority areas at the end of each period.
+  const priorityDays = useMemo(
+    () => ({ thisEnd: period.to || manilaDate(new Date()), previousEnd: period.previous?.to || "" }),
+    [period]
+  );
+  useEffect(() => {
+    const missing = [priorityDays.thisEnd, priorityDays.previousEnd].filter((day) => day && !(day in priorityByDay));
+    if (missing.length === 0) return undefined;
+    let cancelled = false;
+    Promise.all(missing.map((day) => api.priorityAreas({ as_of: day })
+      .then((list) => [day, Array.isArray(list) ? list : []])
+      .catch((err) => {
+        console.error('Failed to fetch priority areas:', err);
+        return [day, []];
+      })))
+      .then((pairs) => { if (!cancelled) setPriorityByDay((prev) => ({ ...prev, ...Object.fromEntries(pairs) })); });
+    return () => { cancelled = true; };
+  }, [priorityDays, priorityByDay]);
+
   const stats = useMemo(() => {
-    const now = summarize(current, hotspotsIn(data.priorityAreas, period, selectedBarangay));
-    const before = previous ? summarize(previous, hotspotsIn(data.priorityAreas, period.previous, selectedBarangay)) : null;
+    const now = summarize(current, priorityIn(priorityByDay[priorityDays.thisEnd], selectedBarangay));
+    const before = previous ? summarize(previous, priorityIn(priorityByDay[priorityDays.previousEnd], selectedBarangay)) : null;
     return { now, before, rows: comparisonRows(now, before) };
-  }, [current, previous, data.priorityAreas, period, selectedBarangay]);
+  }, [current, previous, priorityByDay, priorityDays, selectedBarangay]);
   const metric = (key) => stats.rows.find((r) => r.key === key);
 
   const trend = useMemo(
@@ -255,6 +289,15 @@ const Reports = () => {
     () => compareGroups(current, previous, selectedBarangay ? (c) => c.areaName || c.zone : (c) => c.barangay),
     [current, previous, selectedBarangay]
   );
+
+  // The last few months or weeks up to the end of the report, each against the one before.
+  const historyEnd = period.to || manilaDate(new Date());
+  const historyRows = useMemo(
+    () => collectionHistory(collections, { unit: history.unit, count: history.count, end: historyEnd, barangay: selectedBarangay }),
+    [collections, history, historyEnd, selectedBarangay]
+  );
+  const historyName = history.unit === "week" ? "week" : "month";
+  const historyLabel = (row) => `${row.label}${row.partial ? " (so far)" : ""}`;
 
   // Barangay filter options: derived from actual submitted requests, not a fixed list.
   const barangays = useMemo(
@@ -271,7 +314,7 @@ const Reports = () => {
 
   const overview = [
     { label: "Date Range", value: period.label, icon: Calendar },
-    { label: "Compared With", value: comparing ? period.previous.label : "No comparison (set a start date)", icon: GitCompareArrows },
+    { label: "Compared With", value: comparing ? `${period.previous.label} (${COMPARE_OPTIONS[period.compareMode].toLowerCase()})` : noComparisonReason(period), icon: GitCompareArrows },
     { label: "Coverage Area", value: areaLabel, icon: MapPin },
     { label: "Report Type", value: "Collection Report", icon: FileText },
     { label: "Generated On", value: generatedOn(), icon: Clock },
@@ -282,7 +325,7 @@ const Reports = () => {
     { key: "bags", label: "Total Bags Collected", suffix: "Bags", icon: FileBarChart2, tint: "bg-blue-50 text-blue-500" },
     { key: "deployments", label: "Total Robot Deployments", suffix: "", icon: Bot, tint: "bg-emerald-50 text-emerald-500" },
     { key: "zones", label: "Patrol Zones Covered", suffix: "", icon: Locate, tint: "bg-violet-50 text-violet-500" },
-    { key: "hotspots", label: "Waste Collection Hotspots Identified", suffix: "", icon: Target, tint: "bg-amber-50 text-amber-500" },
+    { key: "priority", label: "Priority Collection Areas", suffix: "", icon: Target, tint: "bg-amber-50 text-amber-500" },
   ];
 
   const reportScope = `${areaLabel} · ${period.label}`;
@@ -293,7 +336,7 @@ const Reports = () => {
       currentUser,
       action: 'Report generated',
       module: 'Report Generation',
-      details: `Collection Report generated for ${draft.barangay || 'All Areas'} (${reportPeriod(draft.dateFrom, draft.dateTo).label})`,
+      details: `Collection Report generated for ${draft.barangay || 'All Areas'} (${reportPeriod(draft.dateFrom, draft.dateTo).label}), compared with: ${COMPARE_OPTIONS[draft.compare].toLowerCase()}`,
     });
   };
 
@@ -358,7 +401,7 @@ const Reports = () => {
     const changeCell = (change) => (comparing ? formatChange(change) : '-');
     XLSX.utils.book_append_sheet(wb, buildSheet(
       'Period Comparison',
-      ['Metric', 'This Period', 'Previous Period', 'Change'],
+      ['Metric', 'This Period', 'Compared Period', 'Change'],
       stats.rows.map((r) => [r.unit ? `${r.label} (${r.unit})` : r.label, r.current, comparing ? r.previous : '-', changeCell(r.change)]),
       [26, 14, 16, 12],
       [1, 2, 3],
@@ -366,7 +409,7 @@ const Reports = () => {
 
     XLSX.utils.book_append_sheet(wb, buildSheet(
       `Bags by ${groupBy}`,
-      [groupBy, 'Drives', 'Bags (This Period)', 'Bags (Previous Period)', 'Change'],
+      [groupBy, 'Drives', 'Bags (This Period)', 'Bags (Compared Period)', 'Change'],
       groups.map((g) => [g.name, g.drives, g.current, comparing ? g.previous : '-', changeCell(g.change)]),
       [24, 10, 18, 20, 12],
       [1, 2, 3, 4],
@@ -374,20 +417,36 @@ const Reports = () => {
 
     XLSX.utils.book_append_sheet(wb, buildSheet(
       'Waste Collection Distribution',
-      ['Waste Type', 'Items (This Period)', 'Share', 'Items (Previous Period)', 'Change'],
+      ['Waste Type', 'Items (This Period)', 'Share', 'Items (Compared Period)', 'Change'],
       wasteTypes.map((w) => [w.name, w.value, `${w.pct}%`, comparing ? w.previous : '-', changeCell(w.change)]),
       [24, 18, 10, 22, 12],
       [1, 2, 3, 4],
     ), 'Waste Types');
 
-    XLSX.writeFile(wb, `collection-report-${manilaDate(new Date())}.xlsx`);
+    XLSX.utils.book_append_sheet(wb, buildSheet(
+      `Collection History (last ${history.count} ${historyName}s)`,
+      [history.unit === 'week' ? 'Week' : 'Month', 'Cleanups', 'Bags', 'Weight (kg)', 'Bags per Cleanup', 'Items', `Change in Bags vs Previous ${history.unit === 'week' ? 'Week' : 'Month'}`],
+      [...historyRows].reverse().map((h) => [historyLabel(h), h.cleanups, h.bags, h.weightKg, h.avgBags, h.items, formatChange(h.change)]),
+      [26, 10, 10, 12, 16, 10, 30],
+      [1, 2, 3, 4, 5, 6],
+    ), 'History');
 
-    logAudit({
-      currentUser,
-      action: 'Report exported (Excel)',
-      module: 'Report Generation',
-      details: `Collection Report exported to Excel for ${reportScope}`,
+    // Shown in a new tab first; it is only saved if the user clicks Download there.
+    const data = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+    const opened = openReportPreview({
+      title: 'Collection Report (Excel)',
+      subtitle: subtitle.replace(/\s+·\s+/g, ' · '),
+      fileName: `collection-report-${manilaDate(new Date())}.xlsx`,
+      blob: new Blob([data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
+      sheets: wb.SheetNames.map((name) => ({ name, html: XLSX.utils.sheet_to_html(wb.Sheets[name], { header: '', footer: '' }) })),
+      onDownload: () => logAudit({
+        currentUser,
+        action: 'Report exported (Excel)',
+        module: 'Report Generation',
+        details: `Collection Report exported to Excel for ${reportScope}`,
+      }),
     });
+    setPreviewBlocked(!opened);
   };
 
   const handleExportPdf = () => {
@@ -507,7 +566,7 @@ const Reports = () => {
       { label: 'Total Bags', row: metric('bags') },
       { label: 'Robot Deployments', row: metric('deployments') },
       { label: 'Zones Covered', row: metric('zones') },
-      { label: 'Hotspots', row: metric('hotspots') },
+      { label: 'Priority Areas', row: metric('priority') },
     ].forEach((k, i) => {
       const x = marginX + i * (kpiWidth + kpiGap);
       doc.setDrawColor(...SLATE_200);
@@ -526,9 +585,11 @@ const Reports = () => {
         doc.setTextColor(...changeColor(k.row.change));
         const changeText = formatChange(k.row.change);
         doc.text(changeText, x + 4, y + 20);
+        // Measured in the bold font it was drawn in, so the next words don't run into it.
+        const changeWidth = doc.getTextWidth(changeText);
         doc.setFont('helvetica', 'normal');
         doc.setTextColor(...SLATE_500);
-        doc.text(`vs ${formatMetric(k.row.previous)}`, x + 5 + doc.getTextWidth(changeText), y + 20);
+        doc.text(`vs ${formatMetric(k.row.previous)}`, x + 5.5 + changeWidth, y + 20);
       }
     });
     y += kpiHeight + 10;
@@ -540,7 +601,7 @@ const Reports = () => {
         [
           { label: 'Metric', width: 70 },
           { label: 'This Period', width: 37, align: 'right' },
-          { label: 'Previous Period', width: 40, align: 'right' },
+          { label: 'Compared', width: 40, align: 'right' },
           { label: 'Change', width: contentWidth - 147, align: 'right' },
         ],
         stats.rows,
@@ -566,7 +627,7 @@ const Reports = () => {
         { label: groupBy, width: 70 },
         { label: 'Drives', width: 22, align: 'right' },
         { label: 'Bags', width: 28, align: 'right' },
-        { label: 'Previous', width: 30, align: 'right' },
+        { label: 'Compared', width: 30, align: 'right' },
         { label: 'Change', width: contentWidth - 150, align: 'right' },
       ],
       groups,
@@ -586,7 +647,7 @@ const Reports = () => {
         { label: 'Waste Type', width: 70 },
         { label: 'Items', width: 28, align: 'right' },
         { label: 'Share', width: 22, align: 'right' },
-        { label: 'Previous', width: 30, align: 'right' },
+        { label: 'Compared', width: 30, align: 'right' },
         { label: 'Change', width: contentWidth - 150, align: 'right' },
       ],
       wasteTypes,
@@ -596,6 +657,28 @@ const Reports = () => {
         { text: `${w.pct}%` },
         { text: comparing ? w.previous.toLocaleString() : '-', color: SLATE_500 },
         comparing ? { text: formatChange(w.change), color: changeColor(w.change), bold: true } : { text: '-', color: SLATE_500 },
+      ][ci],
+    );
+
+    // --- History: the last few months or weeks ---
+    sectionTitle(`Collection History (last ${history.count} ${historyName}s)`);
+    table(
+      [
+        { label: history.unit === 'week' ? 'Week' : 'Month', width: 52 },
+        { label: 'Cleanups', width: 22, align: 'right' },
+        { label: 'Bags', width: 22, align: 'right' },
+        { label: 'Weight (kg)', width: 28, align: 'right' },
+        { label: 'Bags / Cleanup', width: 30, align: 'right' },
+        { label: `vs Prev. ${history.unit === 'week' ? 'Week' : 'Month'}`, width: contentWidth - 154, align: 'right' },
+      ],
+      [...historyRows].reverse(),
+      (h, ci) => [
+        { text: historyLabel(h) },
+        { text: String(h.cleanups) },
+        { text: h.bags.toLocaleString(), bold: true },
+        { text: formatMetric(h.weightKg) },
+        { text: formatMetric(h.avgBags) },
+        { text: formatChange(h.change), color: changeColor(h.change), bold: true },
       ][ci],
     );
 
@@ -634,14 +717,20 @@ const Reports = () => {
       doc.text(`Page ${p} of ${pageCount}`, pageWidth - marginX, pageHeight - 7, { align: 'right' });
     }
 
-    doc.save(`collection-report-${manilaDate(new Date())}.pdf`);
-
-    logAudit({
-      currentUser,
-      action: 'Report exported (PDF)',
-      module: 'Report Generation',
-      details: `Collection Report exported to PDF for ${reportScope}`,
+    // Shown in a new tab first; it is only saved if the user clicks Download there.
+    const opened = openReportPreview({
+      title: 'Collection Report (PDF)',
+      subtitle: `${reportScope}${comparing ? ` · compared with ${period.previous.label}` : ''} · Generated ${generatedOn()}`,
+      fileName: `collection-report-${manilaDate(new Date())}.pdf`,
+      blob: doc.output('blob'),
+      onDownload: () => logAudit({
+        currentUser,
+        action: 'Report exported (PDF)',
+        module: 'Report Generation',
+        details: `Collection Report exported to PDF for ${reportScope}`,
+      }),
     });
+    setPreviewBlocked(!opened);
   };
 
   if (loading) {
@@ -677,96 +766,36 @@ const Reports = () => {
         <div className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700 print:hidden">{error}</div>
       )}
 
-      {/* Filter bar: the date range and location the report covers, applied by Generate Report */}
-      <div className={`${CARD} p-6 mb-6 print:hidden`}>
-        <div className="flex flex-col lg:flex-row gap-4 lg:items-end">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 flex-1">
-            <div>
-              <p className="text-xs font-semibold text-slate-500 mb-1.5">Date Range</p>
-              <div className="flex items-center gap-2">
-                <div className="relative flex-1">
-                  <Calendar size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-                  <input
-                    type="date"
-                    value={draft.dateFrom}
-                    max={draft.dateTo || undefined}
-                    onChange={(e) => setDraft((d) => ({ ...d, dateFrom: e.target.value }))}
-                    aria-label="From"
-                    className={`${INPUT} pl-9`}
-                  />
-                </div>
-                <span className="text-slate-400 text-sm shrink-0">to</span>
-                <div className="relative flex-1">
-                  <Calendar size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-                  <input
-                    type="date"
-                    value={draft.dateTo}
-                    min={draft.dateFrom || undefined}
-                    onChange={(e) => setDraft((d) => ({ ...d, dateTo: e.target.value }))}
-                    aria-label="To"
-                    className={`${INPUT} pl-9`}
-                  />
-                </div>
-              </div>
-            </div>
-            <div>
-              <p className="text-xs font-semibold text-slate-500 mb-1.5">Barangay / Location</p>
-              <div className="relative">
-                <MapPin size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-                <select
-                  value={draft.barangay}
-                  onChange={(e) => setDraft((d) => ({ ...d, barangay: e.target.value }))}
-                  className={`${INPUT} appearance-none pl-9 pr-8 cursor-pointer`}
-                >
-                  <option value="">All Areas</option>
-                  {barangays.map((b) => (
-                    <option key={b} value={b}>{b}</option>
-                  ))}
-                </select>
-                <svg className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" viewBox="0 0 12 12" fill="none">
-                  <path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              </div>
-            </div>
-            <div>
-              <p className="text-xs font-semibold text-slate-500 mb-1.5">Report Type</p>
-              <div className="relative">
-                <FileText size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-                <select value="collection" disabled className={`${INPUT} appearance-none pl-9 disabled:opacity-100`}>
-                  <option value="collection">Collection Report</option>
-                </select>
-              </div>
-            </div>
-          </div>
-          <button
-            onClick={handleGenerate}
-            className="flex items-center justify-center gap-2 bg-[#1b4de4] hover:bg-[#153eb8] text-white font-semibold text-sm rounded-xl px-5 py-2.5 transition-colors shrink-0"
-          >
-            <FileText size={16} />
-            Generate Report
-          </button>
-        </div>
-        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
-          {draftChanged ? (
+      {/* Filter bar: the period, barangay and comparison, applied by Generate Report */}
+      <ReportFilters
+        draft={draft}
+        onChange={(changes) => setDraft((d) => ({ ...d, ...changes }))}
+        barangays={barangays}
+        onGenerate={handleGenerate}
+      >
+        {draftChanged ? (
+          <>
             <span className="font-semibold text-amber-600">Click Generate Report to apply the changes.</span>
-          ) : (
-            <span>
-              Showing <span className="font-semibold text-slate-700">{period.label}</span>
-              {comparing
-                ? <> compared with <span className="font-semibold text-slate-700">{period.previous.label}</span></>
-                : " · set a start date to compare with the period before it"}
-            </span>
-          )}
-          {(draft.dateFrom || draft.dateTo) && (
-            <button type="button" onClick={() => setDraft((d) => ({ ...d, dateFrom: "", dateTo: "" }))} className="font-medium text-blue-600 hover:text-blue-700">
-              Use all time
+            <button type="button" onClick={() => setDraft(applied)} className="font-medium text-blue-600 hover:text-blue-700">
+              Undo changes
             </button>
-          )}
-        </div>
-      </div>
+          </>
+        ) : (
+          <span>
+            Showing <span className="font-semibold text-slate-700">{period.label}</span>
+            {selectedBarangay ? <> in <span className="font-semibold text-slate-700">{selectedBarangay}</span></> : ""}
+            {comparing
+              ? <> compared with <span className="font-semibold text-slate-700">{period.previous.label}</span> ({COMPARE_OPTIONS[period.compareMode].toLowerCase()})</>
+              : ` · ${noComparisonReason(period).toLowerCase()}`}
+          </span>
+        )}
+        {!draftChanged && period.overlaps && (
+          <span className="font-medium text-amber-600">The two periods share some days, so the changes look smaller than they are.</span>
+        )}
+      </ReportFilters>
 
       {/* KPI stat cards row showing high-level collection and deployment metrics */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-5 mb-6">
         {kpis.map(({ key, label, suffix, icon: Icon, tint }) => {
           const row = metric(key);
           return (
@@ -782,7 +811,7 @@ const Reports = () => {
                 {comparing ? (
                   <p className="mt-1.5 text-xs flex flex-wrap items-center gap-x-1">
                     <Change change={row.change} />
-                    <span className="text-slate-400 font-medium">vs {formatMetric(row.previous)} previous period</span>
+                    <span className="text-slate-400 font-medium">vs {formatMetric(row.previous)} · {compareName.toLowerCase()}</span>
                   </p>
                 ) : (
                   <p className="mt-1.5 text-xs font-medium text-slate-400">{period.label}</p>
@@ -818,7 +847,7 @@ const Reports = () => {
                 <span className="h-0.5 w-4 rounded" style={{ backgroundColor: CURRENT_COLOR }} /> This period
               </span>
               <span className="flex items-center gap-1.5">
-                <span className="w-4 border-t-2 border-dashed" style={{ borderColor: PREVIOUS_COLOR }} /> Previous period
+                <span className="w-4 border-t-2 border-dashed" style={{ borderColor: PREVIOUS_COLOR }} /> {compareName}
               </span>
               <span className="ml-auto">
                 {formatMetric(stats.now.bags)} vs {formatMetric(stats.before.bags)} bags <Change change={metric("bags").change} className="ml-1" />
@@ -844,7 +873,7 @@ const Reports = () => {
                     <span className="text-slate-600 font-medium truncate flex-1">{w.name}</span>
                     <span className="text-slate-900 font-semibold shrink-0">{w.value.toLocaleString()} ({w.pct}%)</span>
                     {comparing && (
-                      <span className="shrink-0 w-[68px] text-right" title={`${w.previous.toLocaleString()} in the previous period`}>
+                      <span className="shrink-0 w-[68px] text-right" title={`${w.previous.toLocaleString()} in ${period.previous.label}`}>
                         <Change change={w.change} />
                       </span>
                     )}
@@ -854,7 +883,7 @@ const Reports = () => {
             )}
           </div>
           {comparing && wasteTypes.length > 0 && (
-            <p className="mt-4 text-[11px] text-slate-400">Changes compare item counts with the previous period.</p>
+            <p className="mt-4 text-[11px] text-slate-400">Changes compare item counts with {period.previous.name} ({period.previous.label}).</p>
           )}
         </div>
       </div>
@@ -935,13 +964,13 @@ const Reports = () => {
               onClick={handleExportPdf}
               className="flex flex-col items-center gap-1.5 border border-slate-200 rounded-xl py-3 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition-colors"
             >
-              <FileDown size={16} className="text-red-500" /> Export PDF
+              <FileDown size={16} className="text-red-500" /> Preview PDF
             </button>
             <button
               onClick={handleExportExcel}
               className="flex flex-col items-center gap-1.5 border border-slate-200 rounded-xl py-3 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition-colors"
             >
-              <Sheet size={16} className="text-emerald-600" /> Export Excel
+              <Sheet size={16} className="text-emerald-600" /> Preview Excel
             </button>
             <button
               onClick={handlePrintReport}
@@ -950,15 +979,22 @@ const Reports = () => {
               <Printer size={16} className="text-slate-500" /> Print Report
             </button>
           </div>
+          <p className="mt-2.5 text-[11px] text-slate-400 print:hidden" role={previewBlocked ? "alert" : undefined}>
+            {previewBlocked ? (
+              <span className="font-medium text-amber-600">Your browser blocked the preview tab. Allow pop-ups for this site, then try again.</span>
+            ) : (
+              "The PDF and Excel files open in a new tab to check first; download them from there."
+            )}
+          </p>
         </div>
       </div>
 
       {/* Comparative data: this period against the one before it, overall and per place */}
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_1fr] gap-5">
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_1fr] gap-5 mb-6">
         <div className={`${CARD} p-6`}>
           <h2 className="text-sm font-bold text-slate-900">Period Comparison</h2>
           <p className="text-xs text-slate-400 mt-0.5 mb-4">
-            {comparing ? `${period.label} vs ${period.previous.label}` : `${period.label} · set a start date to compare with the period before it`}
+            {comparing ? `${period.label} vs ${period.previous.label} (${compareName.toLowerCase()})` : `${period.label} · ${noComparisonReason(period).toLowerCase()}`}
           </p>
           <div className="overflow-x-auto -mx-2">
             <table className="w-full text-sm">
@@ -966,7 +1002,7 @@ const Reports = () => {
                 <tr className="text-left text-xs font-semibold text-slate-400 border-b border-slate-100">
                   <th className="py-2.5 px-2 font-semibold">Metric</th>
                   <th className="py-2.5 px-2 font-semibold text-right">This Period</th>
-                  {comparing && <th className="py-2.5 px-2 font-semibold text-right">Previous</th>}
+                  {comparing && <th className="py-2.5 px-2 font-semibold text-right">Compared</th>}
                   {comparing && <th className="py-2.5 px-2 font-semibold text-right">Change</th>}
                 </tr>
               </thead>
@@ -988,7 +1024,7 @@ const Reports = () => {
           <h2 className="text-sm font-bold text-slate-900">Bags by {groupBy}</h2>
           <p className="text-xs text-slate-400 mt-0.5 mb-4">
             {selectedBarangay ? `Collection areas in ${selectedBarangay}` : "Every barangay with a filed trash report"}
-            {comparing ? ", against the previous period" : ""}
+            {comparing ? `, against ${period.previous.name}` : ""}
           </p>
           {groups.length === 0 ? (
             <p className="py-8 text-center text-sm text-slate-400">No bags were collected in either period.</p>
@@ -1022,10 +1058,93 @@ const Reports = () => {
           {comparing && groups.length > 0 && (
             <div className="mt-4 flex items-center gap-4 text-[11px] text-slate-400">
               <span className="flex items-center gap-1.5"><span className="h-1.5 w-3 rounded-full" style={{ backgroundColor: CURRENT_COLOR }} /> This period</span>
-              <span className="flex items-center gap-1.5"><span className="h-1 w-3 rounded-full" style={{ backgroundColor: PREVIOUS_COLOR }} /> Previous period</span>
+              <span className="flex items-center gap-1.5"><span className="h-1 w-3 rounded-full" style={{ backgroundColor: PREVIOUS_COLOR }} /> {compareName}</span>
             </div>
           )}
         </div>
+      </div>
+
+      {/* History: the last few months or weeks side by side, each against the one before */}
+      <div className={`${CARD} p-6`}>
+        <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
+          <div>
+            <h2 className="text-sm font-bold text-slate-900">Collection History</h2>
+            <p className="text-xs text-slate-400 mt-0.5">
+              The last {history.count} {history.unit === "week" ? "weeks (Monday to Sunday)" : "calendar months"} up to {formatDay(historyEnd)}
+              {selectedBarangay ? ` in ${selectedBarangay}` : ""}, each compared with the {historyName} before it.
+            </p>
+          </div>
+          <div className="flex items-center gap-2 print:hidden">
+            <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg">
+              {Object.entries(HISTORY_UNITS).map(([unit, name]) => (
+                <button
+                  key={unit}
+                  type="button"
+                  onClick={() => setHistory({ unit, count: HISTORY_COUNTS[unit][1] })}
+                  className={`px-3 py-1 rounded-md text-xs font-semibold transition-all duration-200 ${
+                    history.unit === unit ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-800"
+                  }`}
+                >
+                  {name}
+                </button>
+              ))}
+            </div>
+            <select
+              value={history.count}
+              onChange={(e) => setHistory((h) => ({ ...h, count: Number(e.target.value) }))}
+              aria-label={`Number of ${historyName}s`}
+              className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-600 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-100"
+            >
+              {HISTORY_COUNTS[history.unit].map((n) => <option key={n} value={n}>Last {n} {historyName}s</option>)}
+            </select>
+          </div>
+        </div>
+        <div className="overflow-x-auto -mx-2">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-xs font-semibold text-slate-400 border-b border-slate-100">
+                <th className="py-2.5 px-2 font-semibold">{history.unit === "week" ? "Week" : "Month"}</th>
+                <th className="py-2.5 px-2 font-semibold text-right">Cleanups</th>
+                <th className="py-2.5 px-2 font-semibold w-[34%]">Bags</th>
+                <th className="py-2.5 px-2 font-semibold text-right">Weight</th>
+                <th className="py-2.5 px-2 font-semibold text-right">Bags / Cleanup</th>
+                <th className="py-2.5 px-2 font-semibold text-right whitespace-nowrap">vs Previous {history.unit === "week" ? "Week" : "Month"}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[...historyRows].reverse().map((h, i, rows) => {
+                const top = Math.max(...rows.map((r) => r.bags), 1);
+                const inReport = Boolean(period.from) && h.from <= period.to && h.to >= period.from;
+                return (
+                  <tr key={h.key} className={`border-b border-slate-50 last:border-0 ${inReport ? "bg-blue-50/40" : ""}`}>
+                    <td className="py-2.5 px-2 text-slate-700 font-medium whitespace-nowrap">
+                      {h.label}
+                      {h.partial && <span className="ml-1.5 text-[11px] font-normal text-slate-400">so far</span>}
+                    </td>
+                    <td className="py-2.5 px-2 text-right text-slate-600">{h.cleanups}</td>
+                    <td className="py-2.5 px-2">
+                      <div className="flex items-center gap-2">
+                        <div className="h-2 flex-1 rounded-full bg-slate-100">
+                          <div className="h-2 rounded-full" style={{ width: `${(h.bags / top) * 100}%`, backgroundColor: CURRENT_COLOR }} />
+                        </div>
+                        <span className="w-12 text-right font-semibold text-slate-900">{h.bags.toLocaleString()}</span>
+                      </div>
+                    </td>
+                    <td className="py-2.5 px-2 text-right text-slate-600 whitespace-nowrap">{formatMetric(h.weightKg, "kg")}</td>
+                    <td className="py-2.5 px-2 text-right text-slate-600">{formatMetric(h.avgBags)}</td>
+                    <td className="py-2.5 px-2 text-right text-xs" title={h.partial ? `Only part of this ${historyName} so far` : undefined}>
+                      <Change change={h.change} />
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        <p className="mt-3 text-[11px] text-slate-400">
+          {period.from ? "Highlighted rows overlap the report period. " : ""}
+          {historyRows.some((h) => h.partial) ? `The latest ${historyName} is not over yet, so its change is only so far.` : ""}
+        </p>
       </div>
     </div>
   );

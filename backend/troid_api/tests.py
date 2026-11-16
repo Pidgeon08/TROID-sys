@@ -16,10 +16,10 @@ from django.test import TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from . import bot_auth, mqtt_client, views
+from . import backup, bot_auth, mqtt_client, views
 from .models import (
-    AuditLog, Boat, CollectionArea, DeploymentSchedule, DetectionEvent, LetterFile, Notification, Operator, PriorityArea,
-    Request, StatusHistory, User,
+    AuditLog, Boat, CollectionArea, DeploymentSchedule, DetectionEvent, LetterFile, Notification, Operator,
+    Request, StatusHistory, SystemPause, User,
 )
 
 
@@ -592,35 +592,130 @@ class BackupRestoreTests(TestCase):
         self.client = APIClient()
         self.admin = make_user('admin')
         self.boat = Boat.objects.create(name='Robot', device_key='a' * 64)
-        self.req = Request.objects.create(request_id='REQ-0001', barangay='Poro', bags=12)
+        self.area = CollectionArea.objects.create(name='Poro Shore', barangay='Poro', status='approved', points=[[0, 0]] * 3)
+        self.req = Request.objects.create(request_id='REQ-0001', barangay='Poro', bags=12, collection_area=self.area)
         LetterFile.objects.create(request=self.req, data='bGV0dGVy')
+        AuditLog.objects.create(time='earlier', user='someone', role='Admin', action='Something before', details='',
+                                module='Test', ip='-')
 
-    def download(self):
-        response = self.client.get('/api/backup/', **session_header(self.admin))
+    def pause(self, kind, user=None):
+        return self.client.post('/api/maintenance/start/', {'kind': kind}, format='json', **session_header(user or self.admin))
+
+    def download(self, features=None):
+        self.assertEqual(self.pause('backup').status_code, 200)
+        response = self.client.post('/api/backup/', {'features': features or backup.FEATURE_KEYS}, format='json',
+                                    **session_header(self.admin))
         self.assertEqual(response.status_code, 200)
         return response.json()
 
-    def restore(self, payload, user=None):
-        return self.client.post('/api/backup/restore/', payload, format='json', **session_header(user or self.admin))
+    def restore(self, payload, features=None, user=None, preview=False):
+        self.pause('restore', user)
+        if features is None:
+            features = payload.get('features') or backup.FEATURE_KEYS if isinstance(payload, dict) else []
+        path = '/api/backup/restore/preview/' if preview else '/api/backup/restore/'
+        return self.client.post(path, {'backup': payload, 'features': features}, format='json',
+                                **session_header(user or self.admin))
 
-    def test_a_backup_has_every_table_but_no_sessions(self):
-        backup = self.download()
+    def actions(self):
+        return list(AuditLog.objects.order_by('pk').values_list('action', flat=True))
 
-        self.assertEqual(backup['format'], 'troid-backup')
-        self.assertEqual(backup['counts']['troid_api.request'], 1)
-        self.assertEqual(backup['counts']['troid_api.letterfile'], 1)
-        users = [r for r in backup['records'] if r['model'] == 'troid_api.user']
+    def test_every_table_belongs_to_one_feature_but_the_audit_log(self):
+        labels = [label for f in backup.FEATURES for label in f['models']]
+        self.assertEqual(len(labels), len(set(labels)))
+        self.assertEqual(set(labels), {m._meta.label_lower for m in backup.app_models()})
+        self.assertNotIn('troid_api.auditlog', labels)
+        for feature in backup.FEATURES:
+            self.assertTrue(set(feature['needs']) <= set(backup.FEATURE_KEYS))
+
+    def test_a_backup_has_the_chosen_features_and_what_they_need(self):
+        Notification.objects.create(recipient=self.admin, notif_type='approved', title='Hi')
+
+        data = self.download(['requests'])
+
+        self.assertEqual(data['format'], 'troid-backup')
+        self.assertEqual(data['features'], ['accounts', 'fleet', 'collection_areas', 'requests'])
+        self.assertEqual(data['counts']['troid_api.request'], 1)
+        self.assertEqual(data['counts']['troid_api.letterfile'], 1)
+        models = {r['model'] for r in data['records']}
+        self.assertNotIn('troid_api.notification', models)
+        self.assertNotIn('troid_api.auditlog', models)
+        users = [r for r in data['records'] if r['model'] == 'troid_api.user']
         self.assertTrue(all(r['fields']['session_token'] is None for r in users))
-        self.assertTrue(any(r['fields']['device_key'] == 'a' * 64 for r in backup['records'] if r['model'] == 'troid_api.boat'))
-        self.assertTrue(AuditLog.objects.filter(action='Database backup downloaded').exists())
+        self.assertTrue(any(r['fields']['device_key'] == 'a' * 64 for r in data['records'] if r['model'] == 'troid_api.boat'))
+
+    def test_the_backup_is_noted_in_the_audit_log_and_the_system_resumes(self):
+        self.download(['collection_areas'])
+
+        self.assertEqual(self.actions()[-3:], ['Backup started', 'Backup created', 'Backup finished'])
+        created = AuditLog.objects.get(action='Backup created')
+        self.assertIn('Collection areas', created.details)
+        self.assertIn('Not included: audit log', created.details)
+        self.assertFalse(SystemPause.objects.exists())
+        self.assertEqual(self.client.get('/api/maintenance/').json(), {'active': False})
+
+    def test_backing_up_and_restoring_need_the_system_paused(self):
+        self.assertEqual(self.client.post('/api/backup/', {'features': ['accounts']}, format='json',
+                                          **session_header(self.admin)).status_code, 409)
+        self.assertEqual(self.client.post('/api/backup/restore/', {'backup': {}, 'features': ['accounts']}, format='json',
+                                          **session_header(self.admin)).status_code, 409)
+        # A backup pause doesn't allow a restore.
+        self.pause('backup')
+        self.assertEqual(self.client.post('/api/backup/restore/', {'backup': {}, 'features': ['accounts']}, format='json',
+                                          **session_header(self.admin)).status_code, 409)
+
+    def test_while_paused_nobody_can_change_anything(self):
+        other = make_user('barangay')
+        self.pause('backup')
+
+        status_now = self.client.get('/api/maintenance/').json()
+        self.assertEqual((status_now['active'], status_now['kind'], status_now['started_by']), (True, 'backup', self.admin.name))
+        refused = self.client.post('/api/requests/', {}, format='json', **session_header(other))
+        self.assertEqual(refused.status_code, 503)
+        self.assertIn('paused', refused.json()['error'])
+        self.assertEqual(self.client.patch(f'/api/users/{other.pk}/', {'name': 'x'}, format='json',
+                                           **session_header(self.admin)).status_code, 503)
+        self.assertEqual(self.client.post('/api/login/', {'email': other.email, 'password': 'Test-password1'},
+                                          format='json').status_code, 503)
+        self.assertEqual(self.client.get('/api/requests/', **session_header(other)).status_code, 200)
+
+        self.client.post('/api/maintenance/end/', {}, format='json', **session_header(self.admin))
+
+        self.assertEqual(self.actions()[-2:], ['Backup started', 'Backup cancelled'])
+        self.assertEqual(self.client.post('/api/login/', {'email': other.email, 'password': 'Test-password1'},
+                                          format='json').status_code, 200)
+
+    def test_a_pause_lapses_when_the_admins_page_stops(self):
+        self.pause('restore')
+        SystemPause.objects.update(heartbeat_at=timezone.now() - timedelta(minutes=2))
+
+        self.assertEqual(self.client.get('/api/maintenance/').json(), {'active': False})
+        self.assertEqual(self.actions()[-1], 'Restore stopped')
+        self.assertFalse(SystemPause.objects.exists())
+
+    def test_the_heartbeat_keeps_the_pause(self):
+        self.pause('backup')
+        SystemPause.objects.update(heartbeat_at=timezone.now() - timedelta(seconds=50))
+
+        self.client.post('/api/maintenance/heartbeat/', {}, format='json', **session_header(self.admin))
+        SystemPause.objects.update(started_at=timezone.now())
+
+        self.assertTrue(self.client.get('/api/maintenance/').json()['active'])
+
+    def test_only_one_admin_at_a_time(self):
+        other = User.objects.create(name='Second Admin', email='second@example.com', password='Test-password1',
+                                    role='admin', status='active', session_token='second-admin')
+        self.pause('backup')
+
+        self.assertEqual(self.pause('restore', other).status_code, 409)
+        self.assertEqual(SystemPause.objects.get().user_id, self.admin.pk)
 
     def test_restore_brings_the_data_back(self):
-        backup = self.download()
+        data = self.download()
         self.req.delete()
         Boat.objects.create(name='Added after the backup')
         make_user('barangay')
 
-        response = self.restore(backup)
+        response = self.restore(data)
 
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json()['still_signed_in'])
@@ -629,56 +724,148 @@ class BackupRestoreTests(TestCase):
         self.assertEqual(list(Boat.objects.values_list('name', flat=True)), ['Robot'])
         self.assertFalse(User.objects.filter(role='barangay').exists())
         self.assertEqual(Request.objects.get().date_submitted, self.req.date_submitted)
-        # New rows still get fresh ids, and the restore itself is in the audit log.
+        # New rows still get fresh ids, and the restore is in the audit log.
         self.assertNotEqual(Boat.objects.create(name='New').pk, self.boat.pk)
-        self.assertTrue(AuditLog.objects.filter(action='Database restored').exists())
+        self.assertEqual(self.actions()[-3:], ['Restore started', 'Restore completed', 'Restore finished'])
+        self.assertFalse(SystemPause.objects.exists())
+        self.assertEqual(self.client.get('/api/requests/', **session_header(self.admin)).status_code, 200)
+
+    def test_restoring_one_feature_leaves_the_others_alone(self):
+        data = self.download(['collection_areas', 'schedules'])
+        CollectionArea.objects.create(name='Added later', barangay='Poro', points=[[0, 0]] * 3)
+        CollectionArea.objects.filter(pk=self.area.pk).update(name='Renamed later')
+        new_boat = Boat.objects.create(name='Added later too')
+        self.req.bags = 99
+        self.req.save()
+
+        response = self.restore(data, ['collection_areas'])
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['features'], ['collection_areas'])
+        self.assertEqual(list(CollectionArea.objects.values_list('name', flat=True)), ['Poro Shore'])
+        self.assertTrue(Boat.objects.filter(pk=new_boat.pk).exists())
+        self.req.refresh_from_db()
+        self.assertEqual((self.req.bags, self.req.collection_area_id), (99, self.area.pk))
+
+    def test_a_restore_needs_what_its_features_need(self):
+        data = self.download(['collection_areas'])
+
+        response = self.restore(data, ['requests'])
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('does not have', response.json()['error'])
+
+    def test_the_audit_log_is_never_restored_or_changed(self):
+        data = self.download()
+        before = list(AuditLog.objects.order_by('pk').values_list('pk', 'action'))
+
+        self.restore(data)
+
+        after = list(AuditLog.objects.order_by('pk').values_list('pk', 'action'))
+        self.assertEqual(after[:len(before)], before)
+        self.assertEqual([a for _, a in after[len(before):]], ['Restore started', 'Restore completed', 'Restore finished'])
+        self.assertIn('audit log was not changed', AuditLog.objects.get(action='Restore completed').details)
+
+    def test_preview_shows_the_changes_and_changes_nothing(self):
+        data = self.download()
+        Boat.objects.create(name='Added later')
+        Request.objects.filter(pk=self.req.pk).update(bags=1)
+
+        response = self.restore(data, ['fleet'], preview=True)
+
+        self.assertEqual(response.status_code, 200)
+        boats = response.json()['changes']['troid_api.boat']
+        self.assertEqual((boats['in_backup'], boats['updated'], boats['removed'], boats['added']), (1, 1, 1, 0))
+        self.assertEqual(response.json()['features'], ['accounts', 'fleet'])
+        self.assertEqual(Boat.objects.count(), 2)
+        self.assertEqual(Request.objects.get().bags, 1)
+        self.assertTrue(SystemPause.objects.exists())
+
+    @override_settings(API_AUTH_ENFORCED=True)
+    def test_restoring_accounts_signs_out_everyone_else(self):
+        other = make_user('barangay')
+        data = self.download()
+
+        self.restore(data, ['accounts'])
+
+        self.assertEqual(self.client.get('/api/requests/', **session_header(other)).status_code, 401)
         self.assertEqual(self.client.get('/api/requests/', **session_header(self.admin)).status_code, 200)
 
     @override_settings(API_AUTH_ENFORCED=True)
-    def test_restore_signs_out_everyone_else(self):
+    def test_restoring_other_features_keeps_everyone_signed_in(self):
         other = make_user('barangay')
-        backup = self.download()
+        data = self.download(['collection_areas'])
 
-        self.restore(backup)
+        self.restore(data, ['collection_areas'])
 
-        self.assertEqual(self.client.get('/api/requests/', **session_header(other)).status_code, 401)
+        self.assertEqual(self.client.get('/api/requests/', **session_header(other)).status_code, 200)
 
     def test_a_backup_bigger_than_the_default_upload_limit_restores(self):
         LetterFile.objects.filter(request=self.req).update(data='A' * 8_000_000)
-        backup = self.download()
+        data = self.download(['requests'])
         LetterFile.objects.all().delete()
 
-        response = self.restore(backup)
+        response = self.restore(data)
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(LetterFile.objects.get().data), 8_000_000)
 
+    def test_version_1_backups_still_restore_without_their_audit_log(self):
+        data = self.download()
+        old = {key: value for key, value in data.items() if key != 'features'}
+        old['version'] = 1
+        old['records'] = data['records'] + [{'model': 'troid_api.auditlog', 'pk': 999, 'fields': {
+            'time': 'old', 'user': 'old', 'role': 'Admin', 'action': 'From the old file', 'details': '',
+            'module': 'Old', 'ip': '-', 'status': 'success'}}]
+        self.req.delete()
+
+        response = self.restore(old, ['requests'])
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(Request.objects.filter(request_id='REQ-0001').exists())
+        self.assertFalse(AuditLog.objects.filter(action='From the old file').exists())
+
     def test_bad_files_change_nothing(self):
-        backup = self.download()
-        no_admin = {**backup, 'records': [r for r in backup['records'] if r['model'] != 'troid_api.user']}
-        foreign = {**backup, 'records': backup['records'] + [{'model': 'auth.user', 'pk': 1, 'fields': {}}]}
-        newer = {**backup, 'migration': '9999_future'}
-        damaged = {**backup, 'records': backup['records'] + [{'model': 'troid_api.boat', 'pk': 99, 'fields': {'nope': 1}}]}
+        data = self.download()
+        no_admin = {**data, 'records': [r for r in data['records'] if r['model'] != 'troid_api.user']}
+        foreign = {**data, 'records': data['records'] + [{'model': 'auth.user', 'pk': 1, 'fields': {}}]}
+        newer = {**data, 'migration': '9999_future'}
+        damaged = {**data, 'records': data['records'] + [{'model': 'troid_api.boat', 'pk': 99, 'fields': {'nope': 1}}]}
+        unlabelled = {key: value for key, value in data.items() if key != 'features'}
         Boat.objects.create(name='Still here')
 
         for name, payload in [('not a backup', {'hello': 1}), ('no admin', no_admin), ('foreign', foreign),
-                              ('newer', newer), ('damaged', damaged)]:
+                              ('newer', newer), ('damaged', damaged), ('unlabelled', unlabelled)]:
             with self.subTest(name):
-                response = self.restore(payload)
+                response = self.restore(payload, backup.FEATURE_KEYS)
                 self.assertEqual(response.status_code, 400)
                 self.assertIn('error', response.json())
         self.assertTrue(Boat.objects.filter(name='Still here').exists())
 
+    def test_the_features_list_counts_what_each_holds(self):
+        response = self.client.get('/api/backup/features/', **session_header(self.admin))
+
+        self.assertEqual(response.status_code, 200)
+        features = {f['key']: f for f in response.json()['features']}
+        self.assertEqual(features['requests']['needs'], ['fleet', 'collection_areas'])
+        self.assertIn('detections', features['requests']['needed_by'])
+        parts = {p['model']: p['count'] for p in features['requests']['parts']}
+        self.assertEqual((parts['troid_api.request'], parts['troid_api.letterfile']), (1, 1))
+        self.assertIn('Audit log', response.json()['not_included'])
+        self.assertEqual(set(backup.RECORD_NAMES), {m._meta.label_lower for m in backup.app_models()})
+
     @override_settings(API_AUTH_ENFORCED=False)
     def test_admins_only_even_while_report_only(self):
-        backup = self.download()
-        self.assertEqual(self.client.get('/api/backup/').status_code, 401)
-        self.assertEqual(self.client.post('/api/backup/restore/', backup, format='json').status_code, 401)
+        self.assertEqual(self.client.post('/api/maintenance/start/', {'kind': 'backup'}, format='json').status_code, 401)
+        self.assertEqual(self.client.get('/api/backup/features/').status_code, 401)
         for role in ('mayorsoffice', 'barangay', 'ngo', 'operator'):
             with self.subTest(role=role):
                 user = make_user(role)
-                self.assertEqual(self.client.get('/api/backup/', **session_header(user)).status_code, 403)
-                self.assertEqual(self.restore(backup, user).status_code, 403)
+                self.assertEqual(self.pause('backup', user).status_code, 403)
+                self.assertEqual(self.client.get('/api/backup/features/', **session_header(user)).status_code, 403)
+                self.assertEqual(self.client.post('/api/backup/', {'features': ['accounts']}, format='json',
+                                                  **session_header(user)).status_code, 403)
+        self.assertFalse(SystemPause.objects.exists())
 
 
 class HealthCheckTests(TestCase):
@@ -892,18 +1079,6 @@ class HeatmapCoverageDataTests(TestCase):
         user = make_user('ngo')
 
         self.assertEqual(self.client.get('/api/heatmap/', **session_header(user)).json(), [])
-
-    def test_barangay_accounts_see_only_their_own_priority_flag(self):
-        PriorityArea.objects.create(barangay='Poro', total_bags=40)
-        PriorityArea.objects.create(barangay='Catbangen', total_bags=60)
-        user = make_user('barangay')
-        User.objects.filter(pk=user.pk).update(location='Poro')
-
-        mine = self.client.get('/api/priority-areas/', **session_header(user)).json()
-        everyone = self.client.get('/api/priority-areas/', **session_header(self.admin)).json()
-
-        self.assertEqual([p['barangay'] for p in mine], ['Poro'])
-        self.assertEqual(len(everyone), 2)
 
     def test_heatmap_points_name_their_request(self):
         self.detect(16.6166, 120.2866, timezone.now(), request=self.req)
@@ -1710,6 +1885,24 @@ class MqttHandlerTests(TestCase):
         self.assertTrue(self.boat.is_active)
         self.assertEqual(self.boat.battery_level, 76)
         broadcast.assert_called_once()
+
+    def test_messages_wait_while_the_system_is_paused(self, broadcast):
+        now = timezone.now()
+        SystemPause.objects.create(pk=1, kind='backup', user_id=1, user_name='Admin', user_email='a@example.com',
+                                   started_at=now, heartbeat_at=now)
+        self.receive(*signed_message(self.boat, 'detection', {'is_verified': True, 'trash_count': 3,
+                                                               'latitude': 16.6, 'longitude': 120.3}))
+        self.receive(*signed_message(self.boat, 'heartbeat', {'is_active': True, 'battery': 50}))
+
+        self.assertEqual(DetectionEvent.objects.count(), 0)
+        self.assertFalse(self.boat.is_online)
+
+        SystemPause.objects.all().delete()
+        self.receive(*signed_message(self.boat, 'heartbeat', {'is_active': True, 'battery': 60}))
+
+        self.assertEqual(DetectionEvent.objects.get().trash_count, 3)
+        self.assertEqual(self.boat.battery_level, 60)
+        self.assertEqual(mqtt_client._held, [])
 
     def test_unsigned_messages_change_nothing(self, broadcast):
         topic = f'troid/bot/{self.boat.id}/'
@@ -2535,3 +2728,122 @@ class MergeRequestTests(TestCase):
         self.ngo_req.refresh_from_db()
         self.assertEqual(self.ngo_req.status, 'pending_mayor_approval')
         self.assertIsNone(self.ngo_req.merged_into)
+
+
+class PriorityAreaTests(TestCase):
+    """A collection area is a priority when its average bags per cleanup over the last 30 days
+    is higher than over the 30 days before."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.admin = make_user('admin')
+        self.poro = CollectionArea.objects.create(name='Poro Shore', barangay='Poro', status='approved', points=[[0, 0]] * 3)
+        self.catbangen = CollectionArea.objects.create(name='Catbangen River', barangay='Catbangen', status='approved',
+                                                       points=[[0, 0]] * 3)
+
+    def cleanup(self, area, bags, days_ago, **fields):
+        fields.setdefault('status', 'completed')
+        req = Request.objects.create(barangay=area.barangay, collection_area=area, bags=bags, **fields)
+        Request.objects.filter(pk=req.pk).update(session_completed_at=timezone.now() - timedelta(days=days_ago))
+        return req
+
+    def areas(self, user=None, **params):
+        response = self.client.get('/api/priority-areas/', params, **session_header(user or self.admin))
+        self.assertEqual(response.status_code, 200)
+        return {a['collection_area']['name']: a for a in response.json()}
+
+    def test_more_bags_per_cleanup_than_last_month_is_a_priority(self):
+        self.cleanup(self.poro, 10, 40)
+        self.cleanup(self.poro, 6, 45)   # last month: 8 a cleanup
+        self.cleanup(self.poro, 12, 5)
+        self.cleanup(self.poro, 9, 10)   # lately: 10.5 a cleanup
+
+        poro = self.areas()['Poro Shore']
+
+        self.assertTrue(poro['is_priority'])
+        self.assertEqual(poro['status'], 'priority')
+        self.assertEqual(poro['current'], {'cleanups': 2, 'bags': 21, 'average': 10.5})
+        self.assertEqual(poro['previous'], {'cleanups': 2, 'bags': 16, 'average': 8.0})
+        self.assertEqual(poro['change_pct'], 31.2)
+
+    def test_fewer_or_the_same_bags_per_cleanup_is_fine(self):
+        self.cleanup(self.poro, 10, 40)
+        self.cleanup(self.poro, 10, 5)
+        self.cleanup(self.catbangen, 20, 40)
+        self.cleanup(self.catbangen, 8, 5)
+        self.cleanup(self.catbangen, 8, 6)
+
+        areas = self.areas()
+
+        self.assertEqual(areas['Poro Shore']['status'], 'steady')
+        self.assertEqual(areas['Catbangen River']['status'], 'steady')
+        self.assertFalse(any(a['is_priority'] for a in areas.values()))
+
+    def test_a_rise_in_cleanups_alone_is_not_a_priority(self):
+        self.cleanup(self.poro, 10, 40)
+        for days_ago in (2, 4, 6, 8):
+            self.cleanup(self.poro, 10, days_ago)
+
+        self.assertEqual(self.areas()['Poro Shore']['status'], 'steady')
+
+    def test_without_both_months_there_is_nothing_to_compare(self):
+        self.cleanup(self.poro, 30, 3)
+        self.cleanup(self.catbangen, 30, 45)
+
+        areas = self.areas()
+
+        self.assertEqual(areas['Poro Shore']['status'], 'no_baseline')
+        self.assertEqual(areas['Catbangen River']['status'], 'no_recent')
+        self.assertIsNone(areas['Catbangen River']['current']['average'])
+        self.assertFalse(any(a['is_priority'] for a in areas.values()))
+
+    def test_only_finished_cleanups_count(self):
+        self.cleanup(self.poro, 5, 40)
+        self.cleanup(self.poro, 5, 5)
+        self.cleanup(self.poro, 50, 5, archived=True)
+        self.cleanup(self.poro, 50, 5, status='merged')
+        self.cleanup(self.poro, 50, 70)  # older than both months
+        Request.objects.create(barangay='Poro', collection_area=self.poro, status='approved', bags=None)
+
+        poro = self.areas()['Poro Shore']
+
+        self.assertEqual((poro['current']['cleanups'], poro['previous']['cleanups']), (1, 1))
+        self.assertEqual(poro['status'], 'steady')
+
+    def test_as_of_answers_for_an_earlier_day(self):
+        self.cleanup(self.poro, 4, 75)
+        self.cleanup(self.poro, 12, 50)
+        self.cleanup(self.poro, 2, 5)
+        as_of = (timezone.now() - timedelta(days=40)).astimezone(views.APP_TIMEZONE).date().isoformat()
+
+        self.assertEqual(self.areas()['Poro Shore']['status'], 'steady')
+        self.assertEqual(self.areas(as_of=as_of)['Poro Shore']['status'], 'priority')
+        self.assertEqual(self.client.get('/api/priority-areas/', {'as_of': 'soon'}, **session_header(self.admin)).status_code, 400)
+
+    def test_barangay_accounts_see_only_their_own_areas(self):
+        self.cleanup(self.poro, 5, 40)
+        self.cleanup(self.poro, 9, 5)
+        self.cleanup(self.catbangen, 5, 40)
+        self.cleanup(self.catbangen, 9, 5)
+        user = make_user('barangay')
+        User.objects.filter(pk=user.pk).update(location='Poro')
+
+        self.assertEqual(list(self.areas(user)), ['Poro Shore'])
+        self.assertEqual(set(self.areas()), {'Poro Shore', 'Catbangen River'})
+        self.assertEqual(list(self.areas(barangay='Catbangen')), ['Catbangen River'])
+        self.assertEqual(self.areas(make_user('ngo')), {})
+
+    def test_filing_a_trash_report_no_longer_books_a_follow_up(self):
+        boat = Boat.objects.create(name='Bot')
+        for days_ago in (35, 40):
+            self.cleanup(self.poro, 5, days_ago)
+        req = Request.objects.create(barangay='Poro', collection_area=self.poro, status='approved', bot_id=boat)
+
+        response = self.client.post(f'/api/requests/{req.request_id}/submit_trash_report/', {
+            'bags': 90, 'weight_kg': 300, 'non_usable_kg': 100, 'recyclable_kg': 200,
+            'trash_categories': {'Plastic': 90},
+        }, format='json', **session_header(self.admin))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(DeploymentSchedule.objects.exists())
+        self.assertTrue(self.areas()['Poro Shore']['is_priority'])

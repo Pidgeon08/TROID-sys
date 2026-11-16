@@ -120,7 +120,12 @@ export const api = {
   updateDeploymentSchedule: (id, data) => api.put(`/deployment-schedules/${id}/`, data),
   deleteDeploymentSchedule: (id) => api.delete(`/deployment-schedules/${id}/`),
 
-  priorityAreas: () => api.get('/priority-areas/'),
+  // Each collection area with recent cleanups and whether it is a priority (more bags per
+  // cleanup over the last 30 days than the 30 before). params: { as_of: 'YYYY-MM-DD', barangay }.
+  priorityAreas: (params = {}) => {
+    const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v));
+    return api.get(`/priority-areas/${qs.toString() ? `?${qs}` : ''}`);
+  },
 
   landfillRecords: () => api.get('/landfill-records/'),
 
@@ -175,9 +180,22 @@ export const api = {
     return api.get(`/heatmap/${q ? `?${q}` : ''}`);
   },
 
-  // A restore replaces the whole database; the body is the backup file's text as-is.
-  downloadBackup: () => api.get('/backup/'),
-  restoreBackup: (backupText) => request('/backup/restore/', { method: 'POST', body: backupText }),
+  // Backup & Restore. The system is paused for everyone else while an admin backs up or
+  // restores: startPause first, keep it alive with pauseHeartbeat, and endPause to cancel.
+  // Making the backup or restoring ends the pause on the server.
+  pauseStatus: () => request('/maintenance/', { skipUnauthorizedEvent: true }),
+  startPause: (kind) => api.post('/maintenance/start/', { kind }),
+  pauseHeartbeat: () => api.post('/maintenance/heartbeat/', {}),
+  endPause: () => api.post('/maintenance/end/', {}),
+  backupFeatures: () => api.get('/backup/features/'),
+  createBackup: (features) => api.post('/backup/', { features }),
+  // `backupText` is the backup file as read, so it isn't parsed and re-encoded on the way.
+  previewRestore: (backupText, features) => request('/backup/restore/preview/', {
+    method: 'POST', body: `{"features":${JSON.stringify(features)},"backup":${backupText}}`,
+  }),
+  restoreBackup: (backupText, features) => request('/backup/restore/', {
+    method: 'POST', body: `{"features":${JSON.stringify(features)},"backup":${backupText}}`,
+  }),
 
   login: (data) => api.post('/login/', data),
   logout: () => request('/logout/', { method: 'POST', skipUnauthorizedEvent: true }),

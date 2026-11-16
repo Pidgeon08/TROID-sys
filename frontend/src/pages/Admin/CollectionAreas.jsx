@@ -19,6 +19,8 @@ import {
   ChevronDown,
   RotateCcw,
   ClipboardList,
+  Maximize2,
+  AlertTriangle,
 } from "lucide-react";
 import api from "../../services/api";
 import { logAudit } from "../../services/auditLog";
@@ -39,6 +41,11 @@ import { SummaryCard } from "../../components/ui/SummaryCard";
 import { Card } from "../../components/ui/Card";
 import { EmptyState } from "../../components/ui/EmptyState";
 import AreaRequestsModal from "./AreaRequestsModal";
+import AreaFilters from "../../components/AreaFilters";
+import { useUrlFilters } from "../../hooks/useUrlFilters";
+import {
+  EMPTY_AREA_FILTERS, areaBarangays, areaFiltersFromParams, areaFiltersToParams, filterAreas, sortAreas, statusCounts,
+} from "../../utils/areaFilters";
 
 const DEFAULT_CENTER = [16.6195, 120.314];
 const DEFAULT_ZOOM = 14;
@@ -46,9 +53,7 @@ const AREA_COLOR = "#1b4de4";
 // The area's old shape, shown for reference while it is redrawn.
 const OLD_SHAPE_COLOR = "#64748b";
 
-// "Archived" is how CENRO sees the declined status (still stored as "declined").
-const TABS = ["All", "Pending", "Approved", "Archived"];
-const TAB_STATUS = { Pending: "pending", Approved: "approved", Archived: "declined" };
+const FILTER_OPTIONS = { fromParams: areaFiltersFromParams, toParams: areaFiltersToParams, empty: EMPTY_AREA_FILTERS };
 
 const STATUS_META = {
   pending: { label: "Pending Approval", cls: "bg-amber-50 text-amber-700", icon: Clock },
@@ -82,6 +87,8 @@ function mapArea(raw) {
     dateSubmitted: formatWhen(raw.date_submitted),
     updatedBy: raw.updated_by || "",
     dateUpdated: formatWhen(raw.date_updated),
+    submittedAt: raw.date_submitted || "",
+    updatedAt: raw.date_updated || "",
     requestCount: raw.request_count || 0,
     ...areaDetailsFromApi(raw),
   };
@@ -119,6 +126,19 @@ function FlyTo({ position, zoom }) {
   return null;
 }
 
+/** Zooms the map to fit the shown areas each time `trigger` changes (0 does nothing). */
+function FitAreas({ areas, trigger }) {
+  const map = useMap();
+  useEffect(() => {
+    if (!trigger) return;
+    const points = areas.flatMap((a) => a.points);
+    if (points.length) map.fitBounds(points, { padding: [30, 30], maxZoom: 16 });
+    // Only a new trigger should move the map, not every change to the list.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [map, trigger]);
+  return null;
+}
+
 function AreaShape({ area, color, weight = 3, opacity = 0.9, dashed = false }) {
   if (area.points.length < (area.closed ? 3 : 2)) return null;
   const pathOptions = { color, weight, opacity, ...(dashed ? { dashArray: "6 6" } : {}) };
@@ -129,9 +149,22 @@ function AreaShape({ area, color, weight = 3, opacity = 0.9, dashed = false }) {
   );
 }
 
+/** "22.1 bags in the last 30 days, up from 18.5 (+19.5%)": the figures behind the priority flag. */
+function priorityText(p) {
+  if (!p) return "";
+  const avg = (n) => `${n} bag${n === 1 ? "" : "s"}`;
+  switch (p.status) {
+    case "priority": return `${avg(p.current.average)} in the last ${p.window_days} days, up from ${avg(p.previous.average)} (+${p.change_pct}%). Priority area.`;
+    case "steady": return `${avg(p.current.average)} in the last ${p.window_days} days, down or level from ${avg(p.previous.average)}.`;
+    case "no_baseline": return `${avg(p.current.average)} in the last ${p.window_days} days; no cleanups the month before to compare with.`;
+    default: return `No cleanups in the last ${p.window_days} days (${avg(p.previous.average)} the month before).`;
+  }
+}
+
 /** What CENRO knows about an area, shown under it in the list. */
 function AreaDetails({ area }) {
   const rows = [
+    ["Bags per cleanup", priorityText(area.priority)],
     ["Water body", [waterBodyLabel(area.waterBodyType), area.waterBodyName].filter(Boolean).join(" · ")],
     ["Hazards", area.hazards],
     ["Size", shapeSize(area)],
@@ -154,7 +187,7 @@ function AreaDetails({ area }) {
         {rows.map(([label, value]) => (
           <Fragment key={label}>
             <dt className="text-slate-400">{label}</dt>
-            <dd className={`break-words whitespace-pre-line font-medium ${label === "Hazards" ? "text-amber-700" : "text-slate-700"}`}>{value}</dd>
+            <dd className={`break-words whitespace-pre-line font-medium ${label === "Hazards" || (label === "Bags per cleanup" && area.priority?.is_priority) ? "text-amber-700" : "text-slate-700"}`}>{value}</dd>
           </Fragment>
         ))}
       </dl>
@@ -168,8 +201,11 @@ function AreaDetails({ area }) {
 export default function CollectionAreas() {
   const { currentUser } = useOutletContext() || {};
   const [areas, setAreas] = useState([]);
+  // Whether each area is a priority (by area ID), from /api/priority-areas/.
+  const [priorityById, setPriorityById] = useState({});
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState("All");
+  const { filters, update: updateFilters, clear: clearFilters, reset: resetFilters } = useUrlFilters(FILTER_OPTIONS);
+  const [fitTrigger, setFitTrigger] = useState(0);
   const [activeId, setActiveId] = useState(null);
   const [flyTo, setFlyTo] = useState(null);
   const [busyId, setBusyId] = useState(null);
@@ -191,6 +227,12 @@ export default function CollectionAreas() {
       .then((data) => { if (!cancelled) setAreas((data || []).map(mapArea)); })
       .catch((err) => console.error("Failed to load collection areas:", err))
       .finally(() => { if (!cancelled) setLoading(false); });
+    api.priorityAreas()
+      .then((data) => {
+        if (cancelled || !Array.isArray(data)) return;
+        setPriorityById(Object.fromEntries(data.map((p) => [p.collection_area.area_id, p])));
+      })
+      .catch((err) => console.error("Failed to load priority areas:", err));
     return () => { cancelled = true; };
   }, []);
 
@@ -201,10 +243,13 @@ export default function CollectionAreas() {
     declined: areas.filter((a) => a.status === "declined").length,
   }), [areas]);
 
-  const filtered = useMemo(() => {
-    if (activeTab === "All") return areas;
-    return areas.filter((a) => a.status === TAB_STATUS[activeTab]);
-  }, [areas, activeTab]);
+  const listed = useMemo(() => areas.map((a) => ({ ...a, priority: priorityById[a.id] || null })), [areas, priorityById]);
+  const filtered = useMemo(() => sortAreas(filterAreas(listed, filters), filters.sort), [listed, filters]);
+  const tabCounts = useMemo(() => statusCounts(listed, filters), [listed, filters]);
+  const barangayOptions = useMemo(() => areaBarangays(areas), [areas]);
+  const filtersActive = filtered.length !== areas.length;
+  // The selected area may be hidden by a filter; then nothing is highlighted on the map.
+  const highlightedId = filtered.some((a) => a.id === activeId) ? activeId : null;
 
   const editing = mode === "edit" ? editTarget : null;
   const barangayChanged = Boolean(editing && form.barangay !== editing.barangay);
@@ -339,7 +384,8 @@ export default function CollectionAreas() {
       } else {
         const created = mapArea(await api.createCollectionArea({ ...body, submitted_by: currentUser?.name || "CENRO" }));
         setAreas((prev) => [created, ...prev]);
-        setActiveTab("Approved");
+        // Show the new area: only approved ones, with no other filter that could hide it.
+        resetFilters({ status: "approved" });
         setActiveId(created.id);
         setFlyTo(centroid(created.points));
         logAudit({
@@ -621,25 +667,24 @@ export default function CollectionAreas() {
             </div>
           </Card>
         ) : (
-        <Card className="!p-0 overflow-hidden">
-          <div className="flex items-center gap-4 px-5 border-b border-slate-100 overflow-x-auto">
-            {TABS.map((tab) => (
-              <button
-                key={tab}
-                onClick={() => setActiveTab(tab)}
-                className={`relative py-3.5 text-sm font-medium transition-colors whitespace-nowrap ${
-                  activeTab === tab ? "text-blue-600" : "text-slate-500 hover:text-slate-700"
-                }`}
-              >
-                {tab}
-                {activeTab === tab && <span className="absolute left-0 right-0 -bottom-px h-[2px] bg-blue-600 rounded-full" />}
-              </button>
-            ))}
-          </div>
-          <div className="max-h-[640px] overflow-y-auto divide-y divide-slate-50">
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)]">
+          <AreaFilters
+            filters={filters}
+            onChange={updateFilters}
+            onClear={clearFilters}
+            barangays={barangayOptions}
+            total={areas.length}
+            shown={filtered.length}
+            counts={tabCounts}
+          />
+          <div className="max-h-[560px] overflow-y-auto divide-y divide-slate-50 rounded-b-2xl">
             {filtered.length === 0 && (
               <div className="p-5">
-                <EmptyState title="No areas found." subtitle="Submissions from barangays will appear here." />
+                {areas.length === 0 ? (
+                  <EmptyState title="No areas yet." subtitle="Submissions from barangays will appear here." />
+                ) : (
+                  <EmptyState title="No areas match these filters." subtitle="Change or clear the filters to see more areas." />
+                )}
               </div>
             )}
             {filtered.map((a) => {
@@ -653,6 +698,14 @@ export default function CollectionAreas() {
                       <p className="flex min-w-0 items-center gap-2 text-sm font-semibold text-slate-800">
                         <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: a.color }} />
                         <span className="truncate">{a.name}</span>
+                        {a.priority?.is_priority && (
+                          <span
+                            className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700"
+                            title="More bags per cleanup over the last 30 days than the 30 before"
+                          >
+                            <AlertTriangle className="h-3 w-3" /> Priority
+                          </span>
+                        )}
                       </p>
                       <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${meta.cls}`}>
                         <StatusIcon className="h-3 w-3" /> {meta.label}
@@ -714,7 +767,7 @@ export default function CollectionAreas() {
               );
             })}
           </div>
-        </Card>
+        </div>
         )}
 
         {/* Map */}
@@ -726,14 +779,15 @@ export default function CollectionAreas() {
                 attribution={TILE_ATTRIBUTION}
               />
               {flyTo && <FlyTo position={flyTo} />}
+              <FitAreas areas={filtered} trigger={fitTrigger} />
               {filtered.map((a) =>
                 a.id === editing?.id ? null : (
                   <AreaShape
                     key={a.id}
                     area={a}
                     color={a.color || AREA_COLOR}
-                    weight={activeId === a.id ? 5 : 3}
-                    opacity={activeId && activeId !== a.id ? 0.4 : 0.9}
+                    weight={highlightedId === a.id ? 5 : 3}
+                    opacity={highlightedId && highlightedId !== a.id ? 0.4 : 0.9}
                   />
                 )
               )}
@@ -750,7 +804,7 @@ export default function CollectionAreas() {
             <span className="inline-flex flex-wrap items-center gap-x-4 gap-y-1">
               <span className="inline-flex items-center gap-1.5">
                 <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: AREA_COLOR }} />
-                Collection Area
+                {filtersActive ? `Showing ${filtered.length} of ${areas.length} areas` : "Collection Area"}
               </span>
               {editing && reshaping && (
                 <span className="inline-flex items-center gap-1.5">
@@ -759,6 +813,15 @@ export default function CollectionAreas() {
                 </span>
               )}
             </span>
+            {!draft.drawing && !mode && filtered.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setFitTrigger((n) => n + 1)}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 font-medium text-slate-600 hover:bg-slate-50"
+              >
+                <Maximize2 className="h-3.5 w-3.5" /> {filtersActive ? "Zoom to shown areas" : "Zoom to all areas"}
+              </button>
+            )}
             {draft.drawing ? (
               <button
                 type="button"

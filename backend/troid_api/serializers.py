@@ -6,7 +6,7 @@ import re
 from django.utils import timezone
 from rest_framework import serializers
 from . import boundaries
-from .models import Boat, DetectionEvent, User, Operator, Request, StatusHistory, Photo, DeploymentSchedule, PriorityArea, LandfillRecord, RecyclingRecord, SegregationRecord, AuditLog, HeatmapData, CollectionArea, Notification
+from .models import Boat, DetectionEvent, User, Operator, Request, StatusHistory, Photo, DeploymentSchedule, LandfillRecord, RecyclingRecord, SegregationRecord, AuditLog, HeatmapData, CollectionArea, Notification
 
 LETTER_MAX_BYTES = 5 * 1024 * 1024
 # Extension -> (content type, the bytes a real file of that type starts with).
@@ -267,16 +267,6 @@ class DeploymentScheduleSerializer(serializers.ModelSerializer):
     class Meta:
         model = DeploymentSchedule
         fields = ['id', 'bot', 'day', 'status', 'label', 'zone', 'request_id', 'cleanup_type']
-
-class PriorityAreaSerializer(serializers.ModelSerializer):
-    bot_name = serializers.SerializerMethodField()
-
-    def get_bot_name(self, obj):
-        return obj.bot.name if obj.bot else None
-
-    class Meta:
-        model = PriorityArea
-        fields = ['id', 'barangay', 'total_bags', 'window_days', 'identified_at', 'deployment_schedule', 'bot', 'bot_name', 'scheduled_day']
 
 class LandfillRecordSerializer(serializers.ModelSerializer):
     class Meta:

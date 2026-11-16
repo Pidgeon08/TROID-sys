@@ -1,55 +1,16 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUpDown, CalendarDays, Check, ChevronDown, ListFilter, X } from "lucide-react";
+import { useMemo } from "react";
+import { ArrowUpDown, CalendarDays, Check, ListFilter, X } from "lucide-react";
 import { SearchBar } from "./ui/SearchBar";
+import { Popover } from "./ui/Popover";
+import { FILTER_ACTIVE, FILTER_CONTROL, FILTER_IDLE } from "./ui/filterStyles";
 import {
   CLEANUP_TYPES, DATE_FIELDS, DATE_PRESETS, SCHEDULE_OPTIONS, SORT_OPTIONS,
   activeFilterChips, describeDateFilter, filterOptions, filterRequests,
 } from "../utils/requestFilters";
 
-const CONTROL = "rounded-lg border bg-white px-3 py-2 text-sm outline-none transition-colors focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30";
-const IDLE = "border-slate-200 text-slate-600 hover:bg-slate-50";
-const ACTIVE = "border-blue-300 bg-blue-50 text-blue-700";
-
-function usePopover() {
-  const [open, setOpen] = useState(false);
-  const ref = useRef(null);
-  useEffect(() => {
-    if (!open) return undefined;
-    const onClick = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
-    const onKey = (e) => { if (e.key === "Escape") setOpen(false); };
-    document.addEventListener("mousedown", onClick);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onClick);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
-  return { open, setOpen, ref };
-}
-
-function Popover({ label, icon: Icon, active, badge, children, width = "w-72" }) {
-  const { open, setOpen, ref } = usePopover();
-  return (
-    <div className="relative" ref={ref}>
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        className={`${CONTROL} ${active ? ACTIVE : IDLE} flex items-center gap-2 whitespace-nowrap`}
-      >
-        <Icon size={15} />
-        <span className="max-w-[220px] truncate">{label}</span>
-        {badge ? <span className="rounded-full bg-blue-600 px-1.5 text-[10px] font-semibold leading-4 text-white">{badge}</span> : null}
-        <ChevronDown size={14} className={`transition-transform ${open ? "rotate-180" : ""}`} />
-      </button>
-      {open && (
-        <div className={`absolute left-0 z-30 mt-1.5 ${width} max-w-[calc(100vw-2rem)] rounded-xl border border-slate-200 bg-white p-3 shadow-lg`}>
-          {children}
-        </div>
-      )}
-    </div>
-  );
-}
+const CONTROL = FILTER_CONTROL;
+const IDLE = FILTER_IDLE;
+const ACTIVE = FILTER_ACTIVE;
 
 function StatusFilter({ filters, onChange, statuses, counts }) {
   const selected = filters.status;

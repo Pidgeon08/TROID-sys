@@ -363,23 +363,6 @@ class DeploymentSchedule(models.Model):
     def __str__(self):
         return f"{self.bot.name} - {self.day}"
 
-class PriorityArea(models.Model):
-    """Auto-identified when a barangay's recent trash reports cross a volume threshold —
-    see check_and_schedule_priority_followup(). Records the follow-up DeploymentSchedule
-    entry created for it (if a bot was available) so it can be audited/tested."""
-    barangay = models.CharField(max_length=100)
-    total_bags = models.IntegerField()
-    window_days = models.IntegerField(default=30)
-    identified_at = models.DateTimeField(auto_now_add=True)
-    deployment_schedule = models.ForeignKey(
-        DeploymentSchedule, on_delete=models.SET_NULL, null=True, blank=True, related_name='priority_areas'
-    )
-    bot = models.ForeignKey(Boat, on_delete=models.SET_NULL, null=True, blank=True)
-    scheduled_day = models.CharField(max_length=20, blank=True)
-
-    def __str__(self):
-        return f"{self.barangay} - {self.total_bags} bags"
-
 class LandfillRecord(models.Model):
     record_id = models.CharField(max_length=20, unique=True)
     barangay = models.CharField(max_length=100)
@@ -433,7 +416,7 @@ class AuditLog(models.Model):
     user = models.CharField(max_length=100)
     role = models.CharField(max_length=50)
     action = models.CharField(max_length=100)
-    details = models.CharField(max_length=200)
+    details = models.CharField(max_length=500)
     module = models.CharField(max_length=50)
     ip = models.CharField(max_length=20)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='success')
@@ -496,3 +479,24 @@ class HeatmapData(models.Model):
 
     def __str__(self):
         return f"{self.latitude}, {self.longitude}"
+
+
+class SystemPause(models.Model):
+    """While this (single) row exists, the system is paused for a backup or restore: every
+    change from anyone else is refused, and the other pages show that the system is paused.
+    The admin's page keeps it alive; it lapses if that page stops (see maintenance.py).
+    It is never part of a backup, and a restore leaves it alone."""
+    KIND_CHOICES = [
+        ('backup', 'Backup'),
+        ('restore', 'Restore'),
+    ]
+    kind = models.CharField(max_length=20, choices=KIND_CHOICES)
+    # Not a ForeignKey: a restore may replace the accounts while the pause lasts.
+    user_id = models.IntegerField()
+    user_name = models.CharField(max_length=100)
+    user_email = models.CharField(max_length=254)
+    started_at = models.DateTimeField()
+    heartbeat_at = models.DateTimeField()
+
+    def __str__(self):
+        return f"{self.get_kind_display()} by {self.user_name}"

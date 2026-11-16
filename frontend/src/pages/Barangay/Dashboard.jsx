@@ -6,6 +6,7 @@ import { AlertTriangle, MapPin, Ship, Trash2 } from "lucide-react";
 import api from "../../services/api";
 import MonthSparkline from "../../components/MonthSparkline";
 import HotspotsCard from "../../components/HotspotsCard";
+import PriorityAreaList from "../../components/PriorityAreaList";
 import { canonicalBarangay } from "../../utils/barangayBoundaries";
 import {
   REQUEST_STATUS_STYLES,
@@ -77,10 +78,8 @@ const Dashboard = ({ currentUser: userProp }) => {
     });
   }, [requests, barangay]);
 
-  const ownPriority = useMemo(
-    () => priority.filter((p) => (p.barangay || "").toLowerCase() === barangay.toLowerCase()),
-    [priority, barangay]
-  );
+  // The API already limits these to the account's barangay.
+  const ownPriority = useMemo(() => priority.filter((p) => p.is_priority), [priority]);
 
   const monthDays = cleanupsThisMonth(ownRequests);
   const monthBags = monthDays.reduce((sum, day) => sum + day.bags, 0);
@@ -88,7 +87,6 @@ const Dashboard = ({ currentUser: userProp }) => {
   const monthName = new Date().toLocaleDateString("en-US", { month: "long", timeZone: "Asia/Manila" });
   const topAreas = topCollectionAreas(ownRequests);
   const recent = ownRequests.slice(0, 5);
-  const flagged = ownPriority[0];
 
   if (loading) {
     return (
@@ -145,28 +143,16 @@ const Dashboard = ({ currentUser: userProp }) => {
           <div className={`${CARD} p-5`}>
             <h2 className="text-[15px] font-bold text-slate-900 flex items-center gap-1.5 mb-4">
               <AlertTriangle className="w-4 h-4 text-amber-500" />
-              Priority Area
+              Priority Areas
             </h2>
-            {flagged ? (
-              <div className="flex items-center gap-3.5">
-                <div className="w-8 h-8 rounded-full bg-amber-50 flex items-center justify-center text-amber-600 shrink-0">
-                  <AlertTriangle className="w-4 h-4" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex justify-between text-xs font-bold text-slate-900">
-                    <span className="truncate">{flagged.barangay}</span>
-                    <span className="shrink-0">{flagged.total_bags} bags</span>
-                  </div>
-                  <p className="text-[11px] text-slate-500 mt-0.5">
-                    Flagged {formatDay(flagged.identified_at)} for {flagged.total_bags} bags in {flagged.window_days} days.{" "}
-                    {flagged.bot_name ? `Follow-up: ${flagged.bot_name} on ${flagged.scheduled_day}.` : "CENRO will schedule a follow-up drive."}
-                  </p>
-                </div>
-              </div>
+            {barangay ? (
+              <PriorityAreaList
+                areas={ownPriority}
+                showBarangay={false}
+                emptyText="Your collection areas are bringing in the same or fewer bags per cleanup than last month."
+              />
             ) : (
-              <p className="text-xs text-slate-400 py-2">
-                {barangay ? `${barangay} hasn't been flagged for a follow-up drive.` : "No barangay assigned."}
-              </p>
+              <p className="text-xs text-slate-400 py-2">No barangay assigned.</p>
             )}
           </div>
 

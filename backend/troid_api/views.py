@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
 import requests
-from django.utils.dateparse import parse_datetime
+from django.utils.dateparse import parse_date, parse_datetime
 from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import (
     action, api_view, authentication_classes, permission_classes, throttle_classes,
@@ -28,22 +28,22 @@ except ImportError:
     from rest_framework.routers import DefaultRouter
 
 from .models import (
-    Boat, DetectionEvent, User, Operator, Request, DeploymentSchedule, PriorityArea,
+    Boat, DetectionEvent, User, Operator, Request, DeploymentSchedule,
     LandfillRecord, RecyclingRecord, SegregationRecord,
-    AuditLog, HeatmapData, Photo, StatusHistory, CollectionArea, Notification, LetterFile
+    AuditLog, HeatmapData, Photo, StatusHistory, CollectionArea, Notification, LetterFile, SystemPause,
 )
 from .serializers import (
     BoatSerializer, UserSerializer, OperatorSerializer, RequestSerializer,
     DeploymentScheduleSerializer, LandfillRecordSerializer, RecyclingRecordSerializer,
     SegregationRecordSerializer, AuditLogSerializer, HeatmapDataSerializer, LoginSerializer,
-    CollectionAreaSerializer, NotificationSerializer, PriorityAreaSerializer, TrashReportSerializer, LetterUploadSerializer
+    CollectionAreaSerializer, NotificationSerializer, TrashReportSerializer, LetterUploadSerializer
 )
-from . import backup, boundaries
+from . import backup, boundaries, maintenance
 from .authentication import INACTIVE_STATUSES, CompanionTokenAuthentication, is_app_operator
 from .permissions import ADMIN, ANY_ROLE, MAYOR, PUBLIC, REQUESTERS, STAFF, HasRole, RoleViewSetMixin, require
 from .drives import active_drive, scheduled_request_ids, troid_counts
-from .realtime import notifications_changed
-from .priority import check_and_schedule_priority_followup
+from .realtime import broadcast_after_commit, notifications_changed
+from .priority import end_of_day, evaluate_priority_areas
 from .throttles import CompanionLoginEmailThrottle, CompanionLoginIPThrottle
 
 logger = logging.getLogger(__name__)
@@ -890,34 +890,166 @@ AdminOnly = HasRole(
 )
 
 
-def _audit_admin(request, action, details):
+def _audit_admin(request, action, details, status='success'):
     record_audit(request, user=request.user.email[:100], role=ROLE_LABELS.get(request.user.role, request.user.role),
-                 action=action, module='Backup & Restore', details=details, status='success')
+                 action=action, module='Backup & Restore', details=details[:500], status=status)
+
+
+def _own_pause(request, kind):
+    """The pause this admin started for this kind of work, or None."""
+    pause = maintenance.active_pause()
+    if pause is None or pause.user_id != request.user.pk or pause.kind != kind:
+        return None
+    return pause
+
+
+def _end_pause(request, pause, action, details):
+    SystemPause.objects.filter(pk=pause.pk).delete()
+    _audit_admin(request, action, details)
+    broadcast_after_commit('system.pause', {'active': False})
+
+
+def _pause_required(kind):
+    return Response(
+        {'error': f'Start the {kind} again: the system has to stay paused while it runs.'},
+        status=status.HTTP_409_CONFLICT,
+    )
+
+
+def _features_text(keys):
+    return ', '.join(backup.feature_labels(keys))
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def maintenance_status(request):
+    """Whether the system is paused for a backup or restore. Every page asks."""
+    return Response(maintenance.describe(maintenance.active_pause()))
+
+
+@api_view(['POST'])
+@permission_classes([AdminOnly])
+def maintenance_start(request):
+    """Pauses the system for everyone else while this admin backs up or restores."""
+    kind = request.data.get('kind')
+    if kind not in ('backup', 'restore'):
+        return Response({'error': 'kind must be "backup" or "restore".'}, status=status.HTTP_400_BAD_REQUEST)
+    with transaction.atomic():
+        pause = maintenance.active_pause()
+        if pause is not None and pause.user_id != request.user.pk:
+            return Response({'error': maintenance.paused_message(pause), 'paused': maintenance.describe(pause)},
+                            status=status.HTTP_409_CONFLICT)
+        now = timezone.now()
+        SystemPause.objects.update_or_create(pk=1, defaults={
+            'kind': kind, 'user_id': request.user.pk, 'user_name': request.user.name[:100],
+            'user_email': request.user.email[:254], 'started_at': now, 'heartbeat_at': now,
+        })
+        _audit_admin(request, f'{kind.title()} started',
+                     'The system was paused for everyone else until the '
+                     f'{kind} is finished or cancelled.', status='warning')
+        broadcast_after_commit('system.pause', {'active': True})
+    return Response(maintenance.describe(maintenance.active_pause()))
+
+
+@api_view(['POST'])
+@permission_classes([AdminOnly])
+def maintenance_heartbeat(request):
+    """Keeps this admin's pause alive (see maintenance.STALE_AFTER)."""
+    updated = SystemPause.objects.filter(pk=1, user_id=request.user.pk).update(heartbeat_at=timezone.now())
+    if not updated:
+        return Response({'error': 'The system is not paused by you.'}, status=status.HTTP_409_CONFLICT)
+    return Response(maintenance.describe(maintenance.active_pause()))
+
+
+@api_view(['POST'])
+@permission_classes([AdminOnly])
+def maintenance_end(request):
+    """Resumes the system when the admin cancels a backup or restore."""
+    pause = maintenance.active_pause()
+    if pause is None or pause.user_id != request.user.pk:
+        return Response(maintenance.describe(pause))
+    _end_pause(request, pause, f'{pause.get_kind_display()} cancelled',
+               f'Nothing was {"backed up" if pause.kind == "backup" else "restored"}. The system was resumed.')
+    return Response(maintenance.describe(None))
 
 
 @api_view(['GET'])
 @permission_classes([AdminOnly])
-def backup_download(request):
-    data = backup.export_backup()
-    _audit_admin(request, 'Database backup downloaded', f'{len(data["records"])} records')
+def backup_features(request):
+    """The parts of the system a backup can hold, with how much each holds now."""
+    return Response({'features': backup.feature_overview(), 'not_included': ['Audit log', 'Sign-in sessions']})
+
+
+@api_view(['POST'])
+@permission_classes([AdminOnly])
+def backup_create(request):
+    """Backs up the chosen features, then resumes the system."""
+    pause = _own_pause(request, 'backup')
+    if pause is None:
+        return _pause_required('backup')
+    try:
+        data = backup.export_backup(request.data.get('features') or [])
+    except backup.BackupError as exc:
+        return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    left_out = [key for key in backup.FEATURE_KEYS if key not in data['features']]
+    _audit_admin(request, 'Backup created',
+                 f'Backed up {_features_text(data["features"])} ({len(data["records"])} records). '
+                 f'Not included: audit log{", " + _features_text(left_out) if left_out else ""}.')
+    _end_pause(request, pause, 'Backup finished', 'The system was resumed.')
     return Response(data)
+
+
+def _restore_args(request):
+    payload = request.data.get('backup') if isinstance(request.data, dict) else None
+    features = request.data.get('features') if isinstance(request.data, dict) else None
+    return payload, features if isinstance(features, list) else []
+
+
+@api_view(['POST'])
+@permission_classes([AdminOnly])
+def backup_restore_preview(request):
+    """What restoring the chosen features of a backup would change; nothing is changed."""
+    if _own_pause(request, 'restore') is None:
+        return _pause_required('restore')
+    payload, features = _restore_args(request)
+    try:
+        return Response(backup.preview_restore(payload, features))
+    except backup.BackupError as exc:
+        return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
 
 @api_view(['POST'])
 @permission_classes([AdminOnly])
 def backup_restore(request):
+    """Restores the chosen features of a backup, then resumes the system."""
+    pause = _own_pause(request, 'restore')
+    if pause is None:
+        return _pause_required('restore')
     me = request.user
+    payload, features = _restore_args(request)
+    # A big restore may take longer than the heartbeat allows; keep the pause meanwhile.
+    SystemPause.objects.filter(pk=pause.pk).update(heartbeat_at=timezone.now() + timedelta(minutes=10))
     try:
-        restored = backup.restore_backup(request.data)
+        result = backup.restore_backup(payload, features)
     except backup.BackupError as exc:
+        SystemPause.objects.filter(pk=pause.pk).update(heartbeat_at=timezone.now())
         return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
     # Backups carry no sessions. Keep this admin signed in if their account came back as the same admin.
-    still_signed_in = User.objects.filter(
-        pk=me.pk, email=me.email, role='admin', status='active',
-    ).update(session_token=me.session_token) == 1
-    _audit_admin(request, 'Database restored',
-                 f'{restored} records from a backup made {request.data.get("created_at", "at an unknown time")}')
-    return Response({'restored': restored, 'still_signed_in': still_signed_in})
+    still_signed_in = True
+    if 'accounts' in result['features']:
+        still_signed_in = User.objects.filter(
+            pk=me.pk, email=me.email, role='admin', status='active',
+        ).update(session_token=me.session_token) == 1
+    changes = result['changes'].values()
+    added = sum(c.get('added', 0) for c in changes)
+    updated = sum(c.get('updated', 0) for c in changes)
+    removed = sum(c.get('removed', 0) for c in changes)
+    made = payload.get('created_at', 'at an unknown time') if isinstance(payload, dict) else 'at an unknown time'
+    _audit_admin(request, 'Restore completed',
+                 f'Restored {_features_text(result["features"])} from a backup made {made}: '
+                 f'{added} added, {updated} put back, {removed} removed. The audit log was not changed.')
+    _end_pause(request, pause, 'Restore finished', 'The system was resumed.')
+    return Response({**result, 'still_signed_in': still_signed_in})
 
 
 class BoatViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
@@ -1330,7 +1462,6 @@ class RequestViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
             state='current',
             details=report['notes'],
         )
-        check_and_schedule_priority_followup(req.barangay)
         if req.status == 'completed':
             notify_request_update(
                 req,
@@ -1772,17 +1903,25 @@ class DeploymentScheduleViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
     serializer_class = DeploymentScheduleSerializer
 
 
-class PriorityAreaViewSet(RoleViewSetMixin, viewsets.ReadOnlyModelViewSet):
-    # Barangay and NGO accounts see only whether their own barangay was flagged.
-    read_roles = ADMIN + REQUESTERS
-    queryset = PriorityArea.objects.order_by('-identified_at')
-    serializer_class = PriorityAreaSerializer
-
-    def get_queryset(self):
-        queryset = super().get_queryset()
-        if getattr(self.request.user, 'role', None) in REQUESTERS:
-            return queryset.filter(barangay__iexact=own_barangay(self.request.user) or '-')
-        return queryset
+@api_view(['GET'])
+@permission_classes([HasRole(*ADMIN, *REQUESTERS)])
+def priority_areas(request):
+    """Each collection area with recent cleanups, and whether it is a priority: its average
+    bags per cleanup over the last 30 days is higher than over the 30 days before (see
+    priority.py). ?as_of=YYYY-MM-DD answers as of the end of that day in Manila;
+    ?barangay= limits it to one barangay. Barangay and NGO accounts only get their own."""
+    as_of = None
+    if request.query_params.get('as_of'):
+        day = parse_date(request.query_params['as_of'])
+        if day is None:
+            return Response({'error': 'as_of must be a date (YYYY-MM-DD).'}, status=status.HTTP_400_BAD_REQUEST)
+        as_of = min(end_of_day(day), timezone.now())
+    barangay = request.query_params.get('barangay') or None
+    if getattr(request.user, 'role', None) in REQUESTERS:
+        barangay = own_barangay(request.user)
+        if not barangay:
+            return Response([])
+    return Response(evaluate_priority_areas(as_of=as_of, barangay=barangay))
 
 
 class LandfillRecordViewSet(RoleViewSetMixin, viewsets.ReadOnlyModelViewSet):
@@ -1840,7 +1979,6 @@ router.register(r'users', UserViewSet)
 router.register(r'operators', OperatorViewSet)
 router.register(r'requests', RequestViewSet)
 router.register(r'deployment-schedules', DeploymentScheduleViewSet)
-router.register(r'priority-areas', PriorityAreaViewSet)
 router.register(r'landfill-records', LandfillRecordViewSet)
 router.register(r'recycling-records', RecyclingRecordViewSet)
 router.register(r'segregation-records', SegregationRecordViewSet)

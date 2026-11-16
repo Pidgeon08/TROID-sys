@@ -1,5 +1,14 @@
 import { Navigate, Outlet } from 'react-router-dom';
 import Sidebar from './Sidebar';
+import SystemPausedScreen from './SystemPausedScreen';
+import { useSystemPause } from '../hooks/useSystemPause';
+
+/** Covers the app while the system is paused for a backup or restore, except in the tab running it. */
+function PauseGuard({ currentUser }) {
+  const { pause, runningHere, refresh } = useSystemPause();
+  if (!pause.active || runningHere) return null;
+  return <SystemPausedScreen pause={pause} isMine={Boolean(currentUser?.id) && pause.user_id === currentUser.id} onResumed={refresh} />;
+}
 
 const Layout = ({ isAuthenticated, onLogout, userType = 'admin', currentUser = null }) => {
   if (!isAuthenticated) {
@@ -12,6 +21,7 @@ const Layout = ({ isAuthenticated, onLogout, userType = 'admin', currentUser = n
       <main className="flex-1 p-8 overflow-y-auto relative z-30 bg-[#f8fafc] print:overflow-visible print:h-auto print:p-0 print:bg-white">
         <Outlet context={{ currentUser }} />
       </main>
+      <PauseGuard currentUser={currentUser} />
     </div>
   );
 };

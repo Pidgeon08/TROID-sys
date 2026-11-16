@@ -108,7 +108,7 @@ function Cell({ entry, onClick, dateObj }) {
   );
 }
 
-function ScheduleModal({ bots, operators, approvedRequests, priorityBarangays = new Set(), scheduledRequestIds = new Set(), onClose, onSave, onReschedule, onViewRequest, prefillBot, prefillZone, schedule, editingSchedule }) {
+function ScheduleModal({ bots, operators, approvedRequests, priorityAreaIds = new Set(), scheduledRequestIds = new Set(), onClose, onSave, onReschedule, onViewRequest, prefillBot, prefillZone, schedule, editingSchedule }) {
   const isEditing = !!editingSchedule;
   const [isRequestListOpen, setIsRequestListOpen] = useState(false);
   const requestDropdownRef = useRef(null);
@@ -125,10 +125,10 @@ function ScheduleModal({ bots, operators, approvedRequests, priorityBarangays = 
   }, [isRequestListOpen]);
 
   const requestBarangay = (r) => r.location?.barangay || r.requestedBy?.barangay || '';
-  const isPriorityRequest = (r) => priorityBarangays.has(requestBarangay(r));
+  const isPriorityRequest = (r) => r.collectionAreaId != null && priorityAreaIds.has(r.collectionAreaId);
 
-  // Priority-area requests surface first, so the barangays TROID flagged as needing a
-  // follow-up are the easiest to pick when scheduling a TROID-assisted cleanup.
+  // Requests for priority collection areas (more bags per cleanup lately than the month
+  // before) surface first, so they are the easiest to pick when scheduling a cleanup.
   const orderedRequests = [...approvedRequests].sort((a, b) => {
     const aPriority = isPriorityRequest(a) ? 0 : 1;
     const bPriority = isPriorityRequest(b) ? 0 : 1;
@@ -350,7 +350,7 @@ function ScheduleModal({ bots, operators, approvedRequests, priorityBarangays = 
                                 ? 'text-amber-700 font-semibold hover:bg-amber-50'
                                 : 'text-slate-700 hover:bg-slate-50'
                             }`}
-                            title={priority ? 'Priority area — flagged for a TROID follow-up cleanup' : undefined}
+                            title={priority ? 'Priority collection area: more bags per cleanup lately than the month before' : undefined}
                           >
                             {priority && <AlertTriangle size={14} className={`shrink-0 ${isScheduled ? 'text-slate-400' : 'text-amber-500'}`} />}
                             <span className="truncate">
@@ -681,7 +681,7 @@ export default function DeploymentSchedule() {
   const [schedule, setSchedule] = useState({});
   const [loading, setLoading] = useState(true);
   const [approvedRequests, setApprovedRequests] = useState([]);
-  const [priorityBarangays, setPriorityBarangays] = useState(new Set());
+  const [priorityAreaIds, setPriorityAreaIds] = useState(new Set());
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [overviewId, setOverviewId] = useState(null);
   const [reschedulingEntry, setReschedulingEntry] = useState(null);
@@ -710,6 +710,7 @@ export default function DeploymentSchedule() {
         preferredDate: r.preferred_date || '',
         preferredTime: r.preferred_time || '',
         cleanupType: r.cleanup_type || 'troid_supported',
+        collectionAreaId: r.collection_area_detail?.id ?? null,
       }));
 
       const scheduleMap = {};
@@ -730,7 +731,7 @@ export default function DeploymentSchedule() {
       setOperators(operatorsData);
       setSchedule(scheduleMap);
       setApprovedRequests(approved);
-      setPriorityBarangays(new Set((priorityData || []).map((p) => p.barangay)));
+      setPriorityAreaIds(new Set((priorityData || []).filter((p) => p.is_priority).map((p) => p.collection_area.id)));
       setLoading(false);
     }).catch(() => setLoading(false));
 
@@ -1237,7 +1238,7 @@ export default function DeploymentSchedule() {
           bots={bots}
           operators={operators}
           approvedRequests={approvedRequests}
-          priorityBarangays={priorityBarangays}
+          priorityAreaIds={priorityAreaIds}
           scheduledRequestIds={scheduledRequestIds}
           onClose={() => { setShowModal(false); setPrefillBot(""); setPrefillZone(""); setReschedulingEntry(null); }}
           onSave={handleSaveSchedule}

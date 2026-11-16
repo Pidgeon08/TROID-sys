@@ -5,7 +5,13 @@ urlpatterns = [
     # Listed before the router so its "<prefix>/<pk>/" routes don't capture
     # these fixed paths (e.g. "users/pending-count/" as a user with pk "pending-count").
     path('health/', views.health, name='health'),
-    path('backup/', views.backup_download, name='backup-download'),
+    path('maintenance/', views.maintenance_status, name='maintenance-status'),
+    path('maintenance/start/', views.maintenance_start, name='maintenance-start'),
+    path('maintenance/heartbeat/', views.maintenance_heartbeat, name='maintenance-heartbeat'),
+    path('maintenance/end/', views.maintenance_end, name='maintenance-end'),
+    path('backup/', views.backup_create, name='backup-create'),
+    path('backup/features/', views.backup_features, name='backup-features'),
+    path('backup/restore/preview/', views.backup_restore_preview, name='backup-restore-preview'),
     path('backup/restore/', views.backup_restore, name='backup-restore'),
     path('users/pending-count/', views.pending_user_count, name='pending-user-count'),
     path('requests/pending-count/', views.pending_request_count, name='pending-request-count'),
@@ -27,5 +33,6 @@ urlpatterns = [
     path('forgot-password/', views.forgot_password, name='forgot-password'),
     path('log-detection/', views.log_detection, name='log-detection'),
     path('heatmap/', views.get_heatmap_data, name='get-heatmap'),
+    path('priority-areas/', views.priority_areas, name='priority-areas'),
     path('task-status-updates/', views.task_status_updates, name='task-status-updates'),
 ]

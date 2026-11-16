@@ -4,6 +4,7 @@ import { useNavigate, useOutletContext } from 'react-router-dom';
 import api from '../../services/api';
 import MonthSparkline from '../../components/MonthSparkline';
 import HotspotsCard from '../../components/HotspotsCard';
+import PriorityAreaList from '../../components/PriorityAreaList';
 import { cleanupsThisMonth, requestArea, topCollectionAreas } from '../../constants/requests';
 
 const Dashboard = () => {
@@ -24,7 +25,7 @@ const Dashboard = () => {
         ]);
 
         setRequestsData(Array.isArray(requestsRes) ? requestsRes : []);
-        setPriorityAreas(Array.isArray(priorityRes) ? priorityRes : []);
+        setPriorityAreas(Array.isArray(priorityRes) ? priorityRes.filter((p) => p.is_priority) : []);
 
         setTopAreas(topCollectionAreas(requestsRes));
 
@@ -121,8 +122,8 @@ const Dashboard = () => {
         {/* ── RIGHT COLUMN (Sidebar Panels) ── */}
         <div className="flex flex-col gap-6 h-full min-h-0 overflow-y-auto">
 
-          {/* Panel 0: Priority Areas — barangays auto-flagged from recent high-volume cleanups,
-              each with a follow-up drive already booked on the fleet's schedule. */}
+          {/* Panel 0: Priority Areas — collection areas whose cleanups bring in more bags each
+              lately (last 30 days) than the month before. */}
           <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-5 shrink-0">
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-[15px] font-bold text-slate-900 flex items-center gap-1.5">
@@ -130,36 +131,16 @@ const Dashboard = () => {
                 Priority Areas
               </h2>
               <button
-                onClick={() => navigate('/admin/deployment')}
+                onClick={() => navigate('/admin/collection-areas?priority=priority')}
                 className="text-xs font-semibold text-slate-500 hover:text-[#1b4de4] border border-slate-200 rounded-lg px-2.5 py-1 transition-all cursor-pointer"
               >
-                View schedule
+                View areas
               </button>
             </div>
-            {priorityAreas.length === 0 ? (
-              <p className="text-xs text-slate-400 py-2">No barangay has crossed the follow-up threshold yet.</p>
-            ) : (
-              <div className="flex flex-col gap-3">
-                {priorityAreas.slice(0, 5).map((area) => (
-                  <div key={area.id} className="flex items-center gap-3.5">
-                    <div className="w-8 h-8 rounded-full bg-amber-50 flex items-center justify-center text-amber-600 shrink-0">
-                      <AlertTriangle className="w-4 h-4" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex justify-between text-xs font-bold text-slate-900">
-                        <span className="truncate">{area.barangay}</span>
-                        <span className="shrink-0">{area.total_bags} bags</span>
-                      </div>
-                      <p className="text-[11px] text-slate-500 mt-0.5">
-                        {area.bot_name
-                          ? `Follow-up: ${area.bot_name} on ${area.scheduled_day}`
-                          : 'Flagged — no bot available to auto-schedule yet'}
-                      </p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+            <PriorityAreaList
+              areas={priorityAreas}
+              emptyText="No collection area is bringing in more bags per cleanup than last month."
+            />
           </div>
 
           {/* Panel 1: Most Trash Collected */}

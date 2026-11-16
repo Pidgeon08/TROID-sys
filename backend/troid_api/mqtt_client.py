@@ -7,6 +7,7 @@ import paho.mqtt.client as mqtt
 from django.utils import timezone
 from .bot_auth import verify_bot_message
 from .drives import active_drive
+from .maintenance import active_pause
 from .models import Boat, DeploymentSchedule, DetectionEvent, Request
 from .realtime import broadcast
 
@@ -56,14 +57,37 @@ def _on_message(client, userdata, msg):
 
         print(f"[MQTT] Received on {msg.topic}: {payload}")
 
-        if msg.topic.endswith('/heartbeat'):
-            _handle_heartbeat(bot_id, payload)
-        elif msg.topic.endswith('/detection'):
-            _handle_detection(bot_id, payload)
-        elif msg.topic.endswith('/status'):
-            _handle_status(bot_id, payload)
+        # Nothing is saved while the system is paused for a backup or restore. Detections and
+        # status changes are held and saved once it resumes; heartbeats just come again.
+        if active_pause() is not None:
+            if not msg.topic.endswith('/heartbeat') and len(_held) < MAX_HELD:
+                _held.append((msg.topic, bot_id, payload))
+            print(f"[MQTT] System paused; holding {msg.topic} until it resumes")
+            return
+        _release_held()
+        _dispatch(msg.topic, bot_id, payload)
     except Exception as e:
         print(f"[MQTT] Error processing message: {e}")
+
+
+# Messages that arrived while the system was paused (see _on_message).
+MAX_HELD = 5000
+_held = []
+
+
+def _release_held():
+    while _held:
+        topic, bot_id, payload = _held.pop(0)
+        _dispatch(topic, bot_id, payload)
+
+
+def _dispatch(topic, bot_id, payload):
+    if topic.endswith('/heartbeat'):
+        _handle_heartbeat(bot_id, payload)
+    elif topic.endswith('/detection'):
+        _handle_detection(bot_id, payload)
+    elif topic.endswith('/status'):
+        _handle_status(bot_id, payload)
 
 def _handle_heartbeat(bot_id, payload):
     try:

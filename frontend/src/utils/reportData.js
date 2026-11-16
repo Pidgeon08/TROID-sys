@@ -49,6 +49,57 @@ export function describeRange(from, to) {
   return from === to ? formatDay(from) : `${formatDay(from)} – ${formatDay(to)}`;
 }
 
+// --- what the period is compared with ----------------------------------------------
+
+export const COMPARE_OPTIONS = {
+  previous: "Previous period",
+  week: "Same dates last week",
+  month: "Same dates last month",
+  year: "Same dates last year",
+  custom: "Another date range",
+  none: "No comparison",
+};
+
+/** The same day `months` calendar months earlier, kept inside that month (Mar 31 → Feb 28). */
+export function shiftMonths(day, months) {
+  const target = Number(day.slice(0, 4)) * 12 + Number(day.slice(5, 7)) - 1 - months;
+  const year = Math.floor(target / 12);
+  const month = target - year * 12;
+  const last = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+  return `${year}-${String(month + 1).padStart(2, "0")}-${String(Math.min(Number(day.slice(8, 10)), last)).padStart(2, "0")}`;
+}
+
+/**
+ * The period with what it is compared with as `previous` ({ from, to, label, name }), or
+ * null for no comparison. The shifted choices need a start date; "Another date range" needs
+ * both of its dates. `overlaps` says when the two share days, which makes the change smaller.
+ */
+export function withComparison(period, mode = "previous", custom = {}) {
+  const make = (from, to, name) => ({ from, to, label: describeRange(from, to), name });
+  let previous = null;
+  if (mode === "custom") {
+    let { from, to } = custom;
+    if (from && to) {
+      if (from > to) [from, to] = [to, from];
+      previous = make(from, to, "the chosen range");
+    }
+  } else if (period.from && mode !== "none") {
+    if (mode === "week") previous = make(addDays(period.from, -7), addDays(period.to, -7), "the same dates last week");
+    else if (mode === "month") previous = make(shiftMonths(period.from, 1), shiftMonths(period.to, 1), "the same dates last month");
+    else if (mode === "year") previous = make(shiftMonths(period.from, 12), shiftMonths(period.to, 12), "the same dates last year");
+    else if (period.previous) previous = { ...period.previous, name: "the previous period" };
+  }
+  const overlaps = Boolean(previous && previous.from <= period.to && (!period.from || previous.to >= period.from));
+  return { ...period, previous, compareMode: mode, overlaps };
+}
+
+/** Why there is no comparison, for the page to say. */
+export function noComparisonReason(period) {
+  if (period.compareMode === "none") return "No comparison chosen";
+  if (period.compareMode === "custom") return "Choose both dates of the range to compare with";
+  return "Set a start date to compare with an earlier period";
+}
+
 export function inPeriod(day, period) {
   if (!day || !period) return false;
   if (period.from && day < period.from) return false;
@@ -101,16 +152,14 @@ export function collectionsIn(collections, period, barangay) {
   return collections.filter((c) => inPeriod(c.day, period) && (!barangay || c.barangay === barangay));
 }
 
-export function hotspotsIn(priorityAreas, period, barangay) {
-  if (!period) return [];
-  return priorityAreas.filter((p) => p.identified_at
-    && inPeriod(manilaDate(new Date(p.identified_at)), period)
-    && (!barangay || p.barangay === barangay));
+/** The priority collection areas (from /api/priority-areas/), in one barangay if given. */
+export function priorityIn(priorityAreas, barangay) {
+  return (priorityAreas || []).filter((p) => p.is_priority && (!barangay || p.barangay === barangay));
 }
 
 // --- totals -----------------------------------------------------------------------
 
-export function summarize(collections, hotspots = []) {
+export function summarize(collections, priorityAreas = []) {
   const sum = (key) => collections.reduce((total, c) => total + c[key], 0);
   const deployments = collections.filter((c) => c.robot);
   const bags = sum("bags");
@@ -127,7 +176,7 @@ export function summarize(collections, hotspots = []) {
     deployments: deployments.length,
     zones: new Set(deployments.map((c) => c.areaKey).filter(Boolean)).size,
     barangays: new Set(collections.map((c) => c.barangay).filter(Boolean)).size,
-    hotspots: hotspots.length,
+    priority: priorityAreas.length,
     avgBags: collections.length ? round1(bags / collections.length) : 0,
   };
 }
@@ -154,7 +203,7 @@ export const COMPARISON_METRICS = [
   { key: "avgBags", label: "Bags per drive" },
   { key: "zones", label: "Patrol zones covered" },
   { key: "barangays", label: "Barangays reached" },
-  { key: "hotspots", label: "Hotspots identified" },
+  { key: "priority", label: "Priority collection areas" },
 ];
 
 export function formatMetric(value, unit) {
@@ -288,4 +337,88 @@ export function trendSeries(current, period, granularity, previous, today = mani
     previousBags: before ? before[i]?.bags ?? null : null,
     previousLabel: before ? before[i]?.label ?? "" : "",
   }));
+}
+
+// --- history ----------------------------------------------------------------------
+
+export const HISTORY_UNITS = { month: "Monthly", week: "Weekly" };
+export const HISTORY_COUNTS = { month: [3, 6, 12], week: [4, 8, 12] };
+
+/** The Monday of the week a day is in. */
+function weekStart(day) {
+  const weekday = new Date(`${day}T00:00:00Z`).getUTCDay();
+  return addDays(day, -((weekday + 6) % 7));
+}
+
+function monthEnd(day) {
+  return addDays(shiftMonths(`${day.slice(0, 7)}-01`, -1), -1);
+}
+
+/**
+ * The last `count` calendar months or Monday–Sunday weeks up to `end` (the latest one cut
+ * short at `end`, marked `partial`), oldest first. Each has the cleanups, bags, weight,
+ * items and bags per cleanup in it, and `change`: the percent change in bags from the one
+ * before it (null when that one had none).
+ */
+export function collectionHistory(collections, { unit = "month", count = 6, end, barangay = "" }) {
+  const ranges = [];
+  let start = unit === "week" ? weekStart(end) : `${end.slice(0, 7)}-01`;
+  // One more than shown, so the oldest shown row has a change too.
+  for (let i = 0; i <= count; i++) {
+    const fullTo = unit === "week" ? addDays(start, 6) : monthEnd(start);
+    ranges.unshift({ from: start, to: fullTo < end ? fullTo : end, partial: fullTo > end });
+    start = unit === "week" ? addDays(start, -7) : shiftMonths(start, 1);
+  }
+  const rows = ranges.map((range) => {
+    const totals = summarize(collectionsIn(collections, range, barangay));
+    const label = unit === "week"
+      ? `${formatDay(range.from, false)} – ${formatDay(range.to)}`
+      : new Date(`${range.from}T00:00:00Z`).toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
+    return {
+      ...range,
+      key: range.from,
+      label,
+      cleanups: totals.drives,
+      bags: totals.bags,
+      weightKg: totals.weightKg,
+      items: totals.items,
+      avgBags: totals.avgBags,
+    };
+  });
+  return rows.slice(1).map((row, i) => ({ ...row, change: pctChange(row.bags, rows[i].bags) }));
+}
+
+// --- quick date ranges for the filter bar ------------------------------------------
+
+export const DATE_PRESETS = {
+  last7: "Last 7 days",
+  last30: "Last 30 days",
+  last90: "Last 90 days",
+  thisMonth: "This month",
+  lastMonth: "Last month",
+  thisYear: "This year",
+  all: "All time",
+};
+
+/** The { from, to } days a quick range stands for ("" for all time). */
+export function presetRange(key, today = manilaDate(new Date())) {
+  const monthStart = `${today.slice(0, 7)}-01`;
+  switch (key) {
+    case "last7": return { from: addDays(today, -6), to: today };
+    case "last30": return { from: addDays(today, -29), to: today };
+    case "last90": return { from: addDays(today, -89), to: today };
+    case "thisMonth": return { from: monthStart, to: today };
+    case "lastMonth": return { from: shiftMonths(monthStart, 1), to: addDays(monthStart, -1) };
+    case "thisYear": return { from: `${today.slice(0, 4)}-01-01`, to: today };
+    default: return { from: "", to: "" };
+  }
+}
+
+/** The quick range the dates are, or "" when they are a range of their own. */
+export function matchingPreset(from, to, today = manilaDate(new Date())) {
+  const end = from && !to ? today : to;
+  return Object.keys(DATE_PRESETS).find((key) => {
+    const range = presetRange(key, today);
+    return range.from === from && range.to === end;
+  }) || "";
 }
