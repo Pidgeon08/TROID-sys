@@ -122,11 +122,13 @@ export const USER_MANUALS = {
       title: 'Report Generation',
       path: '/admin/reports',
       description: 'Generate and export collection reports as PDF, Excel, or print.',
-      keywords: ['export', 'pdf', 'excel', 'print', 'kpi', 'trend'],
+      keywords: ['export', 'pdf', 'excel', 'print', 'kpi', 'trend', 'compare', 'comparison', 'previous period'],
       steps: [
-        'Filter by date range and barangay, then review the KPI cards, the bags-collected trend chart (Daily/Weekly/Monthly), and the waste-type breakdown.',
-        'The KPI deltas compare the selected period against an equal-length prior period automatically.',
-        'Use Export PDF, Export Excel, or Print Report in the Report Overview panel to download a formatted copy.',
+        'Choose a date range (the last 30 days by default) and a barangay, then click "Generate Report" to apply them. Click "Use all time" to clear the dates.',
+        'The report counts every cleanup with a filed trash report, dated by when the cleanup finished. Merged and archived requests are left out so no bag is counted twice.',
+        'Every figure is compared with the period of the same length just before the one you chose: the KPI cards show the change and the previous value, the trend chart draws the previous period as a dashed line, and the waste types show their change too. With no start date there is nothing to compare with.',
+        'The Period Comparison table lists bags, weight, drives, robot deployments, zones, barangays and hotspots side by side. "Bags by Barangay" compares each barangay; with one barangay chosen it compares its collection areas instead.',
+        'Use Export PDF, Export Excel, or Print Report in the Report Overview panel to download a formatted copy. The PDF and Excel files include the comparison, the per-barangay figures and the waste types.',
       ],
     },
     {

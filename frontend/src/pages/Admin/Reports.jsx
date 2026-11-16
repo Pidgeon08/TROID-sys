@@ -14,157 +14,154 @@ import {
   Printer,
   Clock,
   UserCircle2,
+  GitCompareArrows,
 } from "lucide-react";
 import jsPDF from 'jspdf';
 import * as XLSX from 'xlsx-js-style';
 import api from '../../services/api';
 import { logAudit } from '../../services/auditLog';
-import { TRASH_CATEGORIES, REQUEST_STATUS_STYLES, toStatusLabel, requestArea } from '../../constants/requests';
+import { REQUEST_STATUS_STYLES, manilaDate } from '../../constants/requests';
+import {
+  addDays, collectionsIn, compareGroups, comparisonRows, formatChange, formatDay, formatMetric,
+  hotspotsIn, reportPeriod, requestBarangay, summarize, toCollections, trendSeries, wasteBreakdown,
+} from '../../utils/reportData';
 
-// Distinct color per trash category, so the waste-type donut segments are visually
-// distinguishable instead of every slice sharing one color.
-const CATEGORY_COLORS = {
-  Plastic: '#3B82F6',
-  Metal: '#F59E0B',
-  Glass: '#06B6D4',
-  'Paper/Cardboard': '#A855F7',
-  'Organic/Biodegradable': '#22C55E',
-  Other: '#94A3B8',
+const CARD = "bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] print:shadow-none print:border-slate-300 print:break-inside-avoid";
+const INPUT = "w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-medium text-slate-700 hover:border-slate-300 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300";
+const CURRENT_COLOR = "#3B82F6";
+const PREVIOUS_COLOR = "#94A3B8";
+
+const defaultFilters = () => {
+  const today = manilaDate(new Date());
+  return { dateFrom: addDays(today, -29), dateTo: today, barangay: "" };
 };
+
+const generatedOn = () => new Date().toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
 // --- Reusable Sub-components ---
 
-// Reusable label/value field with an icon, used in report filters
-const FieldSelect = ({ icon: Icon, label, value }) => (
-  <div>
-    <p className="text-xs font-semibold text-slate-500 mb-1.5">{label}</p>
-    <button className="w-full flex items-center gap-2.5 bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-medium text-slate-700 hover:border-slate-300 transition-colors">
-      <Icon size={16} className="text-slate-400 shrink-0" />
-      <span className="truncate">{value}</span>
-      <svg className="ml-auto w-3.5 h-3.5 text-slate-400 shrink-0" viewBox="0 0 12 12" fill="none">
-        <path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    </button>
-  </div>
-);
+/** Up/down arrow and percent for a change; green is more, red is less, grey is none. */
+const Change = ({ change, className = "" }) => {
+  if (change === undefined) return null;
+  const tone = change === null || change === 0 ? "text-slate-400" : change > 0 ? "text-emerald-600" : "text-rose-600";
+  return (
+    <span className={`inline-flex items-center gap-0.5 font-semibold whitespace-nowrap ${tone} ${className}`}>
+      {change !== null && change !== 0 && (
+        <svg width="9" height="9" viewBox="0 0 10 10" fill="none" className={change > 0 ? "" : "rotate-180"} aria-hidden="true">
+          <path d="M5 1L9 6H1L5 1Z" fill="currentColor" />
+        </svg>
+      )}
+      {formatChange(change)}
+    </span>
+  );
+};
 
-// Line chart component that visualizes the daily bag collection trend over time
-const TrendChart = ({ data }) => {
-  if (!data || data.length === 0) {
+// Line chart of bags collected per day / week / month, with the previous period dashed behind it.
+const TrendChart = ({ data, comparing }) => {
+  const [hover, setHover] = useState(null);
+  const hasData = data.some((d) => d.bags > 0 || (d.previousBags || 0) > 0);
+  if (!hasData) {
     return (
-      <svg viewBox="0 0 600 220" className="w-full h-[240px]" preserveAspectRatio="none">
-        <text x="50%" y="50%" dominantBaseline="middle" textAnchor="middle" className="text-sm fill-slate-400">
-          No data available
-        </text>
-      </svg>
+      <div className="h-[240px] flex items-center justify-center text-sm text-slate-400">
+        No bags were collected in this period.
+      </div>
     );
   }
 
   const width = 600;
   const height = 220;
-  const padX = 8;
-  const padTop = 12;
+  const padX = 12;
+  const padTop = 14;
   const padBottom = 24;
-  const max = Math.max(...data.map((d) => d.bags)) * 1.15 || 1;
-
+  const max = Math.max(...data.map((d) => Math.max(d.bags, d.previousBags || 0)), 1) * 1.15;
   const innerW = width - padX * 2;
   const innerH = height - padTop - padBottom;
   const stepX = innerW / Math.max(data.length - 1, 1);
+  const xAt = (i) => (data.length === 1 ? width / 2 : padX + i * stepX);
+  const yAt = (v) => padTop + innerH - (v / max) * innerH;
 
-  const points = data.map((d, i) => ({
-    x: padX + i * stepX,
-    y: padTop + innerH - (d.bags / max) * innerH,
-  }));
-
-  const linePath = points.map((p, i) => `${i === 0 ? "M" : "L"}${p.x},${p.y}`).join(" ");
-  const areaPath = `${linePath} L${points[points.length - 1].x},${padTop + innerH} L${points[0].x},${padTop + innerH} Z`;
-
-  const gridLines = [0, 0.25, 0.5, 0.75, 1];
+  const path = (key) => data.map((d, i) => `${i === 0 ? "M" : "L"}${xAt(i)},${yAt(d[key] || 0)}`).join(" ");
+  const linePath = path("bags");
+  const areaPath = `${linePath} L${xAt(data.length - 1)},${padTop + innerH} L${xAt(0)},${padTop + innerH} Z`;
+  const labelEvery = Math.max(1, Math.ceil(data.length / 8));
+  const showMarkers = data.length <= 45;
+  const point = hover !== null ? data[hover] : null;
 
   return (
-    <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-[240px]" preserveAspectRatio="none">
-      <defs>
-        <linearGradient id="bagsFill" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#3B82F6" stopOpacity="0.18" />
-          <stop offset="100%" stopColor="#3B82F6" stopOpacity="0" />
-        </linearGradient>
-      </defs>
-      {gridLines.map((g) => (
-        <line
-          key={g}
-          x1={padX}
-          x2={width - padX}
-          y1={padTop + innerH * g}
-          y2={padTop + innerH * g}
-          stroke="#F1F5F9"
-          strokeWidth="1"
-        />
-      ))}
-      {/* Filled area beneath the trend line */}
-      <path d={areaPath} fill="url(#bagsFill)" />
-      {/* Main trend line */}
-      <path d={linePath} fill="none" stroke="#3B82F6" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-      {/* Data point markers */}
-      {points.map((p, i) => (
-        <circle key={i} cx={p.x} cy={p.y} r="3" fill="#3B82F6" />
-      ))}
-      {/* X-axis day labels - show every other label to avoid crowding */}
-      {data.map((d, i) =>
-        i % 2 === 0 ? (
-          <text key={d.day} x={points[i].x} y={height - 6} fontSize="10" fill="#94A3B8" textAnchor="middle">
-            {d.day}
-          </text>
-        ) : null
+    <div className="relative" onMouseLeave={() => setHover(null)}>
+      <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-[240px]" preserveAspectRatio="none" role="img" aria-label="Bags collected over time">
+        <defs>
+          <linearGradient id="bagsFill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={CURRENT_COLOR} stopOpacity="0.18" />
+            <stop offset="100%" stopColor={CURRENT_COLOR} stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        {[0, 0.25, 0.5, 0.75, 1].map((g) => (
+          <line key={g} x1={padX} x2={width - padX} y1={padTop + innerH * g} y2={padTop + innerH * g} stroke="#F1F5F9" strokeWidth="1" />
+        ))}
+        <path d={areaPath} fill="url(#bagsFill)" />
+        {comparing && (
+          <path d={path("previousBags")} fill="none" stroke={PREVIOUS_COLOR} strokeWidth="2" strokeDasharray="5 4" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+        )}
+        <path d={linePath} fill="none" stroke={CURRENT_COLOR} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+        {hover !== null && (
+          <line x1={xAt(hover)} x2={xAt(hover)} y1={padTop} y2={padTop + innerH} stroke="#CBD5E1" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+        )}
+        {data.map((d, i) => (showMarkers || hover === i) && (
+          <circle key={d.key} cx={xAt(i)} cy={yAt(d.bags)} r={hover === i ? 4.5 : 3} fill={CURRENT_COLOR} stroke="#fff" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+        ))}
+        {data.map((d, i) => (i % labelEvery === 0 ? (
+          <text key={d.key} x={xAt(i)} y={height - 6} fontSize="10" fill="#94A3B8" textAnchor="middle">{d.label}</text>
+        ) : null))}
+        {/* Hover targets: one full-height column per point, wider than the marker */}
+        {data.map((d, i) => (
+          <rect
+            key={d.key}
+            x={xAt(i) - Math.max(stepX, 8) / 2}
+            y={0}
+            width={Math.max(stepX, 8)}
+            height={padTop + innerH}
+            fill="transparent"
+            onMouseEnter={() => setHover(i)}
+          />
+        ))}
+      </svg>
+      {point && (
+        <div
+          className="pointer-events-none absolute top-0 z-10 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs shadow-lg print:hidden"
+          style={{ left: `${(xAt(hover) / width) * 100}%`, transform: `translateX(${hover > data.length / 2 ? "-105%" : "5%"})` }}
+        >
+          <p className="font-semibold text-slate-800">{point.label}</p>
+          <p className="mt-1 flex items-center gap-1.5 text-slate-600">
+            <span className="h-2 w-2 rounded-full" style={{ backgroundColor: CURRENT_COLOR }} />
+            {point.bags.toLocaleString()} bags
+          </p>
+          {comparing && point.previousBags !== null && (
+            <p className="mt-0.5 flex items-center gap-1.5 text-slate-500">
+              <span className="h-0.5 w-2.5" style={{ backgroundColor: PREVIOUS_COLOR }} />
+              {point.previousBags.toLocaleString()} bags ({point.previousLabel})
+            </p>
+          )}
+        </div>
       )}
-    </svg>
+    </div>
   );
 };
 
-// Donut chart component that breaks down waste collection by type
+// Donut chart of trash items by waste type.
 const DonutChart = ({ data }) => {
-  if (!data || data.length === 0) {
-    return (
-      <div className="relative w-[140px] h-[140px] shrink-0">
-        <svg width={140} height={140} viewBox="0 0 140 140" className="-rotate-90">
-          <circle cx={70} cy={70} r={60} fill="none" stroke="#E5E7EB" strokeWidth={20} />
-        </svg>
-        <div className="absolute inset-0 flex flex-col items-center justify-center">
-          <span className="text-lg font-bold text-slate-900">0</span>
-          <span className="text-[10px] font-semibold text-slate-400">Total Bags</span>
-        </div>
-      </div>
-    );
-  }
-
   const size = 140;
   const radius = 60;
   const stroke = 20;
   const circumference = 2 * Math.PI * radius;
   const total = data.reduce((sum, d) => sum + d.value, 0);
 
-  if (total === 0) {
+  let running = 0;
+  const segments = total > 0 ? data.filter((d) => d.value > 0).map((d) => {
+    const dash = (d.value / total) * circumference;
+    const rotation = (running / total) * 360;
+    running += d.value;
     return (
-      <div className="relative w-[140px] h-[140px] shrink-0">
-        <svg width={140} height={140} viewBox="0 0 140 140" className="-rotate-90">
-          <circle cx={70} cy={70} r={60} fill="none" stroke="#E5E7EB" strokeWidth={20} />
-        </svg>
-        <div className="absolute inset-0 flex flex-col items-center justify-center">
-          <span className="text-lg font-bold text-slate-900">0</span>
-          <span className="text-[10px] font-semibold text-slate-400">Total Bags</span>
-        </div>
-      </div>
-    );
-  }
-
-  // Calculate segments with accumulated rotation
-  const safeTotal = Number.isFinite(total) && total > 0 ? total : 0;
-  const segments = data.reduce((acc, d) => {
-    const fraction = safeTotal > 0 ? d.value / safeTotal : 0;
-    const dash = Math.max(0, fraction * circumference);
-    const gap = Math.max(0, circumference - dash);
-    const rotation = safeTotal > 0 ? (acc.runningTotal / safeTotal) * 360 : 0;
-    acc.runningTotal += Number.isFinite(d.value) ? d.value : 0;
-    acc.items.push(
       <circle
         key={d.name}
         cx={size / 2}
@@ -173,23 +170,22 @@ const DonutChart = ({ data }) => {
         fill="none"
         stroke={d.color}
         strokeWidth={stroke}
-        strokeDasharray={`${dash} ${gap}`}
-        strokeLinecap="butt"
+        strokeDasharray={`${dash} ${circumference - dash}`}
         transform={`rotate(${rotation} ${size / 2} ${size / 2})`}
-      />
+      >
+        <title>{`${d.name}: ${d.value.toLocaleString()} (${d.pct}%)`}</title>
+      </circle>
     );
-    return acc;
-  }, { runningTotal: 0, items: [] });
+  }) : [];
 
   return (
     <div className="relative w-[140px] h-[140px] shrink-0">
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="-rotate-90">
-        {segments.items}
+        {segments.length ? segments : <circle cx={70} cy={70} r={60} fill="none" stroke="#E5E7EB" strokeWidth={20} />}
       </svg>
-      {/* Center label showing the total */}
-      <div className="absolute inset-0 flex flex-col items-center justify-center">
+      <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
         <span className="text-lg font-bold text-slate-900">{total.toLocaleString()}</span>
-        <span className="text-[10px] font-semibold text-slate-400">Total Bags</span>
+        <span className="text-[10px] font-semibold text-slate-400">Total Items</span>
       </div>
     </div>
   );
@@ -199,198 +195,119 @@ const DonutChart = ({ data }) => {
 const Reports = () => {
   const { currentUser } = useOutletContext() || {};
   const [search, setSearch] = useState("");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
-  const [selectedBarangay, setSelectedBarangay] = useState("");
-  const [allRequests, setAllRequests] = useState([]);
+  // The filters being edited, and the ones the shown report was generated with.
+  const [draft, setDraft] = useState(defaultFilters);
+  const [applied, setApplied] = useState(defaultFilters);
   const [trendGranularity, setTrendGranularity] = useState("Daily");
-  const [collections, setCollections] = useState([]);
-  const [overview, setOverview] = useState([]);
+  const [data, setData] = useState({ requests: [], boats: [], operators: [], priorityAreas: [] });
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
   useEffect(() => {
-    const fetchReports = async () => {
-      try {
-        const requestsRes = await api.requests();
-        const reqs = Array.isArray(requestsRes) ? requestsRes : [];
+    let cancelled = false;
+    // Robot, operator and hotspot names only add detail, so the report still loads without them.
+    Promise.allSettled([api.requests(), api.boats(), api.operators(), api.priorityAreas()])
+      .then(([requests, boats, operators, priorityAreas]) => {
+        if (cancelled) return;
+        const list = (result) => (result.status === "fulfilled" && Array.isArray(result.value) ? result.value : []);
+        if (requests.status === "rejected") {
+          console.error('Failed to fetch report data:', requests.reason);
+          setError("The report data could not be loaded. Refresh the page to try again.");
+        }
+        setData({ requests: list(requests), boats: list(boats), operators: list(operators), priorityAreas: list(priorityAreas) });
+      })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
 
-        setAllRequests(reqs);
+  const { dateFrom, dateTo, barangay: selectedBarangay } = applied;
+  const period = useMemo(() => reportPeriod(dateFrom, dateTo), [dateFrom, dateTo]);
+  const comparing = Boolean(period.previous);
+  const areaLabel = selectedBarangay || "All Areas";
+  const draftChanged = draft.dateFrom !== dateFrom || draft.dateTo !== dateTo || draft.barangay !== selectedBarangay;
 
-        const collectionsArr = [...reqs]
-          .filter((r) => r.bags != null)
-          .sort((a, b) => new Date(b.date_submitted) - new Date(a.date_submitted))
-          .slice(0, 5)
-          .map((r) => ({
-            date: r.date_submitted ? new Date(r.date_submitted).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '-',
-            zone: requestArea(r) || '-',
-            bags: Number(r.bags) || 0,
-            unit: r.bot_id ? `Boat-${r.bot_id}` : '-',
-            operator: r.operator ? `Operator-${r.operator}` : '-',
-            status: toStatusLabel(r.status),
-          }));
-        setCollections(collectionsArr);
+  const collections = useMemo(
+    () => toCollections(data.requests, { boats: data.boats, operators: data.operators }),
+    [data]
+  );
+  const current = useMemo(() => collectionsIn(collections, period, selectedBarangay), [collections, period, selectedBarangay]);
+  const previous = useMemo(
+    () => (period.previous ? collectionsIn(collections, period.previous, selectedBarangay) : null),
+    [collections, period, selectedBarangay]
+  );
 
-        setOverview([
-          { label: "Date Range", value: dateFrom && dateTo ? `${dateFrom} – ${dateTo}` : "All time", icon: Calendar },
-          { label: "Coverage Area", value: selectedBarangay || "All Areas", icon: MapPin },
-          { label: "Report Type", value: "Collection Report", icon: FileText },
-          { label: "Generated On", value: new Date().toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' }), icon: Clock },
-          { label: "Generated By", value: currentUser?.name || "CENRO Admin", icon: UserCircle2 },
-        ]);
-      } catch (err) {
-        console.error('Failed to fetch report data:', err);
-      } finally {
-        setLoading(false);
-      }
-    };
+  const stats = useMemo(() => {
+    const now = summarize(current, hotspotsIn(data.priorityAreas, period, selectedBarangay));
+    const before = previous ? summarize(previous, hotspotsIn(data.priorityAreas, period.previous, selectedBarangay)) : null;
+    return { now, before, rows: comparisonRows(now, before) };
+  }, [current, previous, data.priorityAreas, period, selectedBarangay]);
+  const metric = (key) => stats.rows.find((r) => r.key === key);
 
-    fetchReports();
-  }, [dateFrom, dateTo, selectedBarangay]);
+  const trend = useMemo(
+    () => trendSeries(current, period, trendGranularity, previous),
+    [current, period, trendGranularity, previous]
+  );
+  const wasteTypes = useMemo(() => wasteBreakdown(current, previous), [current, previous]);
 
-  const filteredCollections = collections.filter((c) => c.zone.toLowerCase().includes(search.toLowerCase()));
-
-  // Total Bags Collected Over Time: grouped by the selected granularity.
-  const trend = useMemo(() => {
-    const trendMap = {};
-    const sorted = [...allRequests].sort((a, b) => new Date(a.date_submitted) - new Date(b.date_submitted));
-    sorted.forEach((r) => {
-      if (!r.date_submitted) return;
-      const d = new Date(r.date_submitted);
-      let key;
-      if (trendGranularity === "Weekly") {
-        const weekStart = new Date(d);
-        weekStart.setDate(d.getDate() - d.getDay());
-        key = weekStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-      } else if (trendGranularity === "Monthly") {
-        key = d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
-      } else {
-        key = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-      }
-      trendMap[key] = (trendMap[key] || 0) + (Number(r.bags) || 0);
-    });
-    const limit = trendGranularity === "Monthly" ? 12 : trendGranularity === "Weekly" ? 12 : 14;
-    return Object.entries(trendMap)
-      .map(([day, bags]) => ({ day, bags }))
-      .slice(-limit);
-  }, [allRequests, trendGranularity]);
-
-  // Waste Collection Distribution: real per-category totals from filed trash reports,
-  // ordered/colored by the canonical TRASH_CATEGORIES list used across the app.
-  const wasteTypes = useMemo(() => {
-    const categoryMap = {};
-    allRequests.forEach((r) => {
-      Object.entries(r.trash_categories || {}).forEach(([cat, count]) => {
-        categoryMap[cat] = (categoryMap[cat] || 0) + (Number(count) || 0);
-      });
-    });
-    const total = Object.values(categoryMap).reduce((a, b) => a + b, 0);
-    if (total === 0) {
-      return [{ name: "No Data", value: 0, pct: 100, color: "#E5E7EB" }];
-    }
-    const orderedNames = [
-      ...TRASH_CATEGORIES.filter((c) => categoryMap[c]),
-      ...Object.keys(categoryMap).filter((c) => !TRASH_CATEGORIES.includes(c)),
-    ];
-    return orderedNames.map((name) => ({
-      name,
-      value: categoryMap[name],
-      pct: Math.round((categoryMap[name] / total) * 100),
-      color: CATEGORY_COLORS[name] || "#94A3B8",
-    }));
-  }, [allRequests]);
+  // Bags by barangay; once one barangay is chosen, by collection area inside it instead.
+  const groupBy = selectedBarangay ? "Collection Area" : "Barangay";
+  const groups = useMemo(
+    () => compareGroups(current, previous, selectedBarangay ? (c) => c.areaName || c.zone : (c) => c.barangay),
+    [current, previous, selectedBarangay]
+  );
 
   // Barangay filter options: derived from actual submitted requests, not a fixed list.
   const barangays = useMemo(
-    () => Array.from(new Set(allRequests.map((r) => r.barangay || r.location_name).filter(Boolean))).sort(),
-    [allRequests]
+    () => Array.from(new Set(data.requests.map(requestBarangay).filter(Boolean))).sort(),
+    [data.requests]
   );
 
-  // KPI totals + real period-over-period deltas. The "current period" is the selected
-  // date range if set, otherwise the trailing 30 days; the "previous period" is the
-  // equal-length window immediately before it.
-  const stats = useMemo(() => {
-    const matchesBarangay = (r) => !selectedBarangay || r.barangay === selectedBarangay || r.location_name === selectedBarangay;
+  const filteredCollections = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return [...current]
+      .sort((a, b) => b.day.localeCompare(a.day) || b.requestId.localeCompare(a.requestId, undefined, { numeric: true }))
+      .filter((c) => !q || [c.requestId, c.zone, c.barangay, c.unit, c.operator, c.status].some((v) => (v || "").toLowerCase().includes(q)));
+  }, [current, search]);
 
-    let periodStart, periodEnd, prevStart, prevEnd;
-    if (dateFrom && dateTo) {
-      periodStart = new Date(dateFrom);
-      periodEnd = new Date(dateTo);
-      periodEnd.setHours(23, 59, 59, 999);
-      const spanMs = periodEnd - periodStart;
-      prevEnd = new Date(periodStart.getTime() - 1);
-      prevStart = new Date(prevEnd.getTime() - spanMs);
-    } else {
-      periodEnd = new Date();
-      periodStart = new Date();
-      periodStart.setDate(periodStart.getDate() - 30);
-      prevEnd = new Date(periodStart.getTime() - 1);
-      prevStart = new Date(prevEnd.getTime() - 30 * 24 * 60 * 60 * 1000);
-    }
+  const overview = [
+    { label: "Date Range", value: period.label, icon: Calendar },
+    { label: "Compared With", value: comparing ? period.previous.label : "No comparison (set a start date)", icon: GitCompareArrows },
+    { label: "Coverage Area", value: areaLabel, icon: MapPin },
+    { label: "Report Type", value: "Collection Report", icon: FileText },
+    { label: "Generated On", value: generatedOn(), icon: Clock },
+    { label: "Generated By", value: currentUser?.name || "CENRO Admin", icon: UserCircle2 },
+  ];
 
-    const inRange = (r, start, end) => {
-      if (!r.date_submitted) return false;
-      const d = new Date(r.date_submitted);
-      return d >= start && d <= end;
-    };
+  const kpis = [
+    { key: "bags", label: "Total Bags Collected", suffix: "Bags", icon: FileBarChart2, tint: "bg-blue-50 text-blue-500" },
+    { key: "deployments", label: "Total Robot Deployments", suffix: "", icon: Bot, tint: "bg-emerald-50 text-emerald-500" },
+    { key: "zones", label: "Patrol Zones Covered", suffix: "", icon: Locate, tint: "bg-violet-50 text-violet-500" },
+    { key: "hotspots", label: "Waste Collection Hotspots Identified", suffix: "", icon: Target, tint: "bg-amber-50 text-amber-500" },
+  ];
 
-    const currentReqs = allRequests.filter((r) => matchesBarangay(r) && inRange(r, periodStart, periodEnd));
-    const previousReqs = allRequests.filter((r) => matchesBarangay(r) && inRange(r, prevStart, prevEnd));
+  const reportScope = `${areaLabel} · ${period.label}`;
 
-    const summarize = (reqs) => ({
-      totalBags: reqs.reduce((sum, r) => sum + (Number(r.bags) || 0), 0),
-      deployments: reqs.length,
-      zones: new Set(reqs.map(requestArea).filter(Boolean)).size,
-      hotspots: new Set(reqs.map(requestArea).filter(Boolean)).size,
+  const handleGenerate = () => {
+    setApplied(draft);
+    logAudit({
+      currentUser,
+      action: 'Report generated',
+      module: 'Report Generation',
+      details: `Collection Report generated for ${draft.barangay || 'All Areas'} (${reportPeriod(draft.dateFrom, draft.dateTo).label})`,
     });
-
-    const current = summarize(currentReqs);
-    const previous = summarize(previousReqs);
-
-    // null means "no previous-period baseline to compare against" (not a fabricated
-    // percentage) — the previous window had zero activity, so any change is undefined.
-    const pctDelta = (curr, prev) => {
-      if (prev === 0) return curr === 0 ? 0 : null;
-      return Math.round(((curr - prev) / prev) * 1000) / 10;
-    };
-
-    return {
-      ...current,
-      deltas: {
-        totalBags: pctDelta(current.totalBags, previous.totalBags),
-        deployments: pctDelta(current.deployments, previous.deployments),
-        zones: pctDelta(current.zones, previous.zones),
-        hotspots: pctDelta(current.hotspots, previous.hotspots),
-      },
-    };
-  }, [allRequests, dateFrom, dateTo, selectedBarangay]);
+  };
 
   const handlePrintReport = () => {
     logAudit({
       currentUser,
       action: 'Report printed',
       module: 'Report Generation',
-      details: `Collection Report printed for ${selectedBarangay || 'All Areas'}`,
+      details: `Collection Report printed for ${reportScope}`,
     });
     window.print();
   };
 
   const handleExportExcel = () => {
-    const headerRow = ['Date', 'Location / Zone', 'Bags Collected', 'Robot / Unit', 'Operator', 'Status'];
-    const wsData = [
-      ['CENRO TROID Bot — Collection Report'],
-      [`${selectedBarangay || 'All Areas'}${dateFrom && dateTo ? `  ·  ${dateFrom} to ${dateTo}` : ''}  ·  Generated ${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`],
-      [],
-      headerRow,
-      ...filteredCollections.map((c) => [c.date, c.zone, c.bags, c.unit, c.operator, c.status]),
-    ];
-
-    const ws = XLSX.utils.aoa_to_sheet(wsData);
-    ws['!cols'] = [{ wch: 14 }, { wch: 20 }, { wch: 14 }, { wch: 14 }, { wch: 16 }, { wch: 16 }];
-    ws['!merges'] = [
-      { s: { r: 0, c: 0 }, e: { r: 0, c: headerRow.length - 1 } },
-      { s: { r: 1, c: 0 }, e: { r: 1, c: headerRow.length - 1 } },
-    ];
-
     const titleStyle = { font: { bold: true, sz: 14, color: { rgb: '1B4DE4' } } };
     const subtitleStyle = { font: { italic: true, sz: 10, color: { rgb: '64748B' } } };
     const headerStyle = {
@@ -398,42 +315,85 @@ const Reports = () => {
       fill: { fgColor: { rgb: '1B4DE4' } },
       alignment: { horizontal: 'center', vertical: 'center' },
     };
-    ws['A1'].s = titleStyle;
-    ws['A2'].s = subtitleStyle;
-    headerRow.forEach((_, i) => {
-      const cell = ws[XLSX.utils.encode_cell({ r: 3, c: i })];
-      if (cell) cell.s = headerStyle;
-    });
+    const subtitle = `${reportScope}${comparing ? `  ·  compared with ${period.previous.label}` : ''}  ·  Generated ${generatedOn()}`;
 
-    filteredCollections.forEach((_, rowIdx) => {
-      const r = rowIdx + 4;
-      const bandFill = rowIdx % 2 === 1 ? { fgColor: { rgb: 'F1F5F9' } } : undefined;
-      for (let c = 0; c < headerRow.length; c++) {
-        const cell = ws[XLSX.utils.encode_cell({ r, c })];
-        if (!cell) continue;
-        cell.s = {
-          fill: bandFill,
-          border: { bottom: { style: 'thin', color: { rgb: 'E2E8F0' } } },
-          alignment: c === 2 ? { horizontal: 'right' } : undefined,
-        };
-      }
-    });
+    // A sheet with a title, a subtitle, a header row, then the rows; `numeric` columns align right.
+    const buildSheet = (title, headerRow, rows, widths, numeric = []) => {
+      const ws = XLSX.utils.aoa_to_sheet([[title], [subtitle], [], headerRow, ...rows]);
+      ws['!cols'] = widths.map((wch) => ({ wch }));
+      ws['!merges'] = [
+        { s: { r: 0, c: 0 }, e: { r: 0, c: headerRow.length - 1 } },
+        { s: { r: 1, c: 0 }, e: { r: 1, c: headerRow.length - 1 } },
+      ];
+      ws['A1'].s = titleStyle;
+      ws['A2'].s = subtitleStyle;
+      headerRow.forEach((_, i) => {
+        const cell = ws[XLSX.utils.encode_cell({ r: 3, c: i })];
+        if (cell) cell.s = headerStyle;
+      });
+      rows.forEach((_, rowIdx) => {
+        const bandFill = rowIdx % 2 === 1 ? { fgColor: { rgb: 'F1F5F9' } } : undefined;
+        for (let c = 0; c < headerRow.length; c++) {
+          const cell = ws[XLSX.utils.encode_cell({ r: rowIdx + 4, c })];
+          if (!cell) continue;
+          cell.s = {
+            fill: bandFill,
+            border: { bottom: { style: 'thin', color: { rgb: 'E2E8F0' } } },
+            alignment: numeric.includes(c) ? { horizontal: 'right' } : undefined,
+          };
+        }
+      });
+      return ws;
+    };
 
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Collection Report');
-    XLSX.writeFile(wb, `collection-report-${new Date().toISOString().split('T')[0]}.xlsx`);
+    XLSX.utils.book_append_sheet(wb, buildSheet(
+      'CENRO TROID Bot — Collection Report',
+      ['Date', 'Request', 'Location / Zone', 'Barangay', 'Bags Collected', 'Weight (kg)', 'Robot / Unit', 'Operator', 'Status'],
+      filteredCollections.map((c) => [formatDay(c.day), c.requestId, c.zone, c.barangay, c.bags, c.weightKg, c.unit, c.operator, c.status]),
+      [14, 12, 22, 18, 14, 12, 16, 18, 16],
+      [4, 5],
+    ), 'Collection Report');
+
+    const changeCell = (change) => (comparing ? formatChange(change) : '-');
+    XLSX.utils.book_append_sheet(wb, buildSheet(
+      'Period Comparison',
+      ['Metric', 'This Period', 'Previous Period', 'Change'],
+      stats.rows.map((r) => [r.unit ? `${r.label} (${r.unit})` : r.label, r.current, comparing ? r.previous : '-', changeCell(r.change)]),
+      [26, 14, 16, 12],
+      [1, 2, 3],
+    ), 'Comparison');
+
+    XLSX.utils.book_append_sheet(wb, buildSheet(
+      `Bags by ${groupBy}`,
+      [groupBy, 'Drives', 'Bags (This Period)', 'Bags (Previous Period)', 'Change'],
+      groups.map((g) => [g.name, g.drives, g.current, comparing ? g.previous : '-', changeCell(g.change)]),
+      [24, 10, 18, 20, 12],
+      [1, 2, 3, 4],
+    ), `By ${groupBy}`);
+
+    XLSX.utils.book_append_sheet(wb, buildSheet(
+      'Waste Collection Distribution',
+      ['Waste Type', 'Items (This Period)', 'Share', 'Items (Previous Period)', 'Change'],
+      wasteTypes.map((w) => [w.name, w.value, `${w.pct}%`, comparing ? w.previous : '-', changeCell(w.change)]),
+      [24, 18, 10, 22, 12],
+      [1, 2, 3, 4],
+    ), 'Waste Types');
+
+    XLSX.writeFile(wb, `collection-report-${manilaDate(new Date())}.xlsx`);
 
     logAudit({
       currentUser,
       action: 'Report exported (Excel)',
       module: 'Report Generation',
-      details: `Collection Report exported to Excel for ${selectedBarangay || 'All Areas'}`,
+      details: `Collection Report exported to Excel for ${reportScope}`,
     });
   };
 
   const handleExportPdf = () => {
     const doc = new jsPDF();
     const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
     const marginX = 14;
     const contentWidth = pageWidth - marginX * 2;
     let y = 0;
@@ -444,13 +404,84 @@ const Reports = () => {
     const SLATE_400 = [148, 163, 184];
     const SLATE_100 = [241, 245, 249];
     const SLATE_200 = [226, 232, 240];
+    const GREEN = [5, 150, 105];
+    const RED = [220, 38, 38];
 
     const statusColors = {
-      Approved: [5, 150, 105], Verified: [100, 116, 139], Completed: [5, 150, 105],
-      Segregated: [147, 51, 234], Declined: [220, 38, 38], Parked: [147, 51, 234],
-      Processing: [2, 132, 199], 'Pending Verification': [234, 88, 12],
+      Approved: GREEN, Verified: SLATE_500, Completed: GREEN,
+      Segregated: [147, 51, 234], Declined: RED, Parked: [147, 51, 234],
+      Ongoing: [2, 132, 199], Processing: [2, 132, 199], 'Pending Verification': [234, 88, 12],
       'Pending City Admin Approval': [217, 119, 6], 'Pending Admin Approval': [37, 99, 235],
       Pending: [217, 119, 6],
+    };
+    const changeColor = (change) => (change === null || change === 0 ? SLATE_500 : change > 0 ? GREEN : RED);
+    const rowHeight = 8;
+
+    const ensureSpace = (needed) => {
+      if (y + needed > pageHeight - 18) {
+        doc.addPage();
+        y = 16;
+        return true;
+      }
+      return false;
+    };
+
+    const sectionTitle = (title) => {
+      ensureSpace(18);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.setTextColor(...SLATE_900);
+      doc.setFillColor(...BRAND);
+      doc.rect(marginX, y - 3.5, 1.2, 4.5, 'F');
+      doc.text(title, marginX + 4, y);
+      y += 6;
+    };
+
+    // A table with a branded header row, repeated on each new page. `cell(row, i)` returns
+    // { text, color?, bold? }; columns are { label, width, align? }.
+    const table = (cols, rows, cell) => {
+      const header = () => {
+        doc.setFillColor(...BRAND);
+        doc.rect(marginX, y, contentWidth, rowHeight, 'F');
+        doc.setTextColor(255, 255, 255);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(8.5);
+        let cx = marginX;
+        cols.forEach((col) => {
+          doc.text(col.label, col.align === 'right' ? cx + col.width - 3 : cx + 3, y + 5.5, col.align === 'right' ? { align: 'right' } : undefined);
+          cx += col.width;
+        });
+        y += rowHeight;
+      };
+      header();
+      rows.forEach((row, i) => {
+        if (ensureSpace(rowHeight)) header();
+        if (i % 2 === 1) {
+          doc.setFillColor(...SLATE_100);
+          doc.rect(marginX, y, contentWidth, rowHeight, 'F');
+        }
+        let cx = marginX;
+        cols.forEach((col, ci) => {
+          const { text, color = SLATE_900, bold = false } = cell(row, ci);
+          doc.setFont('helvetica', bold ? 'bold' : 'normal');
+          doc.setFontSize(8.5);
+          doc.setTextColor(...color);
+          const fitted = doc.splitTextToSize(String(text), col.width - 6)[0] || '';
+          doc.text(fitted, col.align === 'right' ? cx + col.width - 3 : cx + 3, y + 5.5, col.align === 'right' ? { align: 'right' } : undefined);
+          cx += col.width;
+        });
+        doc.setDrawColor(...SLATE_200);
+        doc.line(marginX, y + rowHeight, marginX + contentWidth, y + rowHeight);
+        y += rowHeight;
+      });
+      if (rows.length === 0) {
+        doc.setFont('helvetica', 'italic');
+        doc.setFontSize(8.5);
+        doc.setTextColor(...SLATE_500);
+        doc.text('Nothing in this period.', marginX + 3, y + 5.5);
+        y += rowHeight;
+      }
+      y += 8;
     };
 
     // --- Header band ---
@@ -464,27 +495,24 @@ const Reports = () => {
     doc.setFont('helvetica', 'normal');
     doc.text('Collection Report', marginX, 19);
     doc.setFontSize(8);
-    doc.text(
-      new Date().toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
-      pageWidth - marginX, 12, { align: 'right' }
-    );
-    doc.text(`${selectedBarangay || 'All Areas'}${dateFrom && dateTo ? `  ·  ${dateFrom} to ${dateTo}` : ''}`, pageWidth - marginX, 19, { align: 'right' });
+    doc.text(generatedOn(), pageWidth - marginX, 12, { align: 'right' });
+    doc.text(reportScope, pageWidth - marginX, 19, { align: 'right' });
     y = 36;
 
     // --- KPI stat row ---
-    const kpis = [
-      { label: 'Total Bags', value: stats.totalBags.toLocaleString() },
-      { label: 'Deployments', value: String(stats.deployments) },
-      { label: 'Zones Covered', value: String(stats.zones) },
-      { label: 'Hotspots', value: String(stats.hotspots) },
-    ];
     const kpiGap = 4;
     const kpiWidth = (contentWidth - kpiGap * 3) / 4;
-    kpis.forEach((k, i) => {
+    const kpiHeight = comparing ? 23 : 18;
+    [
+      { label: 'Total Bags', row: metric('bags') },
+      { label: 'Robot Deployments', row: metric('deployments') },
+      { label: 'Zones Covered', row: metric('zones') },
+      { label: 'Hotspots', row: metric('hotspots') },
+    ].forEach((k, i) => {
       const x = marginX + i * (kpiWidth + kpiGap);
       doc.setDrawColor(...SLATE_200);
       doc.setFillColor(...SLATE_100);
-      doc.roundedRect(x, y, kpiWidth, 18, 2, 2, 'FD');
+      doc.roundedRect(x, y, kpiWidth, kpiHeight, 2, 2, 'FD');
       doc.setTextColor(...SLATE_500);
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(7.5);
@@ -492,146 +520,140 @@ const Reports = () => {
       doc.setTextColor(...SLATE_900);
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(13);
-      doc.text(k.value, x + 4, y + 14.5);
+      doc.text(formatMetric(k.row.current), x + 4, y + 14.5);
+      if (comparing) {
+        doc.setFontSize(7);
+        doc.setTextColor(...changeColor(k.row.change));
+        const changeText = formatChange(k.row.change);
+        doc.text(changeText, x + 4, y + 20);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(...SLATE_500);
+        doc.text(`vs ${formatMetric(k.row.previous)}`, x + 5 + doc.getTextWidth(changeText), y + 20);
+      }
     });
-    y += 26;
+    y += kpiHeight + 10;
+
+    // --- Period comparison ---
+    sectionTitle(comparing ? `Period Comparison (vs ${period.previous.label})` : 'Period Summary');
+    if (comparing) {
+      table(
+        [
+          { label: 'Metric', width: 70 },
+          { label: 'This Period', width: 37, align: 'right' },
+          { label: 'Previous Period', width: 40, align: 'right' },
+          { label: 'Change', width: contentWidth - 147, align: 'right' },
+        ],
+        stats.rows,
+        (r, ci) => [
+          { text: r.label },
+          { text: formatMetric(r.current, r.unit), bold: true },
+          { text: formatMetric(r.previous, r.unit), color: SLATE_500 },
+          { text: formatChange(r.change), color: changeColor(r.change), bold: true },
+        ][ci],
+      );
+    } else {
+      table(
+        [{ label: 'Metric', width: 110 }, { label: 'Value', width: contentWidth - 110, align: 'right' }],
+        stats.rows,
+        (r, ci) => [{ text: r.label }, { text: formatMetric(r.current, r.unit), bold: true }][ci],
+      );
+    }
+
+    // --- Bags by barangay / area ---
+    sectionTitle(`Bags by ${groupBy}`);
+    table(
+      [
+        { label: groupBy, width: 70 },
+        { label: 'Drives', width: 22, align: 'right' },
+        { label: 'Bags', width: 28, align: 'right' },
+        { label: 'Previous', width: 30, align: 'right' },
+        { label: 'Change', width: contentWidth - 150, align: 'right' },
+      ],
+      groups,
+      (g, ci) => [
+        { text: g.name },
+        { text: String(g.drives) },
+        { text: g.current.toLocaleString(), bold: true },
+        { text: comparing ? g.previous.toLocaleString() : '-', color: SLATE_500 },
+        comparing ? { text: formatChange(g.change), color: changeColor(g.change), bold: true } : { text: '-', color: SLATE_500 },
+      ][ci],
+    );
 
     // --- Waste type breakdown ---
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(11);
-    doc.setTextColor(...SLATE_900);
-    doc.setFillColor(...BRAND);
-    doc.rect(marginX, y - 3.5, 1.2, 4.5, 'F');
-    doc.text('Waste Collection Distribution', marginX + 4, y);
-    y += 7;
-
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(9);
-    const swatchSize = 3;
-    const colGap = contentWidth / 2;
-    wasteTypes.forEach((w, i) => {
-      const col = i % 2;
-      const row = Math.floor(i / 2);
-      const x = marginX + col * colGap;
-      const rowY = y + row * 6;
-      const rgb = w.color.match(/\w\w/g).map((h) => parseInt(h, 16));
-      doc.setFillColor(...rgb);
-      doc.rect(x, rowY - swatchSize + 1, swatchSize, swatchSize, 'F');
-      doc.setTextColor(...SLATE_500);
-      doc.text(`${w.name}`, x + 5, rowY + 1);
-      doc.setTextColor(...SLATE_900);
-      doc.setFont('helvetica', 'bold');
-      doc.text(`${w.value} (${w.pct}%)`, x + colGap - 4, rowY + 1, { align: 'right' });
-      doc.setFont('helvetica', 'normal');
-    });
-    y += Math.ceil(wasteTypes.length / 2) * 6 + 8;
+    sectionTitle('Waste Collection Distribution (items by type)');
+    table(
+      [
+        { label: 'Waste Type', width: 70 },
+        { label: 'Items', width: 28, align: 'right' },
+        { label: 'Share', width: 22, align: 'right' },
+        { label: 'Previous', width: 30, align: 'right' },
+        { label: 'Change', width: contentWidth - 150, align: 'right' },
+      ],
+      wasteTypes,
+      (w, ci) => [
+        { text: w.name, color: w.color.match(/\w\w/g).map((h) => parseInt(h, 16)), bold: true },
+        { text: w.value.toLocaleString(), bold: true },
+        { text: `${w.pct}%` },
+        { text: comparing ? w.previous.toLocaleString() : '-', color: SLATE_500 },
+        comparing ? { text: formatChange(w.change), color: changeColor(w.change), bold: true } : { text: '-', color: SLATE_500 },
+      ][ci],
+    );
 
     // --- Collection Summary table ---
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(11);
-    doc.setTextColor(...SLATE_900);
-    doc.setFillColor(...BRAND);
-    doc.rect(marginX, y - 3.5, 1.2, 4.5, 'F');
-    doc.text('Collection Summary', marginX + 4, y);
-    y += 6;
-
-    const cols = [
-      { label: 'Date', width: 26 },
-      { label: 'Location / Zone', width: 40 },
-      { label: 'Bags', width: 20, align: 'right' },
-      { label: 'Robot / Unit', width: 32 },
-      { label: 'Operator', width: 32 },
-      { label: 'Status', width: contentWidth - (26 + 40 + 20 + 32 + 32) },
-    ];
-    const rowHeight = 8;
-
-    const drawTableHeader = () => {
-      doc.setFillColor(...BRAND);
-      doc.rect(marginX, y, contentWidth, rowHeight, 'F');
-      doc.setTextColor(255, 255, 255);
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(8.5);
-      let cx = marginX;
-      cols.forEach((col) => {
-        doc.text(col.label, col.align === 'right' ? cx + col.width - 3 : cx + 3, y + 5.5, col.align === 'right' ? { align: 'right' } : undefined);
-        cx += col.width;
-      });
-      y += rowHeight;
-    };
-
-    drawTableHeader();
-
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(8.5);
-    filteredCollections.forEach((c, i) => {
-      if (y > 275) {
-        doc.addPage();
-        y = 16;
-        drawTableHeader();
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(8.5);
-      }
-
-      if (i % 2 === 1) {
-        doc.setFillColor(...SLATE_100);
-        doc.rect(marginX, y, contentWidth, rowHeight, 'F');
-      }
-
-      let cx = marginX;
-      const cells = [c.date, c.zone, String(c.bags), c.unit, c.operator];
-      cells.forEach((val, ci) => {
-        const col = cols[ci];
-        doc.setTextColor(...SLATE_900);
-        const text = doc.splitTextToSize(String(val), col.width - 6)[0] || '';
-        doc.text(text, col.align === 'right' ? cx + col.width - 3 : cx + 3, y + 5.5, col.align === 'right' ? { align: 'right' } : undefined);
-        cx += col.width;
-      });
-
-      const statusRgb = statusColors[c.status] || SLATE_500;
-      doc.setTextColor(...statusRgb);
-      doc.setFont('helvetica', 'bold');
-      doc.text(c.status, cx + 3, y + 5.5);
-      doc.setFont('helvetica', 'normal');
-
-      doc.setDrawColor(...SLATE_200);
-      doc.line(marginX, y + rowHeight, marginX + contentWidth, y + rowHeight);
-
-      y += rowHeight;
-    });
+    sectionTitle('Collection Summary');
+    table(
+      [
+        { label: 'Date', width: 26 },
+        { label: 'Location / Zone', width: 40 },
+        { label: 'Bags', width: 18, align: 'right' },
+        { label: 'Robot / Unit', width: 32 },
+        { label: 'Operator', width: 34 },
+        { label: 'Status', width: contentWidth - 150 },
+      ],
+      filteredCollections,
+      (c, ci) => [
+        { text: formatDay(c.day) },
+        { text: c.zone },
+        { text: String(c.bags) },
+        { text: c.unit },
+        { text: c.operator },
+        { text: c.status, color: statusColors[c.status] || SLATE_500, bold: true },
+      ][ci],
+    );
 
     // --- Footer on every page ---
     const pageCount = doc.internal.getNumberOfPages();
     for (let p = 1; p <= pageCount; p++) {
       doc.setPage(p);
-      const pageH = doc.internal.pageSize.getHeight();
       doc.setDrawColor(...SLATE_200);
-      doc.line(marginX, pageH - 12, pageWidth - marginX, pageH - 12);
+      doc.line(marginX, pageHeight - 12, pageWidth - marginX, pageHeight - 12);
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(7.5);
       doc.setTextColor(...SLATE_400);
-      doc.text('CENRO TROID Bot — Collection Report', marginX, pageH - 7);
-      doc.text(`Page ${p} of ${pageCount}`, pageWidth - marginX, pageH - 7, { align: 'right' });
+      doc.text('CENRO TROID Bot — Collection Report', marginX, pageHeight - 7);
+      doc.text(`Page ${p} of ${pageCount}`, pageWidth - marginX, pageHeight - 7, { align: 'right' });
     }
 
-    doc.save(`collection-report-${new Date().toISOString().split('T')[0]}.pdf`);
+    doc.save(`collection-report-${manilaDate(new Date())}.pdf`);
 
     logAudit({
       currentUser,
       action: 'Report exported (PDF)',
       module: 'Report Generation',
-      details: `Collection Report exported to PDF for ${selectedBarangay || 'All Areas'}`,
+      details: `Collection Report exported to PDF for ${reportScope}`,
     });
   };
 
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-[400px]">
+        <span className="text-sm font-medium text-slate-500">Loading report data...</span>
+      </div>
+    );
+  }
+
   return (
     <div className="animate-fade-in pb-12">
-      {loading && (
-        <div className="flex items-center justify-center h-[400px]">
-          <span className="text-sm font-medium text-slate-500">Loading report data...</span>
-        </div>
-      )}
-      {!loading && (
-      <>
       {/* Page header with title and description */}
       <header className="mb-6 print:hidden">
         <h1 className="text-[28px] font-bold text-slate-900 tracking-tight leading-none">Report Generation</h1>
@@ -644,16 +666,21 @@ const Reports = () => {
       <header className="hidden print:flex print:items-center print:justify-between print:border-b-2 print:border-[#1b4de4] print:pb-4 print:mb-6">
         <div>
           <p className="text-lg font-bold text-slate-900">CENRO TROID Bot</p>
-          <p className="text-xs text-slate-500">Collection Report — {selectedBarangay || "All Areas"}{dateFrom && dateTo ? ` · ${dateFrom} to ${dateTo}` : ""}</p>
+          <p className="text-xs text-slate-500">
+            Collection Report — {reportScope}{comparing ? ` · compared with ${period.previous.label}` : ""}
+          </p>
         </div>
-        <p className="text-xs text-slate-500">Generated {new Date().toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>
+        <p className="text-xs text-slate-500">Generated {generatedOn()}</p>
       </header>
 
-      {/* Filter bar: lets the user select date range and location before generating */}
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] print:shadow-none print:border-slate-300 p-6 mb-6 print:hidden">
+      {error && (
+        <div className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700 print:hidden">{error}</div>
+      )}
+
+      {/* Filter bar: the date range and location the report covers, applied by Generate Report */}
+      <div className={`${CARD} p-6 mb-6 print:hidden`}>
         <div className="flex flex-col lg:flex-row gap-4 lg:items-end">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 flex-1">
-            {/* Date Range with calendar inputs */}
             <div>
               <p className="text-xs font-semibold text-slate-500 mb-1.5">Date Range</p>
               <div className="flex items-center gap-2">
@@ -661,10 +688,11 @@ const Reports = () => {
                   <Calendar size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
                   <input
                     type="date"
-                    value={dateFrom}
-                    onChange={(e) => setDateFrom(e.target.value)}
-                    className="w-full flex items-center gap-2.5 bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-medium text-slate-700 hover:border-slate-300 transition-colors pl-9"
-                    placeholder="From"
+                    value={draft.dateFrom}
+                    max={draft.dateTo || undefined}
+                    onChange={(e) => setDraft((d) => ({ ...d, dateFrom: e.target.value }))}
+                    aria-label="From"
+                    className={`${INPUT} pl-9`}
                   />
                 </div>
                 <span className="text-slate-400 text-sm shrink-0">to</span>
@@ -672,101 +700,105 @@ const Reports = () => {
                   <Calendar size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
                   <input
                     type="date"
-                    value={dateTo}
-                    onChange={(e) => setDateTo(e.target.value)}
-                    className="w-full flex items-center gap-2.5 bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-medium text-slate-700 hover:border-slate-300 transition-colors pl-9"
-                    placeholder="To"
+                    value={draft.dateTo}
+                    min={draft.dateFrom || undefined}
+                    onChange={(e) => setDraft((d) => ({ ...d, dateTo: e.target.value }))}
+                    aria-label="To"
+                    className={`${INPUT} pl-9`}
                   />
                 </div>
               </div>
             </div>
-            {/* Barangay / Location select dropdown */}
             <div>
               <p className="text-xs font-semibold text-slate-500 mb-1.5">Barangay / Location</p>
               <div className="relative">
                 <MapPin size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-<select
-                   value={selectedBarangay}
-                   onChange={(e) => setSelectedBarangay(e.target.value)}
-                   className="w-full flex items-center gap-2.5 bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-medium text-slate-700 hover:border-slate-300 transition-colors appearance-none pl-9 pr-8"
-                 >
-                   <option value="" disabled>Select Barangay / Location</option>
-                   {barangays.map((b) => (
-                     <option key={b} value={b}>{b}</option>
-                   ))}
-                 </select>
+                <select
+                  value={draft.barangay}
+                  onChange={(e) => setDraft((d) => ({ ...d, barangay: e.target.value }))}
+                  className={`${INPUT} appearance-none pl-9 pr-8 cursor-pointer`}
+                >
+                  <option value="">All Areas</option>
+                  {barangays.map((b) => (
+                    <option key={b} value={b}>{b}</option>
+                  ))}
+                </select>
                 <svg className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" viewBox="0 0 12 12" fill="none">
                   <path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
               </div>
             </div>
-            {/* Report Type (left as is) */}
-            <FieldSelect icon={FileText} label="Report Type" value="Collection Report" />
+            <div>
+              <p className="text-xs font-semibold text-slate-500 mb-1.5">Report Type</p>
+              <div className="relative">
+                <FileText size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                <select value="collection" disabled className={`${INPUT} appearance-none pl-9 disabled:opacity-100`}>
+                  <option value="collection">Collection Report</option>
+                </select>
+              </div>
+            </div>
           </div>
-<button
-             onClick={() => logAudit({
-               currentUser,
-               action: 'Report generated',
-               module: 'Report Generation',
-               details: `Collection Report generated for ${selectedBarangay || 'All Areas'}${dateFrom && dateTo ? ` (${dateFrom} – ${dateTo})` : ''}`,
-             })}
-             className="flex items-center justify-center gap-2 bg-[#1b4de4] hover:bg-[#153eb8] text-white font-semibold text-sm rounded-xl px-5 py-2.5 transition-colors shrink-0"
-           >
-             <FileText size={16} />
-             Generate Report
-           </button>
+          <button
+            onClick={handleGenerate}
+            className="flex items-center justify-center gap-2 bg-[#1b4de4] hover:bg-[#153eb8] text-white font-semibold text-sm rounded-xl px-5 py-2.5 transition-colors shrink-0"
+          >
+            <FileText size={16} />
+            Generate Report
+          </button>
+        </div>
+        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
+          {draftChanged ? (
+            <span className="font-semibold text-amber-600">Click Generate Report to apply the changes.</span>
+          ) : (
+            <span>
+              Showing <span className="font-semibold text-slate-700">{period.label}</span>
+              {comparing
+                ? <> compared with <span className="font-semibold text-slate-700">{period.previous.label}</span></>
+                : " · set a start date to compare with the period before it"}
+            </span>
+          )}
+          {(draft.dateFrom || draft.dateTo) && (
+            <button type="button" onClick={() => setDraft((d) => ({ ...d, dateFrom: "", dateTo: "" }))} className="font-medium text-blue-600 hover:text-blue-700">
+              Use all time
+            </button>
+          )}
         </div>
       </div>
 
       {/* KPI stat cards row showing high-level collection and deployment metrics */}
-      {loading ? (
-        <div className="flex items-center justify-center h-[140px]">
-          <span className="text-sm font-medium text-slate-500">Loading report data...</span>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 mb-6">
-          {[
-            { label: "Total Bags Collected", value: stats.totalBags.toLocaleString(), suffix: "Bags", delta: stats.deltas.totalBags, icon: FileBarChart2, tint: "bg-blue-50 text-blue-500" },
-            { label: "Total Robot Deployments", value: stats.deployments, suffix: "", delta: stats.deltas.deployments, icon: Bot, tint: "bg-emerald-50 text-emerald-500" },
-            { label: "Patrol Zones Covered", value: stats.zones, suffix: "", delta: stats.deltas.zones, icon: Locate, tint: "bg-violet-50 text-violet-500" },
-            { label: "Waste Collection Hotspots Identified", value: stats.hotspots, suffix: "", delta: stats.deltas.hotspots, icon: Target, tint: "bg-amber-50 text-amber-500" },
-          ].map(({ label, value, suffix, delta, icon: Icon, tint }) => {
-            const hasBaseline = delta !== null;
-            const isFlat = hasBaseline && delta === 0;
-            const isUp = hasBaseline && delta > 0;
-            return (
-              <div key={label} className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] print:shadow-none print:border-slate-300 p-5 flex gap-4">
-                <div className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 ${tint}`}>
-                  <Icon size={20} />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-xs font-semibold text-slate-500 leading-tight">{label}</p>
-                  <p className="mt-1 text-2xl font-bold text-slate-900 leading-none">
-                    {value} {suffix && <span className="text-sm font-semibold text-slate-400">{suffix}</span>}
-                  </p>
-                  <p className={`mt-1.5 text-xs font-semibold flex items-center gap-0.5 ${!hasBaseline || isFlat ? "text-slate-400" : isUp ? "text-emerald-500" : "text-rose-500"}`}>
-                    {hasBaseline && !isFlat && (
-                      <svg width="10" height="10" viewBox="0 0 10 10" fill="none" className={isUp ? "" : "rotate-180"}>
-                        <path d="M5 1L9 6H1L5 1Z" fill="currentColor" />
-                      </svg>
-                    )}
-                    {!hasBaseline ? "New activity" : isFlat ? "No change" : `${isUp ? "+" : ""}${delta}%`}{" "}
-                    <span className="text-slate-400 font-medium">vs previous period</span>
-                  </p>
-                </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 mb-6">
+        {kpis.map(({ key, label, suffix, icon: Icon, tint }) => {
+          const row = metric(key);
+          return (
+            <div key={key} className={`${CARD} p-5 flex gap-4`}>
+              <div className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 ${tint}`}>
+                <Icon size={20} />
               </div>
-            );
-          })}
-        </div>
-      )}
+              <div className="min-w-0">
+                <p className="text-xs font-semibold text-slate-500 leading-tight">{label}</p>
+                <p className="mt-1 text-2xl font-bold text-slate-900 leading-none">
+                  {formatMetric(row.current)} {suffix && <span className="text-sm font-semibold text-slate-400">{suffix}</span>}
+                </p>
+                {comparing ? (
+                  <p className="mt-1.5 text-xs flex flex-wrap items-center gap-x-1">
+                    <Change change={row.change} />
+                    <span className="text-slate-400 font-medium">vs {formatMetric(row.previous)} previous period</span>
+                  </p>
+                ) : (
+                  <p className="mt-1.5 text-xs font-medium text-slate-400">{period.label}</p>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
 
       {/* Charts section: trend line + waste type donut chart side-by-side */}
       <div className="grid grid-cols-1 lg:grid-cols-[1.6fr_1fr] gap-5 mb-6">
-        {/* Time-series line chart of daily bag collections */}
-        <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] print:shadow-none print:border-slate-300 p-6">
-          <div className="flex items-center justify-between mb-4">
+        <div className={`${CARD} p-6`}>
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-2">
             <h2 className="text-sm font-bold text-slate-900">Total Bags Collected Over Time</h2>
-            <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg">
+            <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg print:hidden">
               {["Daily", "Weekly", "Monthly"].map((g) => (
                 <button
                   key={g}
@@ -780,36 +812,60 @@ const Reports = () => {
               ))}
             </div>
           </div>
-          <TrendChart data={trend} />
+          {comparing && (
+            <div className="mb-2 flex flex-wrap items-center gap-4 text-xs text-slate-500">
+              <span className="flex items-center gap-1.5">
+                <span className="h-0.5 w-4 rounded" style={{ backgroundColor: CURRENT_COLOR }} /> This period
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="w-4 border-t-2 border-dashed" style={{ borderColor: PREVIOUS_COLOR }} /> Previous period
+              </span>
+              <span className="ml-auto">
+                {formatMetric(stats.now.bags)} vs {formatMetric(stats.before.bags)} bags <Change change={metric("bags").change} className="ml-1" />
+              </span>
+            </div>
+          )}
+          <TrendChart data={trend} comparing={comparing} />
         </div>
 
-        {/* Donut chart breaking down total bags by waste type */}
-        <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] print:shadow-none print:border-slate-300 p-6">
+        <div className={`${CARD} p-6`}>
           <h2 className="text-sm font-bold text-slate-900 mb-4">
             Waste Collection Distribution <span className="text-slate-400 font-medium">(by Type of Waste)</span>
           </h2>
           <div className="flex items-center gap-4">
             <DonutChart data={wasteTypes} />
-            {/* Legend listing each waste type with its count and percentage */}
-            <ul className="flex-1 space-y-2.5 min-w-0">
-              {wasteTypes.map((w) => (
-                <li key={w.name} className="flex items-center gap-2 text-xs">
-                  <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: w.color }} />
-                  <span className="text-slate-600 font-medium truncate flex-1">{w.name}</span>
-                  <span className="text-slate-900 font-semibold shrink-0">{w.value} ({w.pct}%)</span>
-                </li>
-              ))}
-            </ul>
+            {wasteTypes.length === 0 ? (
+              <p className="flex-1 text-xs text-slate-400">No trash reports were filed in this period.</p>
+            ) : (
+              <ul className="flex-1 space-y-2.5 min-w-0">
+                {wasteTypes.map((w) => (
+                  <li key={w.name} className="flex items-center gap-2 text-xs">
+                    <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: w.color }} />
+                    <span className="text-slate-600 font-medium truncate flex-1">{w.name}</span>
+                    <span className="text-slate-900 font-semibold shrink-0">{w.value.toLocaleString()} ({w.pct}%)</span>
+                    {comparing && (
+                      <span className="shrink-0 w-[68px] text-right" title={`${w.previous.toLocaleString()} in the previous period`}>
+                        <Change change={w.change} />
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
+          {comparing && wasteTypes.length > 0 && (
+            <p className="mt-4 text-[11px] text-slate-400">Changes compare item counts with the previous period.</p>
+          )}
         </div>
       </div>
 
       {/* Bottom section: collection summary table + report overview / export actions */}
-      <div className="grid grid-cols-1 lg:grid-cols-[1.6fr_1fr] gap-5">
-        {/* Collection summary table with search filtering by zone */}
-        <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] print:shadow-none print:border-slate-300 p-6">
+      <div className="grid grid-cols-1 lg:grid-cols-[1.6fr_1fr] gap-5 mb-6">
+        <div className={`${CARD} p-6`}>
           <div className="flex items-center justify-between mb-4 gap-3">
-            <h2 className="text-sm font-bold text-slate-900">Collection Summary</h2>
+            <h2 className="text-sm font-bold text-slate-900">
+              Collection Summary <span className="text-slate-400 font-medium">({filteredCollections.length})</span>
+            </h2>
             <div className="relative print:hidden">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
               <input
@@ -820,9 +876,9 @@ const Reports = () => {
               />
             </div>
           </div>
-          <div className="overflow-x-auto -mx-2">
+          <div className="overflow-x-auto -mx-2 max-h-[420px] overflow-y-auto print:max-h-none print:overflow-visible">
             <table className="w-full text-sm">
-              <thead>
+              <thead className="sticky top-0 bg-white">
                 <tr className="text-left text-xs font-semibold text-slate-400 border-b border-slate-100">
                   <th className="py-2.5 px-2 font-semibold">Date</th>
                   <th className="py-2.5 px-2 font-semibold">Location / Zone</th>
@@ -833,43 +889,47 @@ const Reports = () => {
                 </tr>
               </thead>
               <tbody>
-                {/* Filter rows by matching the search term against the zone name */}
-                {filteredCollections
-                  .map((c, i) => (
-                    <tr key={i} className="border-b border-slate-50 last:border-0">
-                      <td className="py-3 px-2 text-slate-500 whitespace-nowrap">{c.date}</td>
-                      <td className="py-3 px-2 text-slate-700 font-medium">{c.zone}</td>
-                      <td className="py-3 px-2 text-slate-700">{c.bags} Bags</td>
-                      <td className="py-3 px-2 text-slate-500">{c.unit}</td>
-                      <td className="py-3 px-2 text-slate-500">{c.operator}</td>
-                      <td className="py-3 px-2">
-                        <span className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full ${REQUEST_STATUS_STYLES[c.status] || 'bg-slate-100 text-slate-600'}`}>
-                          {c.status}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
+                {filteredCollections.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="py-8 text-center text-sm text-slate-400">
+                      {search ? "No collections match your search." : "No trash reports were filed in this period."}
+                    </td>
+                  </tr>
+                )}
+                {filteredCollections.map((c) => (
+                  <tr key={c.requestId} className="border-b border-slate-50 last:border-0">
+                    <td className="py-3 px-2 text-slate-500 whitespace-nowrap">{formatDay(c.day)}</td>
+                    <td className="py-3 px-2">
+                      <p className="text-slate-700 font-medium">{c.zone}</p>
+                      <p className="text-[11px] text-slate-400">{c.requestId}{c.barangay && c.barangay !== c.zone ? ` · ${c.barangay}` : ""}</p>
+                    </td>
+                    <td className="py-3 px-2 text-slate-700 whitespace-nowrap">{c.bags} Bags</td>
+                    <td className="py-3 px-2 text-slate-500">{c.unit}</td>
+                    <td className="py-3 px-2 text-slate-500">{c.operator}</td>
+                    <td className="py-3 px-2">
+                      <span className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full whitespace-nowrap ${REQUEST_STATUS_STYLES[c.status] || 'bg-slate-100 text-slate-600'}`}>
+                        {c.status}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
         </div>
 
         {/* Report overview summary and quick-export actions */}
-        <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] print:shadow-none print:border-slate-300 p-6 flex flex-col">
+        <div className={`${CARD} p-6 flex flex-col`}>
           <h2 className="text-sm font-bold text-slate-900 mb-4">Report Overview</h2>
-<ul className="space-y-3.5 flex-1">
-             {overview.map(({ label, value, icon: Icon }) => {
-               const displayValue = label === "Coverage Area" ? selectedBarangay || "All Areas" : value;
-               return (
-                 <li key={label} className="flex items-start gap-3 text-sm">
-                   <Icon size={16} className="text-slate-400 mt-0.5 shrink-0" />
-                   <span className="text-slate-500 w-28 shrink-0">{label}</span>
-                   <span className="text-slate-800 font-semibold">{displayValue}</span>
-                 </li>
-               );
-             })}
-           </ul>
-          {/* Quick export buttons for the generated report */}
+          <ul className="space-y-3.5 flex-1">
+            {overview.map(({ label, value, icon: Icon }) => (
+              <li key={label} className="flex items-start gap-3 text-sm">
+                <Icon size={16} className="text-slate-400 mt-0.5 shrink-0" />
+                <span className="text-slate-500 w-28 shrink-0">{label}</span>
+                <span className="text-slate-800 font-semibold">{value}</span>
+              </li>
+            ))}
+          </ul>
           <div className="grid grid-cols-3 gap-2.5 mt-5 print:hidden">
             <button
               onClick={handleExportPdf}
@@ -889,13 +949,86 @@ const Reports = () => {
             >
               <Printer size={16} className="text-slate-500" /> Print Report
             </button>
-           </div>
-         </div>
-       </div>
-       </>
-       )}
-     </div>
-   );
- };
+          </div>
+        </div>
+      </div>
+
+      {/* Comparative data: this period against the one before it, overall and per place */}
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_1fr] gap-5">
+        <div className={`${CARD} p-6`}>
+          <h2 className="text-sm font-bold text-slate-900">Period Comparison</h2>
+          <p className="text-xs text-slate-400 mt-0.5 mb-4">
+            {comparing ? `${period.label} vs ${period.previous.label}` : `${period.label} · set a start date to compare with the period before it`}
+          </p>
+          <div className="overflow-x-auto -mx-2">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs font-semibold text-slate-400 border-b border-slate-100">
+                  <th className="py-2.5 px-2 font-semibold">Metric</th>
+                  <th className="py-2.5 px-2 font-semibold text-right">This Period</th>
+                  {comparing && <th className="py-2.5 px-2 font-semibold text-right">Previous</th>}
+                  {comparing && <th className="py-2.5 px-2 font-semibold text-right">Change</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {stats.rows.map((r) => (
+                  <tr key={r.key} className="border-b border-slate-50 last:border-0">
+                    <td className="py-2.5 px-2 text-slate-600">{r.label}</td>
+                    <td className="py-2.5 px-2 text-right font-semibold text-slate-900 whitespace-nowrap">{formatMetric(r.current, r.unit)}</td>
+                    {comparing && <td className="py-2.5 px-2 text-right text-slate-500 whitespace-nowrap">{formatMetric(r.previous, r.unit)}</td>}
+                    {comparing && <td className="py-2.5 px-2 text-right text-xs"><Change change={r.change} /></td>}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div className={`${CARD} p-6`}>
+          <h2 className="text-sm font-bold text-slate-900">Bags by {groupBy}</h2>
+          <p className="text-xs text-slate-400 mt-0.5 mb-4">
+            {selectedBarangay ? `Collection areas in ${selectedBarangay}` : "Every barangay with a filed trash report"}
+            {comparing ? ", against the previous period" : ""}
+          </p>
+          {groups.length === 0 ? (
+            <p className="py-8 text-center text-sm text-slate-400">No bags were collected in either period.</p>
+          ) : (
+            <ul className="space-y-3 max-h-[440px] overflow-y-auto pr-1 print:max-h-none print:overflow-visible">
+              {groups.map((g) => {
+                const top = Math.max(groups[0].current, ...groups.map((x) => x.previous), 1);
+                return (
+                  <li key={g.name} className="text-xs">
+                    <div className="flex items-center gap-2">
+                      <span className="flex-1 truncate font-medium text-slate-700" title={g.name}>{g.name}</span>
+                      <span className="font-semibold text-slate-900 whitespace-nowrap">{g.current.toLocaleString()} bags</span>
+                      {comparing && <span className="text-slate-400 whitespace-nowrap">vs {g.previous.toLocaleString()}</span>}
+                      {comparing && <span className="w-[68px] text-right"><Change change={g.change} /></span>}
+                    </div>
+                    <div className="mt-1.5 space-y-1">
+                      <div className="h-1.5 rounded-full bg-slate-100">
+                        <div className="h-1.5 rounded-full" style={{ width: `${(g.current / top) * 100}%`, backgroundColor: CURRENT_COLOR }} />
+                      </div>
+                      {comparing && (
+                        <div className="h-1 rounded-full bg-slate-50">
+                          <div className="h-1 rounded-full" style={{ width: `${(g.previous / top) * 100}%`, backgroundColor: PREVIOUS_COLOR }} />
+                        </div>
+                      )}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          {comparing && groups.length > 0 && (
+            <div className="mt-4 flex items-center gap-4 text-[11px] text-slate-400">
+              <span className="flex items-center gap-1.5"><span className="h-1.5 w-3 rounded-full" style={{ backgroundColor: CURRENT_COLOR }} /> This period</span>
+              <span className="flex items-center gap-1.5"><span className="h-1 w-3 rounded-full" style={{ backgroundColor: PREVIOUS_COLOR }} /> Previous period</span>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
 
 export default Reports;
