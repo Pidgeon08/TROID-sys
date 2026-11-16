@@ -17,6 +17,7 @@ import LetterAttachment from "../../components/LetterAttachment";
 import { Card } from "../../components/ui/Card";
 import NotificationBell from "../../components/NotificationBell";
 import { REQUEST_STATUS_STYLES, mapRequest, getDeploymentStatus, formatTime12h, toStatusLabel } from "../../constants/requests";
+import { MergedIntoCard, MergedRequestsCard } from "../../components/MergedRequestPanels";
 
 const Field = ({ label, value }) => (
   <div className="flex items-center justify-between py-2 text-sm">
@@ -46,7 +47,9 @@ export default function CityHallViewRequest() {
         if (cancelled) return;
         const mapped = mapRequest(res);
         setRequest(mapped);
-        const sched = (schedulesData || []).find((s) => s.request_id === mapped.id) || null;
+        // A merged request's cleanup is the main request's, so its schedule is shown.
+        const scheduledAs = mapped.mergedInto?.id || mapped.id;
+        const sched = (schedulesData || []).find((s) => s.request_id === scheduledAs) || null;
         setSchedule(sched);
       } catch (err) {
         console.error("Failed to fetch request:", err);
@@ -236,6 +239,10 @@ export default function CityHallViewRequest() {
                 </Card>
 
                 <div className="flex flex-col gap-5">
+                  {request.mergedInto && (
+                    <MergedIntoCard mergedInto={request.mergedInto} mergedAt={request.mergedAt} schedule={schedule} routePrefix="mayorsoffice" />
+                  )}
+                  <MergedRequestsCard requests={request.mergedRequests} routePrefix="mayorsoffice" />
                   <Card>
                     <div className="flex items-center justify-between mb-4">
               <h3 className="text-sm font-semibold text-slate-800">Photo Documentation</h3>

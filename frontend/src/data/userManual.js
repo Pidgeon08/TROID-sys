@@ -61,10 +61,14 @@ export const USER_MANUALS = {
       title: 'Requests',
       path: '/admin/requests',
       description: 'Review barangay cleanup requests, send your own, and file trash reports.',
-      keywords: ['cleanup request', 'approve', 'verify', 'trash report', 'pending', 'send request'],
+      keywords: ['cleanup request', 'approve', 'verify', 'trash report', 'pending', 'send request', 'merge', 'unmerge', 'change area', 'redirect', 'letter preview'],
       steps: [
         'Click "Send Request" to request a cleanup yourself. It is the same form barangays use: choose TROID Supported (pick the barangay and one of its approved collection areas) or Unsupported (pick the barangay and type the location), pick a date from the bot timetable (at least 7 days ahead) and a time, and attach the letter of request.',
-        'Use the tabs to filter by status — Pending Admin, Approved, Ongoing, Unscheduled, Verified, Parked.',
+        'Use the filter bar above the list: search by ID, requester, barangay or area; pick one or more statuses (each shows how many requests it has); filter by date submitted or preferred cleanup date (Today, Last/Next 7 or 30 days, This month, or a custom range); and narrow by cleanup type, barangay, collection area, requester, or whether an approved request is scheduled yet. Sort by submitted or preferred date. Remove a filter by clicking its chip, or click Clear all. Filters stay when you open a request and come back.',
+        'The letter of request is shown on the request page. PDF and Word (.docx) letters can be read there; older .doc files must be downloaded.',
+        'Before a TROID-supported cleanup starts, click "Change Area" to send it to another approved collection area, for example where the trash has drifted. A reason is required, and the requester is told where and why.',
+        'Click "Merge" to fold other requests into the one you are viewing, so one cleanup covers them all. Only TROID-supported requests for the same collection area that have not started can be merged. If you change the main request\'s area, the merged requests move with it. Merged requests keep their own pages, show this request\'s status, schedule, history and trash report, and their requesters are told about every update. Their own deployment schedules are removed.',
+        'Click "Unmerge" on a merged request (or beside it in Merged Requests) to put it back where it was. Archiving the main request unmerges the rest.',
         'Open a request to review it: approve/decline, and once the cleanup is done, with or without a robot, click "Mark Session Completed" and fill in the required Trash Collection Report (per-category counts, bags, and weights).',
         'For TROID-supported cleanups, the Trash by category fields are filled in with what the robot counted. Each shows "TROID counted" beside its label, and the numbers can be edited before filing.',
         'Filing enough reports for one barangay may automatically flag it as a Priority Area — check the Dashboard.',
@@ -157,7 +161,7 @@ export const USER_MANUALS = {
       description: 'Approve or decline barangay cleanup requests before CENRO schedules a bot.',
       keywords: ['approve', 'decline', 'pending approval', 'review'],
       steps: [
-        'Use the tabs — All Requests, Pending Approval, Approved, Declined — to filter the list.',
+        'Use the filter bar above the list: search by ID, requester, barangay or area; pick one or more statuses (each shows how many requests it has); filter by date submitted or preferred cleanup date (Today, Last/Next 7 or 30 days, This month, or a custom range); and narrow by cleanup type, barangay, collection area or requester. Sort by submitted or preferred date, and remove a filter by clicking its chip.',
         'Click "Review" on a pending request to read its details, then approve it (sending it on to CENRO) or decline it with a reason.',
         'Requests you\'ve already decided on can still be opened with "View" for reference.',
       ],
@@ -198,9 +202,11 @@ export const USER_MANUALS = {
       description: 'Track every cleanup request you\'ve submitted, from approval through completion.',
       keywords: ['status', 'track', 'pending', 'completed', 'verified'],
       steps: [
-        'Use the tabs to filter by status — Pending, Approved, Deployed, Completed.',
+        'Use the filter bar to search your requests, pick one or more statuses, filter by date submitted or preferred cleanup date, and narrow by cleanup type or collection area. Sort by submitted or preferred date, and remove a filter by clicking its chip.',
         'Click "View" on any request to see its full timeline, including the trash collection report once CENRO files it.',
         'When an approved cleanup is done, click "Mark as Finished" and fill in the required Trash Collection Report. The cleanup stays open until the report is filed.',
+        'If CENRO merges your request into another, it shows "Merged". Its page then shows the other request\'s status, schedule and trash report, and you are notified of its updates.',
+        'A request still waiting for approval after 20 days can be resent from its page to remind the City Admin or CENRO.',
       ],
     },
     {
@@ -212,7 +218,9 @@ export const USER_MANUALS = {
       steps: [
         'Choose the Cleanup Type. TROID Supported sends a TROID bot to one of your approved collection areas (the landmark is optional). Unsupported is a manual cleanup with no bot: type its location instead.',
         'Pick a preferred date from the bot timetable and a time, and attach the letter of request.',
+        'In the Review Request Overview, click "Preview" beside the letter to check it is the right file (PDF and .docx only).',
         'Submit it; it first goes to the City Admin for approval, then to CENRO for scheduling.',
+        'If 20 days pass with no decision, open the request and click "Resend Request" to remind whoever it is waiting on. You can resend again 20 days later.',
         'Track its progress afterward in My Requests.',
       ],
     },

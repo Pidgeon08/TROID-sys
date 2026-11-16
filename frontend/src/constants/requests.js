@@ -1,5 +1,3 @@
-export const TABS = ["All Requests", "Pending City Admin", "Pending Admin", "Approved", "Ongoing", "Unscheduled", "Verified", "Parked"];
-
 export const REQUEST_STATUS_STYLES = {
   Pending: "bg-amber-50 text-amber-700",
   Approved: "bg-emerald-50 text-emerald-700",
@@ -13,7 +11,15 @@ export const REQUEST_STATUS_STYLES = {
   Segregated: "bg-purple-50 text-purple-700",
   "Pending Verification": "bg-orange-50 text-orange-700",
   Verified: "bg-slate-100 text-slate-600",
+  Merged: "bg-indigo-50 text-indigo-700",
 };
+
+// Before the cleanup starts: when CENRO can still change a request's area or merge it.
+export const OPEN_STATUSES = ["Pending City Admin Approval", "Pending Admin Approval", "Approved", "Parked"];
+
+export function formatDate(value) {
+  return value ? new Date(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '';
+}
 
 export const TRASH_CATEGORIES = ["Plastic", "Metal", "Glass", "Paper/Cardboard", "Organic/Biodegradable", "Other"];
 
@@ -117,6 +123,53 @@ export function toStatusLabel(raw) {
   return cityAdminWording((raw || '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()));
 }
 
+function formatDateTime(value) {
+  return value
+    ? new Date(value).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+    : value;
+}
+
+function mapStatusHistory(history) {
+  return (history || []).map((sh) => ({
+    label: cityAdminWording(sh.label),
+    date: formatDateTime(sh.date),
+    actor: cityAdminWording(sh.actor),
+    role: cityAdminWording(sh.role),
+    state: sh.state || 'done',
+    details: sh.details || '',
+  }));
+}
+
+function mapCollectionArea(detail) {
+  return detail ? { id: detail.id, areaId: detail.area_id, name: detail.name } : null;
+}
+
+// The request a merged one was folded into: its cleanup, schedule and results are the merged one's too.
+function mapMergedInto(raw) {
+  if (!raw) return null;
+  return {
+    id: raw.request_id,
+    status: toStatusLabel(raw.status),
+    archived: Boolean(raw.archived),
+    cleanupType: raw.cleanup_type || 'troid_supported',
+    requestedByName: raw.requested_by_name || '',
+    barangay: raw.barangay || '',
+    locationName: raw.location_name || '',
+    collectionArea: mapCollectionArea(raw.collection_area_detail),
+    preferredDate: raw.preferred_date || '',
+    preferredTime: raw.preferred_time || '',
+    sessionCompletedAt: raw.session_completed_at || null,
+    bags: raw.bags || 0,
+    weightKg: raw.weight_kg || 0,
+    nonUsableKg: raw.non_usable_kg || 0,
+    recyclableKg: raw.recyclable_kg || 0,
+    trashCategories: raw.trash_categories || {},
+    verifiedCategories: raw.verified_categories || {},
+    verifiedAt: raw.verified_at || null,
+    statusHistory: mapStatusHistory(raw.status_history),
+  };
+}
+
 export function mapRequest(raw) {
   const status = toStatusLabel(raw.status);
   
@@ -127,6 +180,7 @@ export function mapRequest(raw) {
     dateSubmitted: raw.date_submitted
       ? new Date(raw.date_submitted).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })
       : raw.date_submitted,
+    submittedAt: raw.date_submitted || null,
     requestedBy: {
       name: raw.requested_by_name || '',
       role: raw.requested_by_role || '',
@@ -153,23 +207,12 @@ export function mapRequest(raw) {
       date: p.date || '',
       image_data: p.image_data || '',
     })),
-    statusHistory: (raw.status_history || []).map((sh) => ({
-      label: cityAdminWording(sh.label),
-      date: sh.date
-        ? new Date(sh.date).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })
-        : sh.date,
-      actor: cityAdminWording(sh.actor),
-      role: cityAdminWording(sh.role),
-      state: sh.state || 'done',
-      details: sh.details || '',
-    })),
+    statusHistory: mapStatusHistory(raw.status_history),
     botId: raw.bot_id || null,
     operator: raw.operator || null,
     // 'troid_supported' cleanups have a collection area; 'unsupported' ones only a location.
     cleanupType: raw.cleanup_type || 'troid_supported',
-    collectionArea: raw.collection_area_detail
-      ? { id: raw.collection_area_detail.id, areaId: raw.collection_area_detail.area_id, name: raw.collection_area_detail.name }
-      : null,
+    collectionArea: mapCollectionArea(raw.collection_area_detail),
     bags: raw.bags || 0,
     weightKg: raw.weight_kg || 0,
     nonUsableKg: raw.non_usable_kg || 0,
@@ -179,5 +222,19 @@ export function mapRequest(raw) {
     verifiedCategories: raw.verified_categories || {},
     verificationNotes: raw.verification_notes || '',
     verifiedAt: raw.verified_at || null,
+    // Sendable again after 20 days without a decision (see Request.RESEND_AFTER_DAYS).
+    canResend: Boolean(raw.can_resend),
+    resendAvailableAt: raw.resend_available_at || null,
+    resentAt: raw.resent_at || null,
+    mergedInto: mapMergedInto(raw.merged_into_detail),
+    mergedAt: raw.merged_at || null,
+    mergedRequests: (raw.merged_requests || []).map((m) => ({
+      id: m.request_id,
+      requestedByName: m.requested_by_name || '',
+      requestedByRole: m.requested_by_role || '',
+      barangay: m.barangay || '',
+      locationName: m.location_name || '',
+      mergedAt: m.merged_at || null,
+    })),
   };
 }

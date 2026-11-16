@@ -13,13 +13,18 @@ import {
   Ban,
   ClipboardCheck,
   FileCheck2,
+  Send,
+  Hourglass,
 } from "lucide-react";
 import api from "../../services/api";
 import LetterAttachment from "../../components/LetterAttachment";
 import { logAudit } from "../../services/auditLog";
 import { Card } from "../../components/ui/Card";
 import NotificationBell from "../../components/NotificationBell";
-import { REQUEST_STATUS_STYLES, TRASH_CATEGORIES, mapRequest, fillTroidCounts, getDeploymentStatus, formatTime12h, toStatusLabel } from "../../constants/requests";
+import { REQUEST_STATUS_STYLES, TRASH_CATEGORIES, mapRequest, fillTroidCounts, getDeploymentStatus, formatTime12h, toStatusLabel, formatDate } from "../../constants/requests";
+import { MergedIntoCard, MergedRequestsCard } from "../../components/MergedRequestPanels";
+
+const AWAITING_DECISION = { "Pending City Admin Approval": "City Admin", "Pending Admin Approval": "CENRO" };
 
 function emptyCategoryValues() {
   return TRASH_CATEGORIES.reduce((acc, cat) => ({ ...acc, [cat]: "" }), {});
@@ -56,6 +61,7 @@ export default function BarangayViewRequest() {
   const [submittingTrashReport, setSubmittingTrashReport] = useState(false);
   // What the robot counted, per category; null when it wasn't a TROID-assisted cleanup.
   const [troidCount, setTroidCount] = useState(null);
+  const [resending, setResending] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -65,7 +71,9 @@ export default function BarangayViewRequest() {
         if (cancelled) return;
         const mapped = mapRequest(res);
         setRequest(mapped);
-        const sched = (schedulesData || []).find((s) => s.request_id === mapped.id) || null;
+        // A merged request's cleanup is the main request's, so its schedule is shown.
+        const scheduledAs = mapped.mergedInto?.id || mapped.id;
+        const sched = (schedulesData || []).find((s) => s.request_id === scheduledAs) || null;
         setSchedule(sched);
       } catch (err) {
         console.error("Failed to fetch request:", err);
@@ -76,6 +84,27 @@ export default function BarangayViewRequest() {
     fetchRequest();
     return () => { cancelled = true; };
   }, [id]);
+
+  const handleResend = async () => {
+    const waitingOn = AWAITING_DECISION[request.status];
+    if (!confirm(`Resend ${request.id}? The ${waitingOn} will be reminded that it's still waiting for their decision.`)) return;
+    setResending(true);
+    try {
+      const res = await api.resendRequest(request.id);
+      setRequest(mapRequest(res));
+      logAudit({
+        currentUser,
+        action: "Request resent",
+        module: "Requests",
+        details: `${request.id} resent to the ${waitingOn} after 20 days without a decision`,
+      });
+    } catch (err) {
+      console.error("Failed to resend request:", err);
+      alert(err.message || "Failed to resend the request. Please try again.");
+    } finally {
+      setResending(false);
+    }
+  };
 
   const openTrashReport = () => {
     setTrashCategoryValues(emptyCategoryValues());
@@ -318,6 +347,42 @@ export default function BarangayViewRequest() {
         </Card>
 
         <div className="flex flex-col gap-5">
+          {AWAITING_DECISION[request.status] && (
+            <Card>
+              <div className="flex items-start gap-3">
+                <div className="w-9 h-9 rounded-full bg-amber-50 flex items-center justify-center shrink-0">
+                  <Hourglass size={16} className="text-amber-600" />
+                </div>
+                <div className="min-w-0 flex-1 text-sm">
+                  <p className="font-semibold text-slate-800">Waiting for the {AWAITING_DECISION[request.status]}</p>
+                  {request.canResend ? (
+                    <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
+                      There's been no decision for 20 days. You can resend the request to remind them.
+                    </p>
+                  ) : (
+                    <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
+                      {request.resentAt ? `You resent it on ${formatDate(request.resentAt)}. ` : ""}
+                      If there's still no decision by {formatDate(request.resendAvailableAt)}, you can resend it.
+                    </p>
+                  )}
+                </div>
+              </div>
+              {request.canResend && (
+                <button
+                  onClick={handleResend}
+                  disabled={resending}
+                  className="mt-4 w-full flex items-center justify-center gap-2 rounded-lg bg-[#1b4de4] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#153eb8] transition-colors disabled:opacity-50"
+                >
+                  <Send size={15} />
+                  {resending ? "Resending..." : "Resend Request"}
+                </button>
+              )}
+            </Card>
+          )}
+          {request.mergedInto && (
+            <MergedIntoCard mergedInto={request.mergedInto} mergedAt={request.mergedAt} schedule={schedule} routePrefix="barangay" />
+          )}
+          <MergedRequestsCard requests={request.mergedRequests} routePrefix="barangay" />
           <Card>
 <div className="flex items-center justify-between mb-4">
               <h3 className="text-sm font-semibold text-slate-800">Photo Documentation</h3>

@@ -3,6 +3,7 @@ import binascii
 import os
 import re
 
+from django.utils import timezone
 from rest_framework import serializers
 from . import boundaries
 from .models import Boat, DetectionEvent, User, Operator, Request, StatusHistory, Photo, DeploymentSchedule, PriorityArea, LandfillRecord, RecyclingRecord, SegregationRecord, AuditLog, HeatmapData, CollectionArea, Notification
@@ -144,6 +145,61 @@ class RequestSerializer(serializers.ModelSerializer):
         queryset=CollectionArea.objects.all(), required=False, allow_null=True
     )
     collection_area_detail = serializers.SerializerMethodField()
+    resend_available_at = serializers.SerializerMethodField()
+    can_resend = serializers.SerializerMethodField()
+    merged_into = serializers.SlugRelatedField(slug_field='request_id', read_only=True)
+    merged_into_detail = serializers.SerializerMethodField()
+    merged_requests = serializers.SerializerMethodField()
+
+    def get_resend_available_at(self, obj):
+        return obj.resend_available_at()
+
+    def get_can_resend(self, obj):
+        available = obj.resend_available_at()
+        return available is not None and timezone.now() >= available
+
+    def get_merged_into_detail(self, obj):
+        """The request this one was merged into: its cleanup is this request's cleanup,
+        so its progress and results are shown here too."""
+        primary = obj.merged_into
+        if primary is None:
+            return None
+        area = primary.collection_area
+        return {
+            'request_id': primary.request_id,
+            'status': primary.status,
+            'archived': primary.archived,
+            'cleanup_type': primary.cleanup_type,
+            'requested_by_name': primary.requested_by_name,
+            'barangay': primary.barangay,
+            'location_name': primary.location_name,
+            'collection_area_detail': {'id': area.id, 'area_id': area.area_id, 'name': area.name} if area else None,
+            'preferred_date': primary.preferred_date,
+            'preferred_time': primary.preferred_time,
+            'session_completed_at': primary.session_completed_at,
+            'bags': primary.bags,
+            'weight_kg': primary.weight_kg,
+            'non_usable_kg': primary.non_usable_kg,
+            'recyclable_kg': primary.recyclable_kg,
+            'trash_categories': primary.trash_categories,
+            'verified_categories': primary.verified_categories,
+            'verified_at': primary.verified_at,
+            'status_history': StatusHistorySerializer(primary.status_history.all(), many=True).data,
+        }
+
+    def get_merged_requests(self, obj):
+        return [
+            {
+                'request_id': merged.request_id,
+                'requested_by_name': merged.requested_by_name,
+                'requested_by_role': merged.requested_by_role,
+                'barangay': merged.barangay,
+                'location_name': merged.location_name,
+                'merged_at': merged.merged_at,
+            }
+            for merged in obj.merged_requests.all()
+            if not merged.archived
+        ]
 
     def get_collection_area_detail(self, obj):
         if not obj.collection_area:
@@ -177,7 +233,8 @@ class RequestSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Request
-        fields = ['id', 'request_id', 'request_type', 'cleanup_type', 'status', 'date_submitted', 'requested_by_name', 'requested_by_role', 'requested_by_barangay', 'contact', 'email', 'location_name', 'barangay', 'municipality', 'province', 'preferred_date', 'preferred_time', 'notes', 'decline_reason', 'parked_from_status', 'letter_file_name', 'letter_size', 'letter_content_type', 'bot_id', 'operator', 'collection_area', 'collection_area_detail', 'bags', 'weight_kg', 'non_usable_kg', 'recyclable_kg', 'session_completed_at', 'trash_categories', 'verified_categories', 'verification_notes', 'verified_at', 'archived', 'status_history', 'photos']
+        fields = ['id', 'request_id', 'request_type', 'cleanup_type', 'status', 'date_submitted', 'requested_by_name', 'requested_by_role', 'requested_by_barangay', 'contact', 'email', 'location_name', 'barangay', 'municipality', 'province', 'preferred_date', 'preferred_time', 'notes', 'decline_reason', 'parked_from_status', 'letter_file_name', 'letter_size', 'letter_content_type', 'bot_id', 'operator', 'collection_area', 'collection_area_detail', 'bags', 'weight_kg', 'non_usable_kg', 'recyclable_kg', 'session_completed_at', 'trash_categories', 'verified_categories', 'verification_notes', 'verified_at', 'archived', 'status_history', 'photos', 'resent_at', 'resend_available_at', 'can_resend', 'merged_into', 'merged_into_detail', 'merged_from_status', 'merged_at', 'merged_requests']
+        read_only_fields = ['resent_at', 'merged_from_status', 'merged_at']
         extra_kwargs = {
             'request_id': {'required': False, 'allow_blank': True},
             'letter_file_name': {'read_only': True},

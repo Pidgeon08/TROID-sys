@@ -209,6 +209,7 @@ class Request(models.Model):
         ('segregated', 'Segregated'),
         ('pending_verification', 'Pending Verification'),
         ('verified', 'Verified'),
+        ('merged', 'Merged'),
     ]
     CLEANUP_TYPE_CHOICES = [
         ('troid_supported', 'TROID Supported'),
@@ -253,6 +254,24 @@ class Request(models.Model):
     verified_categories = models.JSONField(default=dict, blank=True)
     verification_notes = models.TextField(blank=True, default="")
     verified_at = models.DateTimeField(null=True, blank=True)
+    # The requester sent it again after 20 days without a decision (see RESEND_AFTER_DAYS).
+    resent_at = models.DateTimeField(null=True, blank=True)
+    # CENRO merged this request into another; that one's cleanup covers both, and this
+    # request shows its progress. merged_from_status is restored when it is unmerged.
+    merged_into = models.ForeignKey('self', on_delete=models.SET_NULL, null=True, blank=True, related_name='merged_requests')
+    merged_from_status = models.CharField(max_length=30, blank=True, default="")
+    merged_at = models.DateTimeField(null=True, blank=True)
+
+    # Waiting on the City Admin or CENRO. After RESEND_AFTER_DAYS without a decision the
+    # requester may send it again, which reminds whoever it's waiting on.
+    AWAITING_DECISION = ('pending_mayor_approval', 'pending_admin_approval')
+    RESEND_AFTER_DAYS = 20
+
+    def resend_available_at(self):
+        """When the requester may resend it, or None if it isn't waiting on a decision."""
+        if self.archived or self.status not in self.AWAITING_DECISION or not self.date_submitted:
+            return None
+        return (self.resent_at or self.date_submitted) + timedelta(days=self.RESEND_AFTER_DAYS)
 
     def save(self, *args, **kwargs):
         if not self.request_id:
@@ -291,6 +310,9 @@ class Notification(models.Model):
         ('report_filed', 'Report Filed'),
         ('verified', 'Verified'),
         ('awaiting_approval', 'Awaiting Approval'),
+        ('area_redirected', 'Collection Area Changed'),
+        ('merged', 'Merged'),
+        ('unmerged', 'Unmerged'),
     ]
     recipient = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications')
     request = models.ForeignKey(Request, on_delete=models.CASCADE, null=True, blank=True, related_name='notifications')

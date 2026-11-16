@@ -16,13 +16,18 @@ import {
   FileCheck2,
   ChevronLeft as ChevronLeftIcon,
   ChevronRight as ChevronRightIcon,
+  GitMerge,
+  MapPinned,
 } from "lucide-react";
 import api from "../../services/api";
 import LetterAttachment from "../../components/LetterAttachment";
 import { logAudit } from "../../services/auditLog";
 import { Card } from "../../components/ui/Card";
 import NotificationBell from "../../components/NotificationBell";
-import { REQUEST_STATUS_STYLES, TRASH_CATEGORIES, mapRequest, fillTroidCounts, getDeploymentStatus, formatTime12h, toStatusLabel } from "../../constants/requests";
+import { OPEN_STATUSES, REQUEST_STATUS_STYLES, TRASH_CATEGORIES, mapRequest, fillTroidCounts, getDeploymentStatus, formatTime12h, toStatusLabel } from "../../constants/requests";
+import { MergedIntoCard, MergedRequestsCard } from "../../components/MergedRequestPanels";
+import RedirectAreaModal from "./RedirectAreaModal";
+import MergeRequestsModal from "./MergeRequestsModal";
 
 function emptyCategoryValues() {
   return TRASH_CATEGORIES.reduce((acc, cat) => ({ ...acc, [cat]: "" }), {});
@@ -121,6 +126,9 @@ export default function ViewRequest({ id: propId, onClose }) {
   const [submittingTrashReport, setSubmittingTrashReport] = useState(false);
   // What the robot counted, per category; null when it wasn't a TROID-assisted cleanup.
   const [troidCount, setTroidCount] = useState(null);
+  const [showRedirect, setShowRedirect] = useState(false);
+  const [showMerge, setShowMerge] = useState(false);
+  const [unmergingId, setUnmergingId] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -130,7 +138,8 @@ export default function ViewRequest({ id: propId, onClose }) {
         if (cancelled) return;
         const mapped = mapRequest(res);
         setRequest(mapped);
-        const sched = (schedulesData || []).find((s) => s.request_id === mapped.id) || null;
+        const scheduledAs = mapped.mergedInto?.id || mapped.id;
+        const sched = (schedulesData || []).find((s) => s.request_id === scheduledAs) || null;
         setSchedule(sched);
       } catch (err) {
         console.error("Failed to fetch request:", err);
@@ -197,6 +206,50 @@ export default function ViewRequest({ id: propId, onClose }) {
       alert(`Failed to ${action} request. Please try again.`);
     } finally {
       setConfirmSubmitting(false);
+    }
+  };
+
+  const handleRedirected = (updated, area) => {
+    setRequest(updated);
+    setShowRedirect(false);
+    logAudit({
+      currentUser,
+      action: "Request collection area changed",
+      module: "Requests",
+      details: `${updated.id} sent to ${area ? `${area.area_id} (${area.name})` : "another collection area"}`,
+    });
+  };
+
+  const handleMerged = (updated, ids) => {
+    setRequest(updated);
+    setShowMerge(false);
+    logAudit({
+      currentUser,
+      action: "Requests merged",
+      module: "Requests",
+      details: `${ids.join(", ")} merged into ${updated.id}`,
+    });
+  };
+
+  // Unmerges this request (when it's merged) or one merged into it.
+  const handleUnmerge = async (mergedId) => {
+    const main = mergedId === request.id ? request.mergedInto?.id : request.id;
+    if (!confirm(`Unmerge ${mergedId} from ${main}? It goes back to the stage it was at, and needs its own deployment schedule again.`)) return;
+    setUnmergingId(mergedId);
+    try {
+      const res = await api.unmergeRequest(mergedId);
+      if (mergedId === request.id) {
+        setRequest(mapRequest(res));
+        setSchedule(null);
+      } else {
+        setRequest((prev) => ({ ...prev, mergedRequests: prev.mergedRequests.filter((m) => m.id !== mergedId) }));
+      }
+      logAudit({ currentUser, action: "Request unmerged", module: "Requests", details: `${mergedId} unmerged from ${main}` });
+    } catch (err) {
+      console.error("Failed to unmerge request:", err);
+      alert(err.message || "Failed to unmerge the request. Please try again.");
+    } finally {
+      setUnmergingId(null);
     }
   };
 
@@ -322,6 +375,24 @@ export default function ViewRequest({ id: propId, onClose }) {
             <FileText size={15} />
             Download All
           </button>
+          {request.cleanupType === "troid_supported" && OPEN_STATUSES.includes(request.status) && (
+            <button
+              onClick={() => setShowRedirect(true)}
+              className="flex items-center gap-2 rounded-lg border border-blue-200 bg-white px-3.5 py-2 text-sm font-medium text-blue-600 hover:bg-blue-50"
+            >
+              <MapPinned size={15} />
+              Change Area
+            </button>
+          )}
+          {request.cleanupType === "troid_supported" && request.collectionArea && OPEN_STATUSES.includes(request.status) && (
+            <button
+              onClick={() => setShowMerge(true)}
+              className="flex items-center gap-2 rounded-lg border border-indigo-200 bg-white px-3.5 py-2 text-sm font-medium text-indigo-600 hover:bg-indigo-50"
+            >
+              <GitMerge size={15} />
+              Merge
+            </button>
+          )}
           {(request.status === "Pending Admin Approval" || request.status === "Approved") && (
             <button
               onClick={openReschedule}
@@ -478,6 +549,22 @@ export default function ViewRequest({ id: propId, onClose }) {
         </Card>
 
         <div className="flex flex-col gap-5">
+          {request.mergedInto && (
+            <MergedIntoCard
+              mergedInto={request.mergedInto}
+              mergedAt={request.mergedAt}
+              schedule={schedule}
+              routePrefix="admin"
+              onUnmerge={() => handleUnmerge(request.id)}
+              unmerging={unmergingId === request.id}
+            />
+          )}
+          <MergedRequestsCard
+            requests={request.mergedRequests}
+            routePrefix="admin"
+            onUnmerge={handleUnmerge}
+            unmergingId={unmergingId}
+          />
           <Card>
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-sm font-semibold text-slate-800">Photo Documentation</h3>
@@ -671,6 +758,14 @@ export default function ViewRequest({ id: propId, onClose }) {
           )}
         </div>
       </div>
+
+      {showRedirect && (
+        <RedirectAreaModal request={request} onClose={() => setShowRedirect(false)} onRedirected={handleRedirected} />
+      )}
+
+      {showMerge && (
+        <MergeRequestsModal request={request} onClose={() => setShowMerge(false)} onMerged={handleMerged} />
+      )}
 
       {confirmAction && createPortal(
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 p-4">

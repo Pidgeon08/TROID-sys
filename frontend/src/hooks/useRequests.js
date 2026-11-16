@@ -1,13 +1,11 @@
 import { useEffect, useState, useMemo } from 'react';
 import api from '../services/api';
-import { mapRequest, matchesRequestQuery } from '../constants/requests';
+import { mapRequest } from '../constants/requests';
 
 export function useRequests(userRole = 'admin') {
   const [requests, setRequests] = useState([]);
   const [scheduledRequestIds, setScheduledRequestIds] = useState(new Set());
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('All Requests');
-  const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -35,30 +33,6 @@ export function useRequests(userRole = 'admin') {
     return () => { cancelled = true; };
   }, []);
 
-  const filteredRequests = useMemo(() => {
-    return requests.filter((req) => matchesRequestQuery(req, searchQuery));
-  }, [requests, searchQuery]);
-
-  const filteredByTab = useMemo(() => {
-    if (activeTab === 'All Requests') return filteredRequests;
-    const statusMap = {
-      'Pending City Admin': 'Pending City Admin Approval',
-      'Pending Admin': 'Pending Admin Approval',
-      'Approved': 'Approved',
-      'Declined': 'Declined',
-      'Parked': 'Parked',
-      'Pending': 'Pending City Admin Approval',
-      'Deployed': 'Approved',
-      'Completed': 'Completed',
-      'Segregated': 'Segregated',
-    };
-    const targetStatus = statusMap[activeTab] || activeTab;
-    if (activeTab === 'Unscheduled') {
-      return filteredRequests.filter((r) => r.status === 'Approved' && !scheduledRequestIds.has(r.id));
-    }
-    return filteredRequests.filter((r) => r.status === targetStatus);
-  }, [filteredRequests, activeTab, scheduledRequestIds]);
-
   const counts = useMemo(() => {
     if (userRole === 'mayorsoffice') {
       return {
@@ -82,12 +56,6 @@ export function useRequests(userRole = 'admin') {
     requests,
     setRequests,
     loading,
-    activeTab,
-    setActiveTab,
-    searchQuery,
-    setSearchQuery,
-    filteredRequests,
-    filteredByTab,
     counts,
     scheduledRequestIds,
   };

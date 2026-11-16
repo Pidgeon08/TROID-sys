@@ -1,11 +1,13 @@
 import { useMemo, useState, useEffect } from "react";
 import { useNavigate, useOutletContext } from "react-router-dom";
 import { Eye, Trash2, Plus, FileText, Clock, CheckCircle2, Signature, Archive } from "lucide-react";
-import { TABS, mapRequest, matchesRequestQuery } from "../../constants/requests";
+import { formatDate, formatTime12h, mapRequest } from "../../constants/requests";
 import { useRequests } from "../../hooks/useRequests";
+import { useRequestFilters } from "../../hooks/useRequestFilters";
+import RequestFilters from "../../components/RequestFilters";
+import { filterRequests, sortRequests } from "../../utils/requestFilters";
 import { Badge } from "../../components/ui/Badge";
 import { Card } from "../../components/ui/Card";
-import { SearchBar } from "../../components/ui/SearchBar";
 import { Pagination } from "../../components/ui/Pagination";
 import { SummaryCard } from "../../components/ui/SummaryCard";
 import { EmptyState } from "../../components/ui/EmptyState";
@@ -19,7 +21,8 @@ export default function Requests({ userRole = "admin" }) {
   const navigate = useNavigate();
   const { currentUser } = useOutletContext() || {};
   const unreadRequestIds = new Set(useUnreadNotifications(currentUser?.id).map((n) => n.request_id));
-  const { loading, activeTab, setActiveTab, searchQuery, setSearchQuery, filteredByTab, counts, setRequests, scheduledRequestIds } = useRequests(userRole);
+  const { loading, requests, counts, setRequests, scheduledRequestIds } = useRequests(userRole);
+  const { filters, update, clear } = useRequestFilters();
   const [currentPage, setCurrentPage] = useState(1);
   const [archivingId, setArchivingId] = useState(null);
   const [showArchived, setShowArchived] = useState(false);
@@ -61,11 +64,16 @@ export default function Requests({ userRole = "admin" }) {
     }
   };
 
-  const filteredArchived = useMemo(
-    () => archivedRequests.filter((req) => matchesRequestQuery(req, searchQuery)),
-    [archivedRequests, searchQuery]
+  const changeFilters = (changes) => { update(changes); setCurrentPage(1); };
+  const clearFilters = () => { clear(); setCurrentPage(1); };
+
+  // Archived requests aren't scheduled any more, so they have no schedule filter.
+  const base = showArchived ? archivedRequests : requests;
+  const scheduledIds = showArchived ? undefined : scheduledRequestIds;
+  const source = useMemo(
+    () => sortRequests(filterRequests(base, filters, { scheduledIds }), filters.sort),
+    [base, filters, scheduledIds]
   );
-  const source = showArchived ? filteredArchived : filteredByTab;
   const paginated = useMemo(
     () => source.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE),
     [source, currentPage]
@@ -105,12 +113,6 @@ export default function Requests({ userRole = "admin" }) {
             <Archive size={15} />
             {showArchived ? 'Hide Archived' : 'Show Archived'}
           </button>
-          <SearchBar
-            value={searchQuery}
-            onChange={(val) => { setSearchQuery(val); setCurrentPage(1); }}
-            placeholder="Search requests..."
-            className="w-56"
-          />
         </div>
       </header>
 
@@ -122,22 +124,14 @@ export default function Requests({ userRole = "admin" }) {
       </div>
 
       <Card>
-        {!showArchived && (
-          <div className="flex items-center gap-6 px-5 border-b border-slate-100 overflow-x-auto">
-            {TABS.map((tab) => (
-              <button
-                key={tab}
-                onClick={() => { setActiveTab(tab); setCurrentPage(1); }}
-                className={`relative py-3.5 text-sm font-medium transition-colors whitespace-nowrap ${
-                  activeTab === tab ? "text-blue-600" : "text-slate-500 hover:text-slate-700"
-                }`}
-              >
-                {tab}
-                {activeTab === tab && <span className="absolute left-0 right-0 -bottom-px h-[2px] bg-blue-600 rounded-full" />}
-              </button>
-            ))}
-          </div>
-        )}
+        <RequestFilters
+          filters={filters}
+          onChange={changeFilters}
+          onClear={clearFilters}
+          requests={base}
+          shown={source.length}
+          scheduledIds={scheduledIds}
+        />
 
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -148,6 +142,7 @@ export default function Requests({ userRole = "admin" }) {
                 <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Requested By</th>
                 <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Barangay</th>
                 <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Date Submitted</th>
+                <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Preferred Date</th>
                 <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Status</th>
                 <th className="px-5 py-3 text-right text-xs font-semibold uppercase tracking-wider text-slate-400">Actions</th>
               </tr>
@@ -165,6 +160,7 @@ export default function Requests({ userRole = "admin" }) {
                   <td className="px-5 py-3.5 text-slate-600">{req.requestedBy?.name}</td>
                   <td className="px-5 py-3.5 text-slate-600">{req.location?.barangay}</td>
                   <td className="px-5 py-3.5 text-slate-500">{req.dateSubmitted}</td>
+                  <td className="px-5 py-3.5 text-slate-500 whitespace-nowrap">{req.preferredDate ? `${formatDate(`${req.preferredDate}T00:00:00`)}${req.preferredTime ? ` · ${formatTime12h(req.preferredTime)}` : ""}` : "—"}</td>
                    <td className="px-5 py-3.5">
                      <div className="flex items-center gap-1.5">
                        <Badge status={req.status} dot />
@@ -225,12 +221,12 @@ export default function Requests({ userRole = "admin" }) {
               ))}
               {showArchived && loadingArchived && (
                 <tr>
-                  <td colSpan={7} className="px-5 py-6 text-center text-sm text-slate-400">Loading archived requests...</td>
+                  <td colSpan={8} className="px-5 py-6 text-center text-sm text-slate-400">Loading archived requests...</td>
                 </tr>
               )}
               {!(showArchived && loadingArchived) && paginated.length === 0 && (
                 <tr>
-                  <td colSpan={7}>
+                  <td colSpan={8}>
                     <EmptyState title="No requests found." subtitle="Try adjusting your filters or send a new request." />
                   </td>
                 </tr>
@@ -244,7 +240,7 @@ export default function Requests({ userRole = "admin" }) {
             page={currentPage}
             totalPages={totalPages}
             onPageChange={goTo}
-            totalItems={filteredByTab.length}
+            totalItems={source.length}
             pageSize={PAGE_SIZE}
           />
         )}

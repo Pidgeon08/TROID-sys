@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ArrowLeft,
@@ -21,6 +21,8 @@ import api from "../../services/api";
 import { BARANGAYS } from "../../utils/barangayBoundaries";
 import { formatFileSize, formatTime12h } from "../../constants/requests";
 import LetterDropzone from "../../components/LetterDropzone";
+import DocumentPreview from "../../components/DocumentPreview";
+import { base64ToBlob, letterKind } from "../../utils/letters";
 
 const REQUEST_TYPE = "Cleanup";
 
@@ -231,6 +233,12 @@ function RequestForm({ currentUser, forCenro = false }) {
   const [showOverview, setShowOverview] = useState(false);
   const [viewPhoto, setViewPhoto] = useState(false);
   const [letterFile, setLetterFile] = useState(null);
+  const [showLetterPreview, setShowLetterPreview] = useState(false);
+  const letterFileKind = letterKind(letterFile?.name);
+  const letterBlob = useMemo(
+    () => (letterFile ? base64ToBlob(letterFile.data, letterFileKind) : null),
+    [letterFile, letterFileKind]
+  );
   const [selectedPhotoIndex, setSelectedPhotoIndex] = useState(0);
   const [showTimeTable, setShowTimeTable] = useState(false);
   const [bots, setBots] = useState([]);
@@ -723,7 +731,7 @@ function RequestForm({ currentUser, forCenro = false }) {
 
       {showOverview && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
-          <div className="w-full max-w-lg bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden">
+          <div className={`w-full ${showLetterPreview ? "max-w-3xl" : "max-w-lg"} bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden transition-[max-width]`}>
             <div className="p-6 border-b border-slate-100">
               <div className="flex items-center justify-between">
                 <h3 className="text-lg font-bold text-slate-900">Review Request Overview</h3>
@@ -793,8 +801,26 @@ function RequestForm({ currentUser, forCenro = false }) {
                 )}
               </div>
               <div className="py-2 text-sm">
-                <span className="text-slate-500 block mb-1">Letter of Request</span>
-                <p className="text-slate-800 text-xs">{letterFile?.name} ({formatFileSize(letterFile?.size || 0)})</p>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <span className="text-slate-500 block mb-1">Letter of Request</span>
+                    <p className="text-slate-800 text-xs break-all">{letterFile?.name} ({formatFileSize(letterFile?.size || 0)})</p>
+                  </div>
+                  {letterBlob && (
+                    <button
+                      type="button"
+                      onClick={() => setShowLetterPreview((shown) => !shown)}
+                      className="shrink-0 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-blue-600 hover:bg-blue-50"
+                    >
+                      {showLetterPreview ? "Hide preview" : "Preview"}
+                    </button>
+                  )}
+                </div>
+                {showLetterPreview && letterBlob && (
+                  <div className="mt-3">
+                    <DocumentPreview blob={letterBlob} kind={letterFileKind} title={letterFile.name} className="h-[420px]" />
+                  </div>
+                )}
               </div>
             </div>
 

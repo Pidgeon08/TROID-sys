@@ -134,6 +134,22 @@ def own_user_id(request, requested_id):
 
 
 def notify_request_update(req, notif_type, title, message):
+    """Tells the requester about a change to their request (see _notify_requester). The
+    requests merged into it share its cleanup, so their requesters are told as well."""
+    _notify_requester(req, notif_type, title, message)
+    told = {(req.email or '').strip().lower()}
+    for merged in req.merged_requests.filter(archived=False).order_by('id'):
+        email = (merged.email or '').strip().lower()
+        if email and email in told:
+            continue
+        told.add(email)
+        _notify_requester(
+            merged, notif_type, title,
+            f'{message} Your request {merged.request_id} was merged into {req.request_id}, so this applies to it too.',
+        )
+
+
+def _notify_requester(req, notif_type, title, message):
     """Creates an in-app Notification for the requester (matched by email) and
     emails them, mirroring send_temp_password_email's best-effort error handling."""
     recipient = User.for_email(req.email)
@@ -161,13 +177,37 @@ def notify_request_update(req, notif_type, title, message):
 
 def notify_city_admins(req, title):
     """Tells every active City Admin that a request is waiting on their approval."""
+    _notify_approvers(req, 'mayorsoffice', title)
+
+
+def notify_cenro_admins(req, title):
+    """Tells every active CENRO admin that a request is waiting on their approval."""
+    _notify_approvers(req, 'admin', title)
+
+
+def _notify_approvers(req, role, title):
     message = f'Request {req.request_id} from {req.barangay or req.requested_by_name or "a requester"} needs your approval.'
-    city_admins = list(User.objects.filter(role='mayorsoffice', status='active'))
+    approvers = list(User.objects.filter(role=role, status='active'))
     Notification.objects.bulk_create(
-        Notification(recipient=city_admin, request=req, notif_type='awaiting_approval', title=title, message=message)
-        for city_admin in city_admins
+        Notification(recipient=approver, request=req, notif_type='awaiting_approval', title=title, message=message)
+        for approver in approvers
     )
-    notifications_changed([city_admin.pk for city_admin in city_admins])
+    notifications_changed([approver.pk for approver in approvers])
+
+
+def actor_of(request, default):
+    """(name, role label) of whoever made this API call, for StatusHistory."""
+    user = getattr(request, 'user', None)
+    name = getattr(user, 'name', None) or default
+    role = ROLE_LABELS.get(getattr(user, 'role', None), default)
+    return name, role
+
+
+def is_own_request(user, req):
+    """Did this signed-in barangay or NGO account make the request? Requests are tied to
+    their requester by email, the same way their notifications are."""
+    email = (getattr(user, 'email', '') or '').strip().lower()
+    return bool(email) and email == (req.email or '').strip().lower()
 
 
 @api_view(['GET'])
@@ -1071,10 +1111,20 @@ class RequestViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
         'submit_trash_report': ADMIN + REQUESTERS,
         'troid_count': ADMIN + REQUESTERS,
         'post_cleanup_comparison': ADMIN,
+        'redirect_area': ADMIN,
+        'merge': ADMIN,
+        'unmerge': ADMIN,
+        'resend': REQUESTERS,
     }
+    # Before the cleanup has started: the stages where an area can change or requests be merged.
+    OPEN_STATUSES = ('pending_mayor_approval', 'pending_admin_approval', 'approved', 'parked')
 
     def get_queryset(self):
-        queryset = Request.objects.all().order_by('-date_submitted')
+        queryset = (
+            Request.objects.all().order_by('-date_submitted')
+            .select_related('collection_area', 'merged_into__collection_area')
+            .prefetch_related('merged_requests')
+        )
         area_id = self.request.query_params.get('collection_area')
         if area_id:
             # The requests sent to one collection area (CENRO's Collection Areas page).
@@ -1197,6 +1247,8 @@ class RequestViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def park(self, request, request_id=None):
         req = self.get_object()
+        if req.merged_into_id:
+            return Response({'error': f'This request was merged into {req.merged_into.request_id}. Park that one instead.'}, status=status.HTTP_400_BAD_REQUEST)
         reason = (request.data.get('reason') or '').strip()
         req.parked_from_status = req.status
         req.status = 'parked'
@@ -1381,7 +1433,206 @@ class RequestViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
         DeploymentSchedule.objects.filter(request_id=req.request_id).delete()
         req.archived = True
         req.save()
+        # Its cleanup won't happen now, so the requests merged into it stand on their own again.
+        actor, role = actor_of(request, 'Admin')
+        for merged in list(req.merged_requests.filter(archived=False)):
+            self._unmerge(merged, actor, role, f'{req.request_id} was archived, so this request is back in review.')
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @action(detail=True, methods=['post'], url_path='redirect-area')
+    def redirect_area(self, request, request_id=None):
+        """CENRO sends the cleanup to a different collection area, e.g. where the trash
+        has drifted to. The requester is told where, and why."""
+        req = self.get_object()
+        if req.merged_into_id:
+            return Response({'error': f'This request was merged into {req.merged_into.request_id}. Change the area there.'}, status=status.HTTP_400_BAD_REQUEST)
+        if req.cleanup_type != 'troid_supported':
+            return Response({'error': 'Only TROID-supported cleanups are sent to a collection area.'}, status=status.HTTP_400_BAD_REQUEST)
+        if req.status not in self.OPEN_STATUSES:
+            return Response({'error': "The collection area can only be changed before the cleanup starts."}, status=status.HTTP_400_BAD_REQUEST)
+        area = CollectionArea.objects.filter(
+            pk=request.data.get('collection_area'), status='approved', archived=False,
+        ).first() if str(request.data.get('collection_area') or '').isdigit() else None
+        if area is None:
+            return Response({'error': 'Choose an approved collection area.'}, status=status.HTTP_400_BAD_REQUEST)
+        if area.pk == req.collection_area_id:
+            return Response({'error': 'The request is already sent to that collection area.'}, status=status.HTTP_400_BAD_REQUEST)
+        reason = (request.data.get('reason') or '').strip()
+        if not reason:
+            return Response({'error': 'Give a reason for changing the collection area.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        old = req.collection_area
+        old_label = f'{old.area_id} ({old.name})' if old else 'no collection area'
+        new_label = f'{area.area_id} ({area.name})'
+        actor, role = actor_of(request, 'Admin')
+        now = timezone.now()
+        details = f'From {old_label} to {new_label}. Reason: {reason}'
+        # Merged requests are for the same area as the one they were merged into, so they move with it.
+        with transaction.atomic():
+            for moved in [req, *req.merged_requests.filter(archived=False)]:
+                moved.collection_area = area
+                moved.save(update_fields=['collection_area'])
+                StatusHistory.objects.create(
+                    request=moved,
+                    label='Collection Area Changed by CENRO',
+                    date=now,
+                    actor=actor,
+                    role=role,
+                    state='current',
+                    details=details if moved is req else f'Moved with {req.request_id}, which it is merged into. {details}',
+                )
+        notify_request_update(
+            req,
+            'area_redirected',
+            'Your cleanup was moved to another collection area',
+            f'CENRO moved request {req.request_id} from {old_label} to {new_label}. Reason: {reason}',
+        )
+        return Response(self.get_serializer(self.get_queryset().get(pk=req.pk)).data)
+
+    @action(detail=True, methods=['post'])
+    def resend(self, request, request_id=None):
+        """The requester sends a request again when nobody has decided on it for
+        RESEND_AFTER_DAYS, reminding the City Admins or CENRO, whoever it's waiting on."""
+        req = self.get_object()
+        require(request, is_own_request(request.user, req), 'can only resend own request')
+        available = req.resend_available_at()
+        if available is None:
+            return Response({'error': 'Only a request still waiting for approval can be resent.'}, status=status.HTTP_400_BAD_REQUEST)
+        now = timezone.now()
+        if now < available:
+            when = timezone.localtime(available, APP_TIMEZONE).strftime('%b %d, %Y %I:%M %p')
+            return Response(
+                {'error': f'A request can be resent after {Request.RESEND_AFTER_DAYS} days without a decision. You can resend this one on {when}.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        waiting_on = 'City Admin' if req.status == 'pending_mayor_approval' else 'CENRO'
+        req.resent_at = now
+        req.save(update_fields=['resent_at'])
+        actor, role = actor_of(request, 'Requester')
+        StatusHistory.objects.create(
+            request=req,
+            label='Resent by Requester',
+            date=now,
+            actor=actor,
+            role=role,
+            state='current',
+            details=f'No decision after {Request.RESEND_AFTER_DAYS} days, so it was sent to the {waiting_on} again.',
+        )
+        if req.status == 'pending_mayor_approval':
+            notify_city_admins(req, 'A request was resent for your approval')
+        else:
+            notify_cenro_admins(req, 'A request was resent for your approval')
+        return Response(self.get_serializer(req).data)
+
+    @action(detail=True, methods=['post'])
+    def merge(self, request, request_id=None):
+        """Merges other requests for the same collection area into this one, so a single
+        cleanup covers them all. The merged requests keep their requesters, who are told
+        about every update to this one and can follow its progress and results from their
+        own request. Unsupported cleanups have no collection area, so they can't be merged."""
+        primary = self.get_object()
+        ids = request.data.get('request_ids')
+        if not isinstance(ids, list) or not ids or not all(isinstance(i, str) for i in ids):
+            return Response({'error': 'Choose the requests to merge into this one.'}, status=status.HTTP_400_BAD_REQUEST)
+        ids = list(dict.fromkeys(ids))
+        if primary.request_id in ids:
+            return Response({'error': "A request can't be merged into itself."}, status=status.HTTP_400_BAD_REQUEST)
+        if primary.archived or primary.merged_into_id or primary.status not in self.OPEN_STATUSES:
+            return Response({'error': 'Requests can only be merged into one whose cleanup has not started.'}, status=status.HTTP_400_BAD_REQUEST)
+        if primary.cleanup_type != 'troid_supported' or primary.collection_area_id is None:
+            return Response({'error': 'Only TROID-supported requests for the same collection area can be merged.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        others = list(Request.objects.filter(request_id__in=ids, archived=False).prefetch_related('merged_requests'))
+        missing = sorted(set(ids) - {other.request_id for other in others})
+        if missing:
+            return Response({'error': f'Not found or archived: {", ".join(missing)}.'}, status=status.HTTP_400_BAD_REQUEST)
+        for other in others:
+            problem = None
+            if other.merged_into_id:
+                problem = 'is already merged into another request'
+            elif other.status not in self.OPEN_STATUSES:
+                problem = 'has already started or finished its cleanup'
+            elif other.cleanup_type != primary.cleanup_type or other.collection_area_id != primary.collection_area_id:
+                problem = f'is not for the same collection area as {primary.request_id}'
+            elif any(not child.archived for child in other.merged_requests.all()):
+                problem = 'has requests merged into it. Unmerge them first'
+            if problem:
+                return Response({'error': f'{other.request_id} {problem}.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        reason = (request.data.get('reason') or '').strip()
+        actor, role = actor_of(request, 'Admin')
+        now = timezone.now()
+        others.sort(key=lambda other: other.request_id)
+        with transaction.atomic():
+            for other in others:
+                # The cleanup happens under the main request, so a separate one isn't run.
+                removed, _ = DeploymentSchedule.objects.filter(request_id=other.request_id).delete()
+                other.merged_from_status = other.status
+                other.status = 'merged'
+                other.merged_into = primary
+                other.merged_at = now
+                other.save(update_fields=['merged_from_status', 'status', 'merged_into', 'merged_at'])
+                details = f'Its cleanup is now done under {primary.request_id}.'
+                if removed:
+                    details += ' Its own deployment schedule was removed.'
+                if reason:
+                    details += f' Reason: {reason}'
+                StatusHistory.objects.create(
+                    request=other, label=f'Merged into {primary.request_id} by CENRO',
+                    date=now, actor=actor, role=role, state='current', details=details,
+                )
+            StatusHistory.objects.create(
+                request=primary, label='Requests Merged by CENRO',
+                date=now, actor=actor, role=role, state='current',
+                details=f'Merged into this request: {", ".join(o.request_id for o in others)}.'
+                + (f' Reason: {reason}' if reason else ''),
+            )
+        for other in others:
+            _notify_requester(
+                other,
+                'merged',
+                'Your cleanup request was merged',
+                f'CENRO merged your request {other.request_id} into {primary.request_id}, so one cleanup covers both. '
+                f'You will still be told about its progress and can see its results from your request.'
+                + (f' Reason: {reason}' if reason else ''),
+            )
+        primary = self.get_queryset().get(pk=primary.pk)
+        return Response(self.get_serializer(primary).data)
+
+    @action(detail=True, methods=['post'])
+    def unmerge(self, request, request_id=None):
+        """Takes a merged request back out, to the stage it was at when it was merged."""
+        req = self.get_object()
+        if not req.merged_into_id:
+            return Response({'error': 'This request is not merged.'}, status=status.HTTP_400_BAD_REQUEST)
+        actor, role = actor_of(request, 'Admin')
+        reason = (request.data.get('reason') or '').strip()
+        self._unmerge(req, actor, role, f'Reason: {reason}' if reason else 'Returned to its own review.')
+        return Response(self.get_serializer(self.get_queryset().get(pk=req.pk)).data)
+
+    def _unmerge(self, req, actor, role, details):
+        primary = req.merged_into
+        now = timezone.now()
+        req.status = req.merged_from_status or 'pending_mayor_approval'
+        req.merged_into = None
+        req.merged_from_status = ''
+        req.merged_at = None
+        req.save(update_fields=['status', 'merged_into', 'merged_from_status', 'merged_at'])
+        StatusHistory.objects.create(
+            request=req, label=f'Unmerged from {primary.request_id}',
+            date=now, actor=actor, role=role, state='current', details=details,
+        )
+        StatusHistory.objects.create(
+            request=primary, label=f'{req.request_id} Unmerged',
+            date=now, actor=actor, role=role, state='current', details=details,
+        )
+        _notify_requester(
+            req,
+            'unmerged',
+            'Your cleanup request is on its own again',
+            f'Request {req.request_id} is no longer merged into {primary.request_id} and is back to '
+            f'"{req.get_status_display()}". {details}',
+        )
 
     @action(detail=True, methods=['post'])
     def restore(self, request, request_id=None):

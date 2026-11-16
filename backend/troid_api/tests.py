@@ -989,6 +989,9 @@ class EndpointRoleTests(TestCase):
         self.assert_roles('get', f'/api/requests/{rid}/letter/', STAFF_ROLES)
         self.assert_roles('get', f'/api/requests/{rid}/troid_count/', REQUESTER_ROLES)
         self.assert_roles('get', '/api/requests/post-cleanup-comparison/', ('admin',))
+        self.assert_roles('post', f'/api/requests/{rid}/redirect-area/', ('admin',), {})
+        self.assert_roles('post', f'/api/requests/{rid}/merge/', ('admin',), {})
+        self.assert_roles('post', f'/api/requests/{rid}/unmerge/', ('admin',), {})
         self.assert_roles('post', f'/api/requests/{rid}/restore/', ('admin',))
         self.assert_roles('delete', f'/api/requests/{rid}/', ('admin',))
 
@@ -2244,3 +2247,291 @@ class CleanupDriveTests(TestCase):
         self.assertEqual(self.req.status, 'completed')
         self.assertEqual(self.req.trash_categories, {'Plastic': 9})  # The edited figure is what's kept.
         self.assertIsNotNone(self.req.session_completed_at)
+
+
+def requester(name, email, role='barangay'):
+    return User.objects.create(
+        name=name, email=email, password='x', role=role, status='active', location='Poro',
+        session_token=f'{email}-session',
+    )
+
+
+@override_settings(API_AUTH_ENFORCED=True)
+class RedirectCollectionAreaTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.admin = make_user('admin')
+        self.owner = requester('Poro Barangay', 'poro@example.com')
+        self.old_area = CollectionArea.objects.create(name='Old Spot', barangay='Poro', status='approved')
+        self.new_area = CollectionArea.objects.create(name='River Mouth', barangay='Poro', status='approved')
+        self.req = Request.objects.create(
+            status='pending_admin_approval', email=self.owner.email, barangay='Poro', collection_area=self.old_area,
+        )
+
+    def redirect(self, req=None, **data):
+        req = req or self.req
+        data.setdefault('collection_area', self.new_area.pk)
+        data.setdefault('reason', 'The trash drifted downstream.')
+        return self.client.post(f'/api/requests/{req.request_id}/redirect-area/', data, format='json', **session_header(self.admin))
+
+    def test_cenro_moves_the_request_and_tells_the_requester_why(self):
+        response = self.redirect()
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()['collection_area_detail']['name'], 'River Mouth')
+        self.req.refresh_from_db()
+        self.assertEqual(self.req.collection_area, self.new_area)
+        step = self.req.status_history.get()
+        self.assertEqual(step.label, 'Collection Area Changed by CENRO')
+        self.assertIn(self.old_area.area_id, step.details)
+        self.assertIn('drifted downstream', step.details)
+        notice = Notification.objects.get(recipient=self.owner)
+        self.assertEqual(notice.notif_type, 'area_redirected')
+        self.assertIn('River Mouth', notice.message)
+
+    def test_only_to_a_different_approved_area_with_a_reason(self):
+        pending = CollectionArea.objects.create(name='Unreviewed', barangay='Poro', status='pending')
+        archived = CollectionArea.objects.create(name='Old', barangay='Poro', status='approved', archived=True)
+        for data in (
+            {'collection_area': pending.pk},
+            {'collection_area': archived.pk},
+            {'collection_area': self.old_area.pk},
+            {'collection_area': 'abc'},
+            {'reason': '  '},
+        ):
+            with self.subTest(data=data):
+                self.assertEqual(self.redirect(**data).status_code, 400)
+        self.req.refresh_from_db()
+        self.assertEqual(self.req.collection_area, self.old_area)
+
+    def test_not_once_the_cleanup_started_or_for_unsupported_cleanups(self):
+        ongoing = Request.objects.create(status='ongoing', collection_area=self.old_area)
+        manual = Request.objects.create(status='approved', cleanup_type='unsupported', location_name='Bridge')
+        self.assertEqual(self.redirect(ongoing).status_code, 400)
+        self.assertEqual(self.redirect(manual).status_code, 400)
+
+    def test_only_cenro_can_redirect(self):
+        response = self.client.post(
+            f'/api/requests/{self.req.request_id}/redirect-area/',
+            {'collection_area': self.new_area.pk, 'reason': 'x'}, format='json', **session_header(self.owner),
+        )
+        self.assertEqual(response.status_code, 403)
+
+
+@override_settings(API_AUTH_ENFORCED=True)
+class ResendRequestTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.city_admin = make_user('mayorsoffice')
+        self.cenro = make_user('admin')
+        self.owner = requester('Poro Barangay', 'poro@example.com')
+        self.other = requester('Lingsat NGO', 'ngo@example.com', role='ngo')
+
+    def waiting(self, status='pending_mayor_approval', days=21):
+        req = Request.objects.create(status=status, email=self.owner.email, barangay='Poro')
+        Request.objects.filter(pk=req.pk).update(date_submitted=timezone.now() - timedelta(days=days))
+        req.refresh_from_db()
+        return req
+
+    def resend(self, req, user=None):
+        return self.client.post(f'/api/requests/{req.request_id}/resend/', {}, format='json', **session_header(user or self.owner))
+
+    def test_after_20_days_it_reminds_the_city_admins(self):
+        req = self.waiting()
+        self.assertTrue(self.client.get(f'/api/requests/{req.request_id}/', **session_header(self.owner)).json()['can_resend'])
+
+        response = self.resend(req)
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertFalse(response.json()['can_resend'])
+        req.refresh_from_db()
+        self.assertIsNotNone(req.resent_at)
+        self.assertEqual(req.status, 'pending_mayor_approval')
+        self.assertEqual(req.status_history.get().label, 'Resent by Requester')
+        notices = Notification.objects.filter(notif_type='awaiting_approval')
+        self.assertEqual([n.recipient for n in notices], [self.city_admin])
+
+    def test_waiting_on_cenro_reminds_cenro(self):
+        req = self.waiting('pending_admin_approval')
+        self.assertEqual(self.resend(req).status_code, 200)
+        notices = Notification.objects.filter(notif_type='awaiting_approval')
+        self.assertEqual([n.recipient for n in notices], [self.cenro])
+
+    def test_not_before_20_days_and_then_20_days_after_each_resend(self):
+        early = self.waiting(days=19)
+        response = self.resend(early)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('20 days', response.json()['error'])
+        self.assertFalse(Notification.objects.exists())
+
+        req = self.waiting(days=45)
+        self.assertEqual(self.resend(req).status_code, 200)
+        self.assertEqual(self.resend(req).status_code, 400)
+        Request.objects.filter(pk=req.pk).update(resent_at=timezone.now() - timedelta(days=20))
+        self.assertEqual(self.resend(req).status_code, 200)
+
+    def test_only_while_waiting_for_a_decision(self):
+        for status in ('approved', 'parked', 'completed', 'merged'):
+            with self.subTest(status=status):
+                req = self.waiting(status)
+                self.assertFalse(self.client.get(f'/api/requests/{req.request_id}/', **session_header(self.owner)).json()['can_resend'])
+                self.assertEqual(self.resend(req).status_code, 400)
+
+    def test_only_by_whoever_made_the_request(self):
+        req = self.waiting()
+        self.assertEqual(self.resend(req, self.other).status_code, 403)
+        self.assertEqual(self.resend(req, self.cenro).status_code, 403)
+        req.refresh_from_db()
+        self.assertIsNone(req.resent_at)
+
+
+@override_settings(API_AUTH_ENFORCED=True)
+class MergeRequestTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.admin = make_user('admin')
+        self.poro = requester('Poro Barangay', 'poro@example.com')
+        self.ngo = requester('River NGO', 'ngo@example.com', role='ngo')
+        self.lingsat = requester('Lingsat Barangay', 'lingsat@example.com')
+        self.area = CollectionArea.objects.create(name='River Mouth', barangay='Poro', status='approved')
+        self.main = self.make('pending_admin_approval', self.poro)
+        self.ngo_req = self.make('pending_mayor_approval', self.ngo)
+        self.lingsat_req = self.make('approved', self.lingsat)
+
+    def make(self, status, user, **fields):
+        fields.setdefault('collection_area', self.area)
+        return Request.objects.create(status=status, email=user.email, barangay='Poro', requested_by_name=user.name, **fields)
+
+    def merge(self, *others, into=None, user=None):
+        into = into or self.main
+        return self.client.post(
+            f'/api/requests/{into.request_id}/merge/',
+            {'request_ids': [o if isinstance(o, str) else o.request_id for o in others], 'reason': 'Same stretch of river.'},
+            format='json', **session_header(user or self.admin),
+        )
+
+    def detail(self, req, user=None):
+        return self.client.get(f'/api/requests/{req.request_id}/', **session_header(user or self.admin)).json()
+
+    def test_merging_keeps_each_request_and_points_it_at_the_main_one(self):
+        DeploymentSchedule.objects.create(bot=Boat.objects.create(name='B'), day='2026-12-01', request_id=self.lingsat_req.request_id)
+
+        response = self.merge(self.ngo_req, self.lingsat_req)
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(
+            sorted(m['request_id'] for m in response.json()['merged_requests']),
+            sorted([self.ngo_req.request_id, self.lingsat_req.request_id]),
+        )
+        for req, was in ((self.ngo_req, 'pending_mayor_approval'), (self.lingsat_req, 'approved')):
+            req.refresh_from_db()
+            self.assertEqual(req.status, 'merged')
+            self.assertEqual(req.merged_from_status, was)
+            self.assertEqual(req.merged_into, self.main)
+            self.assertTrue(req.status_history.filter(label=f'Merged into {self.main.request_id} by CENRO').exists())
+        self.assertFalse(DeploymentSchedule.objects.filter(request_id=self.lingsat_req.request_id).exists())
+        self.assertTrue(self.main.status_history.filter(label='Requests Merged by CENRO').exists())
+        self.assertEqual(
+            sorted(n.recipient.email for n in Notification.objects.filter(notif_type='merged')),
+            ['lingsat@example.com', 'ngo@example.com'],
+        )
+
+    def test_every_party_gets_the_main_requests_updates_and_results(self):
+        self.merge(self.ngo_req, self.lingsat_req)
+
+        self.client.post(f'/api/requests/{self.main.request_id}/admin_approve/', **session_header(self.admin))
+
+        approved = Notification.objects.filter(notif_type='approved')
+        self.assertEqual(sorted(n.recipient.email for n in approved), ['lingsat@example.com', 'ngo@example.com', 'poro@example.com'])
+        ngo_notice = approved.get(recipient=self.ngo)
+        self.assertEqual(ngo_notice.request, self.ngo_req)
+        self.assertIn(self.main.request_id, ngo_notice.message)
+
+        Request.objects.filter(pk=self.main.pk).update(
+            status='completed', bags=12, weight_kg=40.5, trash_categories={'Plastic': 30},
+        )
+        shared = self.detail(self.ngo_req, self.ngo)['merged_into_detail']
+        self.assertEqual(shared['request_id'], self.main.request_id)
+        self.assertEqual(shared['status'], 'completed')
+        self.assertEqual(shared['bags'], 12)
+        self.assertEqual(shared['trash_categories'], {'Plastic': 30})
+        self.assertEqual(shared['collection_area_detail']['name'], 'River Mouth')
+        self.assertTrue(any(step['label'] == 'Approved by Admin' for step in shared['status_history']))
+
+    def test_one_requester_with_two_merged_requests_is_told_once(self):
+        second = self.make('pending_admin_approval', self.poro)
+        self.merge(second)
+        Notification.objects.all().delete()
+
+        self.client.post(f'/api/requests/{self.main.request_id}/reschedule/', {'preferred_date': '2026-12-20'}, format='json', **session_header(self.admin))
+
+        self.assertEqual(Notification.objects.filter(recipient=self.poro).count(), 1)
+
+    def test_only_requests_for_the_same_collection_area(self):
+        elsewhere = self.make('pending_admin_approval', self.ngo, collection_area=CollectionArea.objects.create(
+            name='Creek', barangay='Poro', status='approved',
+        ))
+        manual = self.make('pending_admin_approval', self.ngo, cleanup_type='unsupported', collection_area=None, location_name='Bridge')
+        other_manual = self.make('pending_admin_approval', self.lingsat, cleanup_type='unsupported', collection_area=None, location_name='Bridge')
+
+        response = self.merge(elsewhere)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('same collection area', response.json()['error'])
+        self.assertEqual(self.merge(manual).status_code, 400)
+        self.assertEqual(self.merge(other_manual, into=manual).status_code, 400)
+        self.assertEqual(Request.objects.filter(status='merged').count(), 0)
+
+    def test_changing_the_main_requests_area_moves_the_merged_ones_too(self):
+        self.merge(self.ngo_req)
+        creek = CollectionArea.objects.create(name='Creek', barangay='Poro', status='approved')
+
+        response = self.client.post(
+            f'/api/requests/{self.main.request_id}/redirect-area/',
+            {'collection_area': creek.pk, 'reason': 'Trash drifted.'}, format='json', **session_header(self.admin),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.ngo_req.refresh_from_db()
+        self.assertEqual(self.ngo_req.collection_area, creek)
+        self.assertTrue(self.ngo_req.status_history.filter(label='Collection Area Changed by CENRO').exists())
+        self.assertTrue(Notification.objects.filter(recipient=self.ngo, notif_type='area_redirected').exists())
+        self.assertEqual(self.detail(self.ngo_req)['merged_into_detail']['collection_area_detail']['name'], 'Creek')
+
+    def test_what_cannot_be_merged(self):
+        started = self.make('ongoing', self.ngo)
+        manual = self.make('pending_admin_approval', self.ngo, cleanup_type='unsupported', collection_area=None, location_name='Bridge')
+        archived = self.make('approved', self.ngo, archived=True)
+        self.assertEqual(self.merge(self.main).status_code, 400)
+        self.assertEqual(self.merge(started).status_code, 400)
+        self.assertEqual(self.merge(manual).status_code, 400)
+        self.assertEqual(self.merge(archived).status_code, 400)
+        self.assertEqual(self.merge('REQ-NOPE').status_code, 400)
+        self.assertEqual(self.merge(self.ngo_req, into=started).status_code, 400)
+
+        self.assertEqual(self.merge(self.ngo_req).status_code, 200)
+        self.assertEqual(self.merge(self.ngo_req, into=self.lingsat_req).status_code, 400)
+        self.assertEqual(self.merge(self.main, into=self.lingsat_req).status_code, 400)
+        self.assertEqual(self.merge(self.lingsat_req, into=self.ngo_req).status_code, 400)
+        self.assertEqual(self.client.post(f'/api/requests/{self.ngo_req.request_id}/park/', {'reason': 'x'}, format='json', **session_header(self.admin)).status_code, 400)
+        self.assertEqual(self.merge(self.lingsat_req, user=self.poro).status_code, 403)
+
+    def test_unmerging_returns_it_to_where_it_was(self):
+        self.merge(self.lingsat_req)
+
+        response = self.client.post(f'/api/requests/{self.lingsat_req.request_id}/unmerge/', {}, format='json', **session_header(self.admin))
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()['status'], 'approved')
+        self.assertIsNone(response.json()['merged_into'])
+        self.assertEqual(self.detail(self.main)['merged_requests'], [])
+        self.assertTrue(Notification.objects.filter(recipient=self.lingsat, notif_type='unmerged').exists())
+        self.assertEqual(self.client.post(f'/api/requests/{self.lingsat_req.request_id}/unmerge/', {}, format='json', **session_header(self.admin)).status_code, 400)
+
+    def test_archiving_the_main_request_unmerges_the_rest(self):
+        self.merge(self.ngo_req)
+
+        self.client.delete(f'/api/requests/{self.main.request_id}/', **session_header(self.admin))
+
+        self.ngo_req.refresh_from_db()
+        self.assertEqual(self.ngo_req.status, 'pending_mayor_approval')
+        self.assertIsNone(self.ngo_req.merged_into)
