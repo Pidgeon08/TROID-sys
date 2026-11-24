@@ -6,8 +6,11 @@ import 'leaflet.heat';
 import { trailRuns } from '../utils/coverage';
 import { HEAT_GRADIENTS, PATH_COLORS, PATH_START, formatClock } from '../constants/mapLayers';
 
-/** Leaflet.heat overlay. Waits until the map has a size so it never draws into a 0×0 canvas. */
-export function HeatmapLayer({ points, type }) {
+/**
+ * Leaflet.heat overlay. Waits until the map has a size so it never draws into a 0×0 canvas.
+ * `options` overrides Leaflet.heat's (radius, blur, max).
+ */
+export function HeatmapLayer({ points, type, options }) {
   const map = useMap();
 
   useEffect(() => {
@@ -23,7 +26,7 @@ export function HeatmapLayer({ points, type }) {
       const valid = (points || []).filter((p) => Number.isFinite(p?.[0]) && Number.isFinite(p?.[1]) && !(p[0] === 0 && p[1] === 0));
       if (valid.length === 0) return;
       try {
-        heat = L.heatLayer(valid, { radius: 35, blur: 25, maxZoom: 17, gradient: HEAT_GRADIENTS[type] || HEAT_GRADIENTS['Waste Density'] }).addTo(map);
+        heat = L.heatLayer(valid, { radius: 35, blur: 25, maxZoom: 17, gradient: HEAT_GRADIENTS[type] || HEAT_GRADIENTS['Waste Density'], ...options }).addTo(map);
       } catch (err) {
         console.error('Heatmap render error:', err);
       }
@@ -35,7 +38,7 @@ export function HeatmapLayer({ points, type }) {
         try { map.removeLayer(heat); } catch { /* map already gone */ }
       }
     };
-  }, [map, points, type]);
+  }, [map, points, type, options]);
 
   return null;
 }

@@ -18,6 +18,7 @@ import { Card } from "../../components/ui/Card";
 import NotificationBell from "../../components/NotificationBell";
 import { REQUEST_STATUS_STYLES, mapRequest, getDeploymentStatus, formatTime12h, toStatusLabel } from "../../constants/requests";
 import { MergedIntoCard, MergedRequestsCard } from "../../components/MergedRequestPanels";
+import { LIVE, useLiveVersion } from "../../hooks/useLiveUpdates";
 
 const Field = ({ label, value }) => (
   <div className="flex items-center justify-between py-2 text-sm">
@@ -39,6 +40,8 @@ export default function CityHallViewRequest() {
   const [reasonStep, setReasonStep] = useState(null);
   const [schedule, setSchedule] = useState(null);
 
+  // Loaded again when this data changes anywhere, so the page stays current without a reload.
+  const live = useLiveVersion(LIVE.requests, LIVE.schedules);
   useEffect(() => {
     let cancelled = false;
     const fetchRequest = async () => {
@@ -59,7 +62,7 @@ export default function CityHallViewRequest() {
     };
     fetchRequest();
     return () => { cancelled = true; };
-  }, [id]);
+  }, [id, live]);
 
   const handleApprove = async () => {
     setSubmitting(true);
@@ -197,45 +200,7 @@ export default function CityHallViewRequest() {
                 </div>
 
                 <Card title="Letter of Request" className="lg:sticky lg:top-5">
-                  <LetterAttachment request={request}>
-                    <div className="rounded-lg border border-slate-100 bg-slate-100 p-6 min-h-[560px] flex flex-col">
-                      <div className="bg-white rounded shadow-sm p-8 flex-1 text-sm text-slate-700 leading-relaxed break-words">
-                        <div className="flex items-start gap-3 mb-4">
-                          <div className="w-12 h-12 rounded-full border-2 border-blue-800 flex items-center justify-center text-[9px] text-center text-blue-800 font-semibold leading-tight shrink-0">
-                            SEAL
-                          </div>
-                          <div className="text-xs text-slate-500 leading-snug">
-                            Republic of the Philippines
-                            <br />
-                            Province of La Union
-                            <br />
-                            City of San Fernando
-                            <br />
-                            <span className="font-bold text-slate-800 text-sm">{request.location?.barangay?.toUpperCase()}</span>
-                          </div>
-                        </div>
-                        <p className="text-right text-xs text-slate-500 mb-4">{request.dateSubmitted}</p>
-                        <p className="mb-3 text-xs text-slate-600">
-                          The Community Environment and
-                          <br />
-                          Natural Resources Office (CENRO)
-                          <br />
-                          San Fernando, La Union
-                        </p>
-                        <p className="font-semibold text-slate-800 mb-3 text-xs">Subject: Request for Assistance – {request.type}</p>
-                        <p className="mb-3 text-xs">Dear Sir/Madam,</p>
-                        <p className="mb-3 text-xs">{request.notes}</p>
-                        <p className="mb-6 text-xs">Thank you very much for your immediate attention and support.</p>
-                        <p className="text-xs">Respectfully yours,</p>
-                        <p className="font-semibold text-slate-800 mt-6 text-xs">{request.requestedBy?.name}</p>
-                        <p className="text-xs text-slate-500">
-                          {request.requestedBy?.role}
-                          <br />
-                          {request.requestedBy?.barangay}
-                        </p>
-                      </div>
-                    </div>
-                  </LetterAttachment>
+                  <LetterAttachment request={request} />
                 </Card>
 
                 <div className="flex flex-col gap-5">

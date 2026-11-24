@@ -28,13 +28,15 @@ from django.db import IntegrityError, connection, transaction
 from django.db.migrations.recorder import MigrationRecorder
 from django.utils import timezone
 
+from . import live
+
 FORMAT = 'troid-backup'
 VERSION = 2
 READABLE_VERSIONS = (1, 2)
 APP = 'troid_api'
 SESSION_FIELDS = {'troid_api.user': ('session_token', 'companion_session_token')}
 # Never backed up, and never replaced by a restore.
-NOT_BACKED_UP = {'troid_api.auditlog', 'troid_api.systempause'}
+NOT_BACKED_UP = {'troid_api.auditlog', 'troid_api.liveversion', 'troid_api.systempause'}
 
 FEATURES = [
     {'key': 'accounts', 'label': 'User accounts',
@@ -287,6 +289,8 @@ def restore_backup(payload, keys):
     """Restores these features from the backup, all or nothing. Returns what changed."""
     keys, models, records = _plan(payload, keys)
     changes = _apply(models, records)
+    # Rows are restored as they are, without the usual change signals: every open page refetches.
+    live.touch(*live.ALL_TOPICS)
     # Restored rows keep their ids; new rows must be numbered after them (PostgreSQL).
     with connection.cursor() as cursor:
         for sql in connection.ops.sequence_reset_sql(no_style(), models):

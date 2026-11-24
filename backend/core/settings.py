@@ -80,6 +80,10 @@ API_AUTH_ENFORCED = os.environ.get('API_AUTH_ENFORCED', 'False') == 'True'
 # detection would be stored twice. Never run during tests.
 BACKGROUND_WORKERS = os.environ.get('BACKGROUND_WORKERS', 'True') == 'True' and not RUNNING_TESTS
 
+# On the local db.sqlite3, keep the sample data from `manage.py seed_sample_data` dated around
+# today (troid_api/sample_data.py). It never runs on Postgres, whatever this says.
+SAMPLE_DATA_AUTO_REFRESH = os.environ.get('SAMPLE_DATA_AUTO_REFRESH', 'True') == 'True' and not RUNNING_TESTS
+
 
 # Application definition
 

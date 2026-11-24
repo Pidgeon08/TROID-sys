@@ -16,6 +16,7 @@ urlpatterns = [
     path('users/pending-count/', views.pending_user_count, name='pending-user-count'),
     path('requests/pending-count/', views.pending_request_count, name='pending-request-count'),
     path('notifications/unread-count/', views.unread_notification_count, name='unread-notification-count'),
+    path('live/', views.live_versions, name='live-versions'),
     path('companion/login/', views.companion_login, name='companion-login'),
     path('companion/me/', views.companion_me, name='companion-me'),
     path('companion/change-password/', views.companion_change_password, name='companion-change-password'),

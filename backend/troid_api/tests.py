@@ -16,7 +16,7 @@ from django.test import TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from . import backup, bot_auth, mqtt_client, views
+from . import backup, bot_auth, live, mqtt_client, views
 from .models import (
     AuditLog, Boat, CollectionArea, DeploymentSchedule, DetectionEvent, LetterFile, Notification, Operator,
     Request, StatusHistory, SystemPause, User,
@@ -1058,6 +1058,20 @@ class HeatmapCoverageDataTests(TestCase):
         )
         self.assertEqual(drive['collection_area']['points'], self.area.points)
 
+    def test_a_barangay_account_compares_only_its_own_barangays_drives(self):
+        Request.objects.create(email='other@example.com', status='completed', barangay='Catbangen',
+                               trash_categories={'Plastic': 1})
+        poro = make_user('barangay')
+        User.objects.filter(pk=poro.pk).update(location='Poro')
+        nowhere = User.objects.create(name='No Barangay', email='none@example.com', role='ngo', session_token='none-session')
+
+        mine = self.client.get('/api/requests/post-cleanup-comparison/', **session_header(poro)).json()
+        none = self.client.get('/api/requests/post-cleanup-comparison/', **session_header(nowhere)).json()
+
+        self.assertEqual([d['request_id'] for d in mine], [self.req.request_id])
+        self.assertEqual(none, [])
+        self.assertEqual(len(self.comparison()), 2)  # CENRO still sees every barangay
+
     def comparison(self):
         response = self.client.get('/api/requests/post-cleanup-comparison/', **session_header(self.admin))
         self.assertEqual(response.status_code, 200)
@@ -1128,6 +1142,16 @@ class HeatmapCoverageDataTests(TestCase):
         self.detect(16.0, 120.0, timezone.now())
 
         self.assertEqual(sorted(p['request'] or '' for p in self.heatmap()), ['', self.req.request_id])
+
+    def test_an_areas_heatmap_has_only_its_cleanups_detections(self):
+        other_area = CollectionArea.objects.create(name='Other', barangay='Poro', status='approved', points=[[16.5, 120.2]] * 3)
+        other_req = Request.objects.create(email='other@example.com', barangay='Poro', collection_area=other_area)
+        self.detect(16.6166, 120.2866, timezone.now(), request=self.req)
+        self.detect(16.5, 120.2, timezone.now(), request=other_req)
+        self.detect(16.0, 120.0, timezone.now())
+
+        points = self.heatmap(time_filter='all', collection_area=self.area.area_id)
+        self.assertEqual([p['request'] for p in points], [self.req.request_id])
 
     def test_custom_range_filters_by_the_start_and_end_given(self):
         now = timezone.now()
@@ -1206,7 +1230,7 @@ class EndpointRoleTests(TestCase):
         self.assert_roles('post', f'/api/requests/{rid}/submit_trash_report/', REQUESTER_ROLES, {})
         self.assert_roles('get', f'/api/requests/{rid}/letter/', STAFF_ROLES)
         self.assert_roles('get', f'/api/requests/{rid}/troid_count/', REQUESTER_ROLES)
-        self.assert_roles('get', '/api/requests/post-cleanup-comparison/', ('admin',))
+        self.assert_roles('get', '/api/requests/post-cleanup-comparison/', REQUESTER_ROLES)
         self.assert_roles('post', f'/api/requests/{rid}/redirect-area/', ('admin',), {})
         self.assert_roles('post', f'/api/requests/{rid}/merge/', ('admin',), {})
         self.assert_roles('post', f'/api/requests/{rid}/unmerge/', ('admin',), {})
@@ -2890,3 +2914,130 @@ class PriorityAreaTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertFalse(DeploymentSchedule.objects.exists())
         self.assertTrue(self.areas()['Poro Shore']['is_priority'])
+
+
+class SampleDataRefreshTests(TestCase):
+    """The local sample data is moved forward to today; nothing else is."""
+
+    def setUp(self):
+        from . import sample_data
+        self.sample_data = sample_data
+        self.made = timezone.now() - timedelta(days=10)
+        anchor = User.objects.create(name='Sample CENRO Admin', email=sample_data.ANCHOR_EMAIL, role='admin')
+        User.objects.filter(pk=anchor.pk).update(date_created=self.made)
+        self.boat = Boat.objects.create(name=f'{sample_data.BOAT_PREFIX}-A')
+        self.sample = Request.objects.create(notes=f'{sample_data.MARKER} test', status='approved',
+                                             preferred_date='2026-11-20', drive_started_at=self.made)
+        Request.objects.filter(pk=self.sample.pk).update(date_submitted=self.made)
+        StatusHistory.objects.create(request=self.sample, label='Approved by Admin', date=self.made)
+        self.own = Request.objects.create(notes='A real request', status='approved', preferred_date='2026-11-20')
+        Request.objects.filter(pk=self.own.pk).update(date_submitted=self.made)
+
+    def test_moves_only_the_sample_data_forward_by_its_age(self):
+        own_bot = Boat.objects.create(name='Real bot')
+        manual = DeploymentSchedule.objects.create(bot=None, day='2026-11-20', request_id=self.sample.request_id,
+                                                   cleanup_type='unsupported')
+        troid = DeploymentSchedule.objects.create(bot=self.boat, day='2026-11-21', request_id=self.sample.request_id)
+        theirs = DeploymentSchedule.objects.create(bot=own_bot, day='2026-11-22', request_id=self.own.request_id)
+
+        self.assertEqual(self.sample_data.refresh_sample_dates(), 10)
+
+        sample, own = Request.objects.get(pk=self.sample.pk), Request.objects.get(pk=self.own.pk)
+        self.assertEqual(sample.preferred_date, '2026-11-30')
+        self.assertAlmostEqual((sample.date_submitted - self.made).total_seconds(), 10 * 86400, delta=1)
+        self.assertAlmostEqual((sample.drive_started_at - self.made).total_seconds(), 10 * 86400, delta=1)
+        self.assertAlmostEqual((StatusHistory.objects.get(request=sample).date - self.made).total_seconds(), 10 * 86400, delta=1)
+        self.assertEqual((own.preferred_date, own.date_submitted), ('2026-11-20', self.made))
+        days = dict(DeploymentSchedule.objects.values_list('pk', 'day'))
+        self.assertEqual((days[manual.pk], days[troid.pk], days[theirs.pk]), ('2026-11-30', '2026-12-01', '2026-11-22'))
+        # Now dated today, so there is nothing more to move.
+        self.assertEqual(self.sample_data.refresh_sample_dates(), 0)
+
+    def test_leaves_a_sample_booking_where_it_is_when_that_day_is_taken(self):
+        # A sample cleanup someone booked on a real robot, which already has that later day taken.
+        own_bot = Boat.objects.create(name='Real bot')
+        DeploymentSchedule.objects.create(bot=own_bot, day='2026-11-30', request_id=self.own.request_id)
+        stuck = DeploymentSchedule.objects.create(bot=own_bot, day='2026-11-20', request_id=self.sample.request_id)
+
+        self.sample_data.refresh_sample_dates()
+
+        self.assertEqual(DeploymentSchedule.objects.get(pk=stuck.pk).day, '2026-11-20')
+
+    def test_does_nothing_without_sample_data(self):
+        User.objects.filter(email=self.sample_data.ANCHOR_EMAIL).delete()
+        self.assertEqual(self.sample_data.refresh_sample_dates(), 0)
+
+
+class LiveVersionTests(TestCase):
+    """Open pages notice changes without a reload: each change moves its topic's number on."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.barangay = make_user('barangay')
+        self.sent = []
+        patcher = patch('troid_api.realtime._start', side_effect=lambda event, payload: self.sent.append((event, payload)))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.committed()
+
+    def committed(self):
+        # A real commit runs and forgets its callbacks; the test's own transaction never commits,
+        # so forget the waiting ones, as a commit would.
+        from django.db import transaction
+        transaction.get_connection().run_on_commit.clear()
+
+    def versions(self, user=None):
+        response = self.client.get('/api/live/', **session_header(user or self.barangay))
+        self.assertEqual(response.status_code, 200, response.content)
+        return response.json()
+
+    def test_a_change_moves_its_topic_once_per_transaction(self):
+        before = self.versions()['versions']
+        with self.captureOnCommitCallbacks(execute=True):
+            req = Request.objects.create(request_id='REQ-LIVE', barangay='Poro')
+            req.status = 'approved'
+            req.save()
+            StatusHistory.objects.create(request=req, label='Approved', date=timezone.now(), actor='CENRO', role='admin')
+        after = self.versions()['versions']
+
+        self.assertEqual(after['requests'], before['requests'] + 1)
+        self.assertEqual(after['areas'], before['areas'])
+        self.assertEqual(self.sent, [('data.changed', {'topics': ['requests']})])
+
+    def test_deleting_moves_the_topic_too(self):
+        area = CollectionArea.objects.create(name='Shore', barangay='Poro', points=[[0, 0]] * 3)
+        self.committed()
+        before = self.versions()['versions']['areas']
+        with self.captureOnCommitCallbacks(execute=True):
+            area.delete()
+        self.assertEqual(self.versions()['versions']['areas'], before + 1)
+
+    def test_a_rolled_back_change_moves_nothing(self):
+        from django.db import transaction
+        with self.captureOnCommitCallbacks(execute=True):
+            try:
+                with transaction.atomic():
+                    CollectionArea.objects.create(name='Gone', barangay='Poro', points=[[0, 0]] * 3)
+                    raise RuntimeError
+            except RuntimeError:
+                pass
+            Request.objects.create(request_id='REQ-KEPT')
+        self.assertEqual(self.sent, [('data.changed', {'topics': ['requests']})])
+
+    def test_quiet_changes_move_nothing(self):
+        boat = Boat.objects.create(name='Robot', device_key='b' * 64)
+        with self.captureOnCommitCallbacks(execute=True):
+            with live.quiet():
+                boat.battery_level = 50
+                boat.save()
+        self.assertEqual(self.sent, [])
+
+    def test_each_user_sees_only_their_own_unread_notifications(self):
+        other = make_user('ngo')
+        Notification.objects.create(recipient=self.barangay, title='One', message='m')
+        newest = Notification.objects.create(recipient=self.barangay, title='Two', message='m')
+        Notification.objects.create(recipient=self.barangay, title='Read', message='m', is_read=True)
+        Notification.objects.create(recipient=other, title='Theirs', message='m')
+
+        self.assertEqual(self.versions()['notifications'], {'unread': 2, 'latest': newest.pk})
+        self.assertEqual(self.versions(other)['notifications']['unread'], 1)

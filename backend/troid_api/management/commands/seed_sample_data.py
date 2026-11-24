@@ -4,12 +4,16 @@
     python manage.py seed_sample_data --clear    # remove the sample data only
 
 It makes sign-in accounts for every role, three robots and their operators, an approved
-collection area inside each of seven real barangays, and about four months of cleanup
+collection area inside each of seven real barangays, and a little over a year of cleanup
 requests in every state: finished drives with trash reports and robot detections (so the
-Reports, Heatmap and Dashboard pages have numbers and comparisons to show), requests waiting
-on the City Admin or CENRO (two of them old enough to resend), scheduled, ongoing, parked,
-declined, merged and archived ones. Some collection areas collect more bags per cleanup
-lately than the month before, so they show as priority areas.
+Reports, Heatmap and Dashboard pages have numbers and comparisons to show, even against last
+year), requests waiting on the City Admin or CENRO (two of them old enough to resend),
+ongoing, parked, declined, merged and archived ones, and TROID and non-TROID cleanups booked
+over the coming weeks. Some collection areas collect more bags per cleanup lately than the
+month before, so they show as priority areas.
+
+The local backend keeps all of it dated around today by itself (troid_api/sample_data.py), so
+it doesn't go stale as days pass.
 
 Everything it creates is tagged so --clear (and the next run) removes exactly that and
 nothing else. It refuses to run against anything but a local SQLite database unless
@@ -19,7 +23,6 @@ import base64
 import math
 import random
 from datetime import datetime, time, timedelta
-from zoneinfo import ZoneInfo
 
 from django.core.management.base import BaseCommand, CommandError
 from django.db import connection, transaction
@@ -30,14 +33,9 @@ from troid_api.models import (
     Boat, CollectionArea, DeploymentSchedule, DetectionEvent, LetterFile, Operator,
     Request, StatusHistory, User,
 )
-
-MANILA = ZoneInfo('Asia/Manila')
-MARKER = '[SAMPLE DATA]'
-EMAIL_DOMAIN = 'sample.troid.local'
-PASSWORD = 'Sample123!'
-SUBMITTER = 'Sample Data'
-BOAT_PREFIX = 'Sample TROID'
-OPERATOR_PREFIX = 'SMP-'
+from troid_api.sample_data import (
+    BOAT_PREFIX, EMAIL_DOMAIN, MANILA, MARKER, OPERATOR_PREFIX, PASSWORD, SUBMITTER,
+)
 CATEGORIES = ['Plastic', 'Metal', 'Glass', 'Paper/Cardboard', 'Organic/Biodegradable', 'Other']
 # Typical share of each kind of trash in a haul; plastic dominates.
 CATEGORY_MIX = [0.46, 0.08, 0.07, 0.12, 0.19, 0.08]
@@ -139,7 +137,10 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument('--clear', action='store_true', help='Only remove the sample data.')
-        parser.add_argument('--days', type=int, default=120, help='How many days back the finished cleanups go (default 120).')
+        parser.add_argument('--days', type=int, default=400,
+                            help='How many days back the finished cleanups go (default 400, so there is a last year to compare with).')
+        parser.add_argument('--weeks-ahead', type=int, default=8,
+                            help='How many weeks of upcoming cleanups to book (default 8).')
         parser.add_argument('--seed', type=int, default=7, help='Random seed, for the same data every run (default 7).')
         parser.add_argument('--allow-remote', action='store_true',
                             help='Run even though the database is not a local SQLite file.')
@@ -158,13 +159,16 @@ class Command(BaseCommand):
             self.rng = random.Random(options['seed'])
             self.now = timezone.now()
             self.today = self.now.astimezone(MANILA).date()
-            self.seed(options['days'])
+            self.seed(options['days'], options['weeks_ahead'])
 
     # --- removing ---------------------------------------------------------------------
 
     def clear(self):
         boats = Boat.objects.filter(name__startswith=BOAT_PREFIX)
-        removed, _ = Request.objects.filter(notes__startswith=MARKER).delete()
+        sample = Request.objects.filter(notes__startswith=MARKER)
+        # Non-TROID cleanups are booked without a bot, so they don't go with the robots.
+        DeploymentSchedule.objects.filter(request_id__in=sample.values_list('request_id', flat=True)).delete()
+        removed, _ = sample.delete()
         boats.delete()  # their schedules and detections go with them
         Operator.objects.filter(operator_id__startswith=OPERATOR_PREFIX).delete()
         CollectionArea.objects.filter(submitted_by=SUBMITTER).delete()
@@ -173,13 +177,13 @@ class Command(BaseCommand):
 
     # --- creating ---------------------------------------------------------------------
 
-    def seed(self, days):
+    def seed(self, days, weeks_ahead):
         self.make_accounts()
         self.make_fleet()
-        self.make_areas()
+        self.make_areas(days)
         self.schedule_days = set()  # (bot id, day) already booked
 
-        specs = self.finished_specs(days) + self.open_specs()
+        specs = self.finished_specs(days) + self.open_specs() + self.upcoming_specs(weeks_ahead)
         specs.sort(key=lambda s: s['submitted'])
         created = {}
         for spec in specs:
@@ -189,8 +193,12 @@ class Command(BaseCommand):
         self.merge(created, 'merge-done-main', ['merge-done-a'])
 
         finished = sum(1 for s in specs if s['status'] in ('completed', 'segregated', 'verified'))
+        upcoming = DeploymentSchedule.objects.filter(
+            request_id__in=[r.request_id for r in created.values()], day__gt=self.today.isoformat(),
+        ).count()
         self.stdout.write(self.style.SUCCESS(
-            f'Created {len(specs)} sample requests ({finished} finished cleanups over the last {days} days), '
+            f'Created {len(specs)} sample requests ({finished} finished cleanups over the last {days} days, '
+            f'{upcoming} cleanups booked over the next {weeks_ahead} weeks), '
             f'{len(self.areas)} collection areas, {len(self.boats)} robots and {len(self.operators)} operators.'
         ))
         self.stdout.write('Sign in with any of these (password ' + PASSWORD + '):')
@@ -224,13 +232,14 @@ class Command(BaseCommand):
                 assigned_bot=self.boats[number - 1], availability='assigned',
             ))
 
-    def make_areas(self):
+    def make_areas(self, days):
         rng = self.rng
         self.areas = {}
         for info in BARANGAYS:
             name = info['name']
             water_type, water_name = info['water']
-            reviewed = self.now - timedelta(days=rng.randint(130, 160))
+            # Approved before the first sample cleanup was requested for it.
+            reviewed = self.now - timedelta(days=days + rng.randint(25, 50))
             area = CollectionArea.objects.create(
                 name=info['area'], barangay=name, submitted_by=SUBMITTER,
                 points=area_polygon(rng, name), closed=True,
@@ -323,6 +332,7 @@ class Command(BaseCommand):
         add('sched-2', 'approved', 'Carlatan', 6, scheduled=6)
         add('unsched-1', 'approved', 'Lingsat', 7)
         add('unsched-2', 'approved', 'San Vicente', 4, troid=False)
+        add('sched-manual', 'approved', 'Carlatan', 5, troid=False, scheduled=2)
         add('ongoing', 'ongoing', 'Catbangen', 9, drive_today=True)
         add('parked', 'parked', 'Biday', 15, parked_from='pending_admin_approval',
             reason='The river is too high after the typhoon. We will schedule it once the water goes down.')
@@ -335,6 +345,24 @@ class Command(BaseCommand):
         add('merge-open-main', 'approved', 'Poro', 6, scheduled=5)
         add('merge-open-a', 'pending_admin_approval', 'Poro', 4, force_ngo=True)
         add('merge-open-b', 'pending_mayor_approval', 'Poro', 3)
+        return specs
+
+    def upcoming_specs(self, weeks):
+        """Approved cleanups booked over the coming weeks, so the schedule has something ahead.
+        Mostly TROID-supported; about one a week is a non-TROID (manual) cleanup."""
+        rng = self.rng
+        now = self.now.astimezone(MANILA)
+        specs = []
+        for week in range(1, weeks + 1):
+            for n in range(rng.randint(2, 4)):
+                ahead = (week - 1) * 7 + rng.randint(1, 7)
+                info = self.pick_barangay(1)
+                specs.append({
+                    'key': f'upcoming-{week}-{n}', 'status': 'approved', 'barangay': info,
+                    'troid': n > 0 or rng.random() < 0.3, 'scheduled': ahead,
+                    # Asked for one to three weeks before the day, approved since.
+                    'submitted': now - timedelta(days=max(6, rng.randint(7, 21) - ahead), hours=rng.randint(1, 8)),
+                })
         return specs
 
     # --- one request ------------------------------------------------------------------
@@ -423,8 +451,16 @@ class Command(BaseCommand):
             else:
                 step('Approved by City Admin', approved_city, city, 'City Admin')
                 step('Declined', approved_city + timedelta(days=1), cenro, 'Admin', spec['reason'])
-        if spec.get('scheduled') and troid:
-            self.book(req, self.today + timedelta(days=spec['scheduled']), barangay)
+        if spec.get('scheduled'):
+            day = self.today + timedelta(days=spec['scheduled'])
+            if troid:
+                self.book(req, day, barangay)
+            else:
+                # A non-TROID cleanup is booked without a bot, so it never takes up a robot's day.
+                DeploymentSchedule.objects.create(
+                    bot=None, day=day.isoformat(), status='scheduled', label=req.preferred_time or '08:00',
+                    zone=barangay, request_id=req.request_id, cleanup_type='unsupported',
+                )
 
         if status == 'ongoing' or drive_day:
             boat, operator = self.crew()

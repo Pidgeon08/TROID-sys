@@ -9,13 +9,15 @@ import { filterRequests, sortRequests } from "../../utils/requestFilters";
 import { Badge } from "../../components/ui/Badge";
 import { Card } from "../../components/ui/Card";
 import { Pagination } from "../../components/ui/Pagination";
+import { pageKeepingPlace, usePageSize } from "../../hooks/usePageSize";
 import { SummaryCard } from "../../components/ui/SummaryCard";
 import { EmptyState } from "../../components/ui/EmptyState";
 import api from "../../services/api";
 import { useUnreadNotifications } from "../../hooks/useUnreadNotifications";
 import { UnreadDot } from "../../components/ui/UnreadDot";
+import { LIVE, useLiveVersion } from "../../hooks/useLiveUpdates";
 
-const PAGE_SIZE = 5;
+const DEFAULT_PAGE_SIZE = 5;
 
 export default function Requests({ userRole = "admin" }) {
   const navigate = useNavigate();
@@ -24,12 +26,20 @@ export default function Requests({ userRole = "admin" }) {
   const { loading, requests, counts, setRequests, scheduledRequestIds } = useRequests(userRole);
   const { filters, update, clear } = useRequestFilters();
   const [currentPage, setCurrentPage] = useState(1);
+  // How many requests a page shows; each browser remembers its choice.
+  const [pageSize, setPageSize] = usePageSize("requests-admin", DEFAULT_PAGE_SIZE);
+  const changePageSize = (size) => {
+    setCurrentPage((p) => pageKeepingPlace(p, pageSize, size));
+    setPageSize(size);
+  };
   const [archivingId, setArchivingId] = useState(null);
   const [showArchived, setShowArchived] = useState(false);
   const [archivedRequests, setArchivedRequests] = useState([]);
   const [loadingArchived, setLoadingArchived] = useState(true);
 
   // Loaded up front too, for the Archived summary card; refreshed when the list is opened.
+  // Loaded again when this data changes anywhere, so the page stays current without a reload.
+  const live = useLiveVersion(LIVE.requests);
   useEffect(() => {
     let cancelled = false;
     api.requestsArchived()
@@ -37,7 +47,7 @@ export default function Requests({ userRole = "admin" }) {
       .catch((err) => console.error('Failed to load archived requests:', err))
       .finally(() => { if (!cancelled) setLoadingArchived(false); });
     return () => { cancelled = true; };
-  }, [showArchived]);
+  }, [showArchived, live]);
 
   const handleRestore = async (req) => {
     try {
@@ -75,11 +85,11 @@ export default function Requests({ userRole = "admin" }) {
     [base, filters, scheduledIds]
   );
   const paginated = useMemo(
-    () => source.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE),
-    [source, currentPage]
+    () => source.slice((currentPage - 1) * pageSize, currentPage * pageSize),
+    [source, currentPage, pageSize]
   );
 
-  const totalPages = Math.max(1, Math.ceil(source.length / PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(source.length / pageSize));
 
   const goTo = (p) => setCurrentPage(Math.max(1, Math.min(totalPages, p)));
 
@@ -241,7 +251,8 @@ export default function Requests({ userRole = "admin" }) {
             totalPages={totalPages}
             onPageChange={goTo}
             totalItems={source.length}
-            pageSize={PAGE_SIZE}
+            pageSize={pageSize}
+          onPageSizeChange={changePageSize}
           />
         )}
       </Card>

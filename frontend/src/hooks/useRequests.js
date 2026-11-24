@@ -1,11 +1,14 @@
 import { useEffect, useState, useMemo } from 'react';
 import api from '../services/api';
 import { mapRequest } from '../constants/requests';
+import { useLiveVersion } from './useLiveUpdates';
 
 export function useRequests(userRole = 'admin') {
   const [requests, setRequests] = useState([]);
   const [scheduledRequestIds, setScheduledRequestIds] = useState(new Set());
   const [loading, setLoading] = useState(true);
+  // Loaded again whenever a request or a booking changes anywhere.
+  const live = useLiveVersion('requests', 'schedules');
 
   useEffect(() => {
     let cancelled = false;
@@ -31,7 +34,7 @@ export function useRequests(userRole = 'admin') {
     }
     fetchRequests();
     return () => { cancelled = true; };
-  }, []);
+  }, [live]);
 
   const counts = useMemo(() => {
     if (userRole === 'mayorsoffice') {

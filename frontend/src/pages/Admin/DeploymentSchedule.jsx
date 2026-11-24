@@ -20,8 +20,10 @@ import {
   Users,
 } from "lucide-react";
 import { api } from '../../services/api';
+import { Popover } from '../../components/ui/Popover';
 import { logAudit } from '../../services/auditLog';
 import ViewRequest from './ViewRequest';
+import { LIVE, useLiveVersion } from "../../hooks/useLiveUpdates";
 
 const DAYS = [
   { key: "mon", label: "Mon" },
@@ -37,6 +39,50 @@ const TIME_SLOTS = [
   "06:00", "07:00", "08:00", "09:00", "10:00", "11:00", "12:00",
   "13:00", "14:00", "15:00", "16:00", "17:00", "18:00",
 ];
+
+// The schedule's Filter button. Requested by narrows the cleanups shown to who asked for them;
+// Robots narrows the robot rows by what they have in the period on screen (day, week or month).
+const REQUESTER_FILTERS = [
+  { value: "", label: "Anyone" },
+  { value: "barangay", label: "Barangay" },
+  { value: "ngo", label: "NGO" },
+];
+const ROBOT_FILTERS = [
+  { value: "", label: "All robots" },
+  { value: "assigned", label: "Assigned", hint: "Has a cleanup in this period" },
+  { value: "unassigned", label: "Unassigned", hint: "No cleanup or maintenance in this period" },
+  { value: "maintenance", label: "Under maintenance", hint: "Has maintenance in this period" },
+];
+
+function FilterOptions({ title, options, value, onChange }) {
+  return (
+    <fieldset>
+      <legend className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400">{title}</legend>
+      <div className="flex flex-col gap-0.5">
+        {options.map((o) => (
+          <label
+            key={o.value || "all"}
+            className={`flex cursor-pointer items-start gap-2 rounded-lg px-2 py-1.5 text-sm transition-colors ${
+              value === o.value ? "bg-blue-50 text-[#1b4de4]" : "text-slate-700 hover:bg-slate-50"
+            }`}
+          >
+            <input
+              type="radio"
+              name={title}
+              checked={value === o.value}
+              onChange={() => onChange(o.value)}
+              className="mt-1 accent-[#1b4de4]"
+            />
+            <span>
+              <span className="font-medium">{o.label}</span>
+              {o.hint && <span className="block text-[11px] text-slate-400">{o.hint}</span>}
+            </span>
+          </label>
+        ))}
+      </div>
+    </fieldset>
+  );
+}
 
 const CLEANUP_OPTIONS = [
   { value: "troid_supported", label: "TROID cleanup", hint: "A TROID bot and operator are deployed.", icon: Bot },
@@ -733,7 +779,13 @@ export default function DeploymentSchedule() {
   const [overviewId, setOverviewId] = useState(null);
   const [reschedulingEntry, setReschedulingEntry] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [requesterFilter, setRequesterFilter] = useState("");
+  const [robotFilter, setRobotFilter] = useState("");
+  // request id -> who asked for it and where: { role, barangay, area, location }
+  const [requestInfo, setRequestInfo] = useState({});
 
+  // Loaded again when this data changes anywhere, so the page stays current without a reload.
+  const live = useLiveVersion(LIVE.schedules, LIVE.requests, LIVE.fleet, LIVE.areas);
   useEffect(() => {
     let cancelled = false;
     Promise.all([api.boats(), api.operators(), api.deploymentSchedules(), api.requests(), api.priorityAreas()]).then(([boatsData, operatorsData, schedulesData, requestsData, priorityData]) => {
@@ -793,21 +845,18 @@ export default function DeploymentSchedule() {
       setSchedule(scheduleMap);
       setManualSchedules(manual);
       setApprovedRequests(approved);
+      setRequestInfo(Object.fromEntries((requestsData || []).map((r) => [r.request_id, {
+        role: r.requested_by_role || '',
+        barangay: r.barangay || r.requested_by_barangay || '',
+        area: r.collection_area_detail?.name || '',
+        location: r.location_name || '',
+      }])));
       setPriorityAreaIds(new Set((priorityData || []).filter((p) => p.is_priority).map((p) => p.collection_area.id)));
       setLoading(false);
     }).catch(() => setLoading(false));
 
     return () => { cancelled = true; };
-  }, []);
-
-  const filteredBots = bots.filter((bot) => {
-    if (!searchQuery.trim()) return true;
-    const q = searchQuery.toLowerCase();
-    return (
-      String(bot.id).toLowerCase().includes(q) ||
-      bot.name?.toLowerCase().includes(q)
-    );
-  });
+  }, [live]);
 
   const selectedDayKey = dateKey(selectedDate);
   const selectedDayLabel = DAY_LABELS[selectedDate.getDay()];
@@ -839,9 +888,82 @@ export default function DeploymentSchedule() {
     return days;
   };
 
+  // The search matches a robot by its ID or name, and a cleanup by its request ID, barangay,
+  // collection area or location. A robot that matches shows all its entries; otherwise only the
+  // cleanups at the place searched for are shown.
+  const query = searchQuery.trim().toLowerCase();
+  const botMatches = (bot) => String(bot.id).toLowerCase().includes(query) || Boolean(bot.name?.toLowerCase().includes(query));
+  const matchedBotIds = new Set(query ? bots.filter(botMatches).map((b) => String(b.id)) : []);
+  const entryMatches = (entry) => {
+    const info = requestInfo[entry.requestId] || {};
+    return [entry.requestId, entry.zone, info.barangay, info.area, info.location]
+      .some((value) => value && String(value).toLowerCase().includes(query));
+  };
+
+  // A cleanup requested by someone the filter leaves out isn't shown; maintenance always is.
+  const shown = (entry) => {
+    if (!entry) return null;
+    if (requesterFilter && entry.status === "scheduled" && requestInfo[entry.requestId]?.role !== requesterFilter) return null;
+    return entry;
+  };
+  const entryFor = (botId, day) => {
+    const entry = shown(schedule[botId]?.[day]);
+    if (!entry || !query || matchedBotIds.has(String(botId))) return entry;
+    return entryMatches(entry) ? entry : null;
+  };
+
   const manualOn = (day) => manualSchedules
-    .filter((m) => m.day === day && m.status === "scheduled")
+    .filter((m) => m.day === day && m.status === "scheduled" && shown(m) && (!query || entryMatches(m)))
     .sort((a, b) => a.label.localeCompare(b.label));
+
+  // The days on screen, which the Robots filter looks at.
+  const periodDays = view === "Day"
+    ? [selectedDayKey]
+    : view === "Week"
+      ? getWeekDays().map((d) => dateKey(d.dateObj))
+      : getMonthDays().filter(Boolean).map(dateKey);
+  const robotHas = (botId, status) => periodDays.some((day) => entryFor(botId, day)?.status === status);
+
+  const filteredBots = bots.filter((bot) => {
+    if (query && !matchedBotIds.has(String(bot.id)) && !periodDays.some((day) => entryFor(bot.id, day))) return false;
+    if (robotFilter === "assigned") return robotHas(bot.id, "scheduled");
+    if (robotFilter === "maintenance") return robotHas(bot.id, "maintenance");
+    if (robotFilter === "unassigned") return !robotHas(bot.id, "scheduled") && !periodDays.some((day) => schedule[bot.id]?.[day]?.status === "maintenance");
+    return true;
+  });
+  // Non-TROID cleanups have no robot, so they only show when the filter isn't about robots being free or in maintenance.
+  const showManualRow = (!robotFilter || robotFilter === "assigned")
+    && (!query || periodDays.some((day) => manualOn(day).length > 0));
+
+  // Every cleanup the search found, so the page can point to them even outside the period on screen.
+  const searchHits = query
+    ? [
+      ...Object.entries(schedule).flatMap(([botId, days]) => Object.entries(days)
+        .filter(([, entry]) => entry.status === "scheduled" && !matchedBotIds.has(botId) && shown(entry) && entryMatches(entry))
+        .map(([day, entry]) => ({ day, entry }))),
+      ...manualSchedules.filter((m) => m.status === "scheduled" && shown(m) && entryMatches(m)).map((m) => ({ day: m.day, entry: m })),
+    ].sort((a, b) => a.day.localeCompare(b.day))
+    : [];
+  const hitsOnScreen = searchHits.filter((h) => periodDays.includes(h.day)).length;
+  // The next one from today, or the latest if they are all past.
+  const upcomingHit = searchHits.find((h) => h.day >= dateKey(new Date()));
+  const nextHit = upcomingHit || searchHits[searchHits.length - 1];
+  const hitDate = (day) => {
+    const date = new Date(`${day}T00:00:00`);
+    return date.toLocaleDateString("en-US", {
+      weekday: "short", month: "short", day: "numeric",
+      ...(date.getFullYear() !== new Date().getFullYear() ? { year: "numeric" } : {}),
+    });
+  };
+  const hitPlaces = [...new Set(searchHits.map((h) => {
+    const info = requestInfo[h.entry.requestId] || {};
+    return info.area || info.location || h.entry.zone || info.barangay;
+  }).filter(Boolean))];
+  const activeFilters = (requesterFilter ? 1 : 0) + (robotFilter ? 1 : 0);
+  const filterLabel = activeFilters === 0
+    ? "Filter"
+    : [REQUESTER_FILTERS.find((o) => o.value === requesterFilter && o.value)?.label, ROBOT_FILTERS.find((o) => o.value === robotFilter && o.value)?.label]
+      .filter(Boolean).join(" · ");
 
   const scheduledToday = Object.values(schedule).filter((s) => s?.[selectedDayKey]?.status === "scheduled").length
     + manualOn(selectedDayKey).length;
@@ -1080,21 +1202,23 @@ export default function DeploymentSchedule() {
                   </div>
                 </div>
                 {weekDays.map((d) => (
-                  <Cell key={d.key} entry={schedule[bot.id]?.[dateKey(d.dateObj)]} onClick={(entry) => handleCellClick(entry, bot.id, dateKey(d.dateObj))} dateObj={d.dateObj} />
+                  <Cell key={d.key} entry={entryFor(bot.id, dateKey(d.dateObj))} onClick={(entry) => handleCellClick(entry, bot.id, dateKey(d.dateObj))} dateObj={d.dateObj} />
                 ))}
               </div>
             ))}
             {filteredBots.length === 0 && (
               <p className="py-6 text-center text-sm text-slate-400">
-                No robots match the selected filters.
+                No robots or cleanups match the search and filters.
               </p>
             )}
+            {showManualRow && (
             <div className="grid grid-cols-[160px_repeat(7,1fr)] items-start gap-2 py-2.5">
               {manualRowLabel}
               {weekDays.map((d) => (
                 <div key={d.key}>{manualCells(manualOn(dateKey(d.dateObj)), dateKey(d.dateObj), d.dateObj)}</div>
               ))}
             </div>
+            )}
           </div>
         </div>
       </div>
@@ -1122,7 +1246,7 @@ export default function DeploymentSchedule() {
           </div>
           <div className="divide-y divide-slate-50">
             {filteredBots.map((bot) => {
-              const dayEntry = schedule[bot.id]?.[dateKey(selectedDate)];
+              const dayEntry = entryFor(bot.id, dateKey(selectedDate));
               const scheduledSlot = dayEntry?.status === "scheduled" ? dayEntry.label : null;
               return (
                 <div
@@ -1153,7 +1277,7 @@ export default function DeploymentSchedule() {
             })}
             {filteredBots.length === 0 && (
               <p className="py-6 text-center text-sm text-slate-400">
-                No robots match the selected filters.
+                No robots or cleanups match the search and filters.
               </p>
             )}
             <div
@@ -1196,7 +1320,7 @@ export default function DeploymentSchedule() {
                   const dayKey = dateKey(date);
                   const isToday = date.toDateString() === new Date().toDateString();
                   const isSelected = date.toDateString() === selectedDate.toDateString();
-                  const hasSchedule = filteredBots.some(bot => schedule[bot.id]?.[dayKey]?.status === 'scheduled') || manualOn(dayKey).length > 0;
+                  const hasSchedule = filteredBots.some(bot => entryFor(bot.id, dayKey)?.status === 'scheduled') || (showManualRow && manualOn(dayKey).length > 0);
                   let statusClass = "border border-dashed border-slate-200";
                   if (hasSchedule) statusClass = "bg-emerald-50 border border-emerald-100";
 
@@ -1301,14 +1425,29 @@ export default function DeploymentSchedule() {
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search robots..."
-              className="w-56 rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm text-slate-700 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30 placeholder:text-slate-400"
+              placeholder="Search robots, requests or places..."
+              aria-label="Search robots, requests or places"
+              className="w-72 rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm text-slate-700 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30 placeholder:text-slate-400"
             />
           </div>
-          <button className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
-            <Filter className="h-4 w-4" />
-            Filter
-          </button>
+          <Popover label={filterLabel} icon={Filter} active={activeFilters > 0} badge={activeFilters} align="right">
+            <div className="flex flex-col gap-3">
+              <FilterOptions title="Requested by" options={REQUESTER_FILTERS} value={requesterFilter} onChange={setRequesterFilter} />
+              <FilterOptions title="Robots" options={ROBOT_FILTERS} value={robotFilter} onChange={setRobotFilter} />
+              <p className="text-[11px] leading-relaxed text-slate-400">
+                Robots are judged by the {view === "Day" ? "day" : view === "Week" ? "week" : "month"} on screen.
+              </p>
+              {activeFilters > 0 && (
+                <button
+                  type="button"
+                  onClick={() => { setRequesterFilter(""); setRobotFilter(""); }}
+                  className="self-start text-xs font-medium text-slate-500 underline-offset-2 hover:text-slate-700 hover:underline"
+                >
+                  Clear filters
+                </button>
+              )}
+            </div>
+          </Popover>
           <div className="flex rounded-lg border border-slate-200 bg-white p-0.5 text-sm">
             {["Day", "Week", "Month"].map((v) => (
               <button
@@ -1324,6 +1463,33 @@ export default function DeploymentSchedule() {
           </div>
         </div>
       </div>
+
+      {query && !matchedBotIds.size && (
+        <div className="-mt-3 mb-5 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-blue-100 bg-blue-50/60 px-4 py-2.5 text-sm">
+          <MapPin className="h-4 w-4 shrink-0 text-[#1b4de4]" />
+          {searchHits.length === 0 ? (
+            <span className="text-slate-600">No robot, request or place matches "{searchQuery.trim()}".</span>
+          ) : (
+            <>
+              <span className="text-slate-700">
+                <span className="font-semibold">{searchHits.length}</span> cleanup{searchHits.length === 1 ? "" : "s"} at{" "}
+                <span className="font-semibold">{hitPlaces.slice(0, 3).join(", ")}{hitPlaces.length > 3 ? ` and ${hitPlaces.length - 3} more` : ""}</span>
+                {" · "}
+                {hitsOnScreen > 0 ? `${hitsOnScreen} in this ${view.toLowerCase()}` : `none in this ${view.toLowerCase()}`}
+              </span>
+              {nextHit && !periodDays.includes(nextHit.day) && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedDate(new Date(`${nextHit.day}T00:00:00`))}
+                  className="rounded-lg bg-white px-2.5 py-1 text-xs font-semibold text-[#1b4de4] border border-blue-200 hover:bg-blue-50"
+                >
+                  {upcomingHit ? "Next" : "Latest"}: {hitDate(nextHit.day)}
+                </button>
+              )}
+            </>
+          )}
+        </div>
+      )}
 
       {/* Summary cards */}
       <div className="mb-6 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">

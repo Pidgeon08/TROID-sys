@@ -502,3 +502,12 @@ class SystemPause(models.Model):
 
     def __str__(self):
         return f"{self.get_kind_display()} by {self.user_name}"
+
+
+class LiveVersion(models.Model):
+    """How many times each kind of data has changed (see live.py), so open pages notice."""
+    topic = models.CharField(max_length=30, primary_key=True)
+    version = models.PositiveBigIntegerField(default=0)
+
+    def __str__(self):
+        return f"{self.topic} v{self.version}"

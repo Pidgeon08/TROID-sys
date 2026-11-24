@@ -10,6 +10,7 @@ from .drives import active_drive
 from .maintenance import active_pause
 from .models import Boat, DeploymentSchedule, DetectionEvent, Request
 from .realtime import broadcast
+from . import live
 
 APP_TIMEZONE = ZoneInfo('Asia/Manila')   # same as views.py
 
@@ -98,7 +99,8 @@ def _handle_heartbeat(bot_id, payload):
             boat.battery_level = payload['battery']
         if 'is_active' in payload:
             boat.is_active = payload['is_active']
-        boat.save()
+        with live.quiet():  # reported through the relay as boat.* events
+            boat.save()
         print(f"[MQTT] Updated Boat {bot_id}: online=True, battery={payload.get('battery')}, active={payload.get('is_active')}")
         broadcast('boat.heartbeat', {
             'boat_id': boat.id,
@@ -130,7 +132,8 @@ def _handle_detection(bot_id, payload):
         # started, else to today's deployment (the barangay heatmap filters on this link).
         boat.last_latitude = lat
         boat.last_longitude = lng
-        boat.save()
+        with live.quiet():  # reported through the relay as boat.* events
+            boat.save()
         linked_request = active_drive(boat)
         if linked_request is None:
             today = timezone.now().astimezone(APP_TIMEZONE).strftime('%Y-%m-%d')

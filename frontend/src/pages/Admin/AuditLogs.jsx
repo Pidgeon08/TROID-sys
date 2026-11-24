@@ -14,6 +14,7 @@ import {
   InboxIcon,
 } from "lucide-react";
 import api from '../../services/api';
+import { LIVE, useLiveVersion } from "../../hooks/useLiveUpdates";
 
 const MODULES = [
   "All modules",
@@ -92,6 +93,8 @@ const AuditLogs = () => {
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
 
+  // Loaded again when this data changes anywhere, so the page stays current without a reload.
+  const live = useLiveVersion(LIVE.audit);
   useEffect(() => {
     api.auditLogs().then((data) => {
       const mapped = Array.isArray(data) ? data.map((l) => ({
@@ -108,7 +111,7 @@ const AuditLogs = () => {
       setLogs(mapped);
       setLoading(false);
     }).catch(() => setLoading(false));
-  }, []);
+  }, [live]);
 
   const filtered = useMemo(() => {
     return logs.filter((log) => {

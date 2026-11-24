@@ -19,7 +19,7 @@ from django.contrib.auth.hashers import check_password, make_password
 from django.core.mail import send_mail
 from django.conf import settings
 from django.db import transaction
-from django.db.models import Count, Q
+from django.db.models import Count, Max, Q
 from django.utils import timezone
 
 try:
@@ -30,7 +30,7 @@ except ImportError:
 from .models import (
     Boat, DetectionEvent, User, Operator, Request, DeploymentSchedule,
     LandfillRecord, RecyclingRecord, SegregationRecord,
-    AuditLog, HeatmapData, Photo, StatusHistory, CollectionArea, Notification, LetterFile, SystemPause,
+    AuditLog, HeatmapData, Photo, StatusHistory, CollectionArea, Notification, LetterFile, SystemPause, LiveVersion,
 )
 from .serializers import (
     BoatSerializer, UserSerializer, OperatorSerializer, RequestSerializer,
@@ -43,6 +43,7 @@ from .authentication import INACTIVE_STATUSES, CompanionTokenAuthentication, is_
 from .permissions import ADMIN, ANY_ROLE, MAYOR, PUBLIC, REQUESTERS, STAFF, HasRole, RoleViewSetMixin, require
 from .drives import active_drive, scheduled_request_ids, troid_counts
 from .realtime import broadcast_after_commit, notifications_changed
+from . import live
 from .priority import end_of_day, evaluate_priority_areas
 from .throttles import CompanionLoginEmailThrottle, CompanionLoginIPThrottle
 
@@ -821,6 +822,11 @@ def get_heatmap_data(request):
     if barangay:
         detections = detections.filter(request__barangay__iexact=barangay)
 
+    # One collection area's heatmap: what the robots found during cleanups sent to it.
+    collection_area = request.query_params.get('collection_area')
+    if collection_area:
+        detections = detections.filter(request__collection_area__area_id=collection_area)
+
     if category:
         detections = detections.filter(categories__has_key=category)
 
@@ -878,6 +884,19 @@ def unread_notification_count(request):
     user_id = own_user_id(request, request.query_params.get('user_id'))
     count = Notification.objects.filter(recipient_id=user_id, is_read=False).count()
     return Response({"unread_count": count})
+
+
+@api_view(['GET'])
+@permission_classes([HasRole(*ANY_ROLE)])
+def live_versions(request):
+    """What open pages check every few seconds to see whether anything changed: a number per
+    kind of data that moves on every change (live.py), and the caller's unread notifications."""
+    versions = dict.fromkeys(live.ALL_TOPICS, 0)
+    versions.update(LiveVersion.objects.values_list('topic', 'version'))
+    user_id = own_user_id(request, request.query_params.get('user_id'))
+    unread = Notification.objects.filter(recipient_id=user_id, is_read=False) if user_id else Notification.objects.none()
+    summary = unread.aggregate(count=Count('id'), latest=Max('id'))
+    return Response({'versions': versions, 'notifications': {'unread': summary['count'], 'latest': summary['latest']}})
 
 
 # Always enforced (even while API_AUTH_ENFORCED is off): a backup holds password
@@ -1242,7 +1261,7 @@ class RequestViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
         'unpark': ADMIN + MAYOR,
         'submit_trash_report': ADMIN + REQUESTERS,
         'troid_count': ADMIN + REQUESTERS,
-        'post_cleanup_comparison': ADMIN,
+        'post_cleanup_comparison': ADMIN + REQUESTERS,
         'redirect_area': ADMIN,
         'merge': ADMIN,
         'unmerge': ADMIN,
@@ -1492,10 +1511,16 @@ class RequestViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
         trash report. Cleanups from before the robot's counts were recorded have no
         detections: for those the old report and CENRO's verified figures are compared.
         Unsupported cleanups have no bot involved, so the report is just the user's count,
-        and only TROID-supported drives carry a collection area to compare coverage with."""
+        and only TROID-supported drives carry a collection area to compare coverage with.
+        Barangay and NGO accounts only get their own barangay's drives."""
         reqs = Request.objects.filter(
             archived=False, status__in=['completed', 'segregated', 'verified']
         ).exclude(trash_categories={}).select_related('collection_area', 'bot_id').prefetch_related('detection_events')
+        if getattr(request.user, 'role', None) in REQUESTERS:
+            barangay = own_barangay(request.user)
+            if not barangay:
+                return Response([])
+            reqs = reqs.filter(barangay__iexact=barangay)
 
         results = []
         for req in reqs:

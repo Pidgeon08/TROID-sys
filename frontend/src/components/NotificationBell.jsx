@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useNavigate } from "react-router-dom";
-import { Bell } from "lucide-react";
+import { Bell, Volume2, VolumeX } from "lucide-react";
 import api from "../services/api";
 import { notifyNotificationsChanged, useUnreadNotifications } from "../hooks/useUnreadNotifications";
+import { isSoundMuted, setSoundMuted, subscribeSoundMuted } from "../utils/notificationSound";
 
 function routePrefix(userType) {
   if (userType === "mayorsoffice") return "mayorsoffice";
@@ -25,6 +26,7 @@ function timeAgo(dateString) {
 const NotificationBell = ({ currentUser, userType, variant = "light", requestId = null }) => {
   const unread = useUnreadNotifications(currentUser?.id);
   const unreadCount = unread.length;
+  const muted = useSyncExternalStore(subscribeSoundMuted, isSoundMuted);
   const [notifications, setNotifications] = useState([]);
   const [open, setOpen] = useState(false);
   const panelRef = useRef(null);
@@ -102,8 +104,18 @@ const NotificationBell = ({ currentUser, userType, variant = "light", requestId 
         <div className={`absolute mt-2 w-80 max-h-96 overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-lg z-50 ${
           variant === "dark" ? "left-0" : "right-0"
         }`}>
-          <div className="px-4 py-3 border-b border-slate-100">
+          <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-slate-100">
             <h3 className="text-sm font-semibold text-slate-800">Notifications</h3>
+            <button
+              type="button"
+              onClick={() => setSoundMuted(!muted)}
+              aria-pressed={!muted}
+              title={muted ? "Turn the notification sound on" : "Turn the notification sound off"}
+              className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+            >
+              {muted ? <VolumeX size={14} /> : <Volume2 size={14} />}
+              {muted ? "Sound off" : "Sound on"}
+            </button>
           </div>
           {notifications.length === 0 ? (
             <p className="px-4 py-6 text-center text-xs text-slate-400">No notifications yet.</p>

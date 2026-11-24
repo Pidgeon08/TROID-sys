@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ShieldCheck, Clock, CheckCircle2, Ban, TrendingUp, FileText } from "lucide-react";
 import api from "../../services/api";
+import { LIVE, useLiveVersion } from "../../hooks/useLiveUpdates";
 
 const STAT_COLORS = {
   total: "bg-blue-100 text-blue-700",
@@ -32,6 +33,8 @@ export default function Dashboard() {
   const [recentDecisions, setRecentDecisions] = useState([]);
   const [loading, setLoading] = useState(true);
 
+  // Loaded again when this data changes anywhere, so the page stays current without a reload.
+  const live = useLiveVersion(LIVE.requests);
   useEffect(() => {
     let cancelled = false;
     async function load() {
@@ -81,7 +84,7 @@ export default function Dashboard() {
     }
     load();
     return () => { cancelled = true; };
-  }, []);
+  }, [live]);
 
   if (loading) {
     return (

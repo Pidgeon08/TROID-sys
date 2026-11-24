@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { useOutletContext } from "react-router-dom";
+import { useOutletContext, useSearchParams } from "react-router-dom";
 import { MapContainer, TileLayer, Polyline, Polygon, useMap } from "react-leaflet";
 import { TILE_URL, TILE_ATTRIBUTION } from "../../services/mapTiles";
 import "leaflet/dist/leaflet.css";
@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import api from "../../services/api";
 import { logAudit } from "../../services/auditLog";
+import { LIVE, useLiveVersion } from "../../hooks/useLiveUpdates";
 
 const DEFAULT_CENTER = [16.6195, 120.314];
 const DEFAULT_ZOOM = 14;
@@ -81,6 +82,8 @@ function BarangayAreas() {
   const [editColor, setEditColor] = useState(AREA_COLOR);
   const [savingEdit, setSavingEdit] = useState(false);
 
+  // Loaded again when this data changes anywhere, so the page stays current without a reload.
+  const live = useLiveVersion(LIVE.areas, LIVE.requests);
   useEffect(() => {
     let cancelled = false;
     api.collectionAreas({ barangay: officialBarangay || barangayLocation })
@@ -88,7 +91,7 @@ function BarangayAreas() {
       .catch((err) => console.error("Failed to load collection areas:", err))
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [officialBarangay, barangayLocation]);
+  }, [officialBarangay, barangayLocation, live]);
 
   const undoPoint = draft.undo;
 
@@ -160,6 +163,17 @@ function BarangayAreas() {
     setActiveId(a.id);
     setFlyTo(centroid(a.points));
   };
+
+  // Opened from a link to one area (?area=CA-0016, e.g. from the dashboard): show that one.
+  const [searchParams] = useSearchParams();
+  const linkedAreaId = searchParams.get("area");
+  const [linkedShown, setLinkedShown] = useState(null);
+  const linkedArea = linkedAreaId && linkedShown !== linkedAreaId ? areas.find((a) => a.id === linkedAreaId) : null;
+  if (linkedArea) {
+    setLinkedShown(linkedAreaId);
+    setActiveId(linkedArea.id);
+    setFlyTo(centroid(linkedArea.points));
+  }
 
   const openEditArea = (a) => {
     setEditingArea(a);
@@ -346,7 +360,7 @@ function BarangayAreas() {
                   return (
                     <li
                       key={a.id}
-                      className={`flex flex-col gap-2 py-3 ${activeId === a.id ? "opacity-100" : "opacity-90"}`}
+                      className={`flex flex-col gap-2 py-3 -mx-2 px-2 rounded-lg transition-colors ${activeId === a.id ? "bg-blue-50/70" : "opacity-90"}`}
                     >
                       <div className="flex items-center gap-3">
                         <span

@@ -21,8 +21,16 @@ class TroidApiConfig(AppConfig):
     name = 'troid_api'
 
     def ready(self):
+        from . import live
+        live.connect()
+        if not _is_web_server():
+            return
+        # Local sample data only: never on the shared Postgres database.
+        if settings.SAMPLE_DATA_AUTO_REFRESH and settings.DATABASES['default']['ENGINE'].endswith('sqlite3'):
+            from .sample_data import start_sample_refresher
+            start_sample_refresher()
         # Off on computers sharing the live database, and during tests (core/settings.py).
-        if not settings.BACKGROUND_WORKERS or not _is_web_server():
+        if not settings.BACKGROUND_WORKERS:
             return
         from .mqtt_client import start_mqtt_client, start_offline_checker
         start_mqtt_client()

@@ -15,12 +15,14 @@ import { UnreadDot } from "../../components/ui/UnreadDot";
 import { formatDate, formatTime12h, mapRequest } from "../../constants/requests";
 import { SummaryCard } from "../../components/ui/SummaryCard";
 import { Pagination } from "../../components/ui/Pagination";
+import { pageKeepingPlace, usePageSize } from "../../hooks/usePageSize";
 import { Badge } from "../../components/ui/Badge";
 import RequestFilters from "../../components/RequestFilters";
 import { useRequestFilters } from "../../hooks/useRequestFilters";
 import { filterRequests, sortRequests } from "../../utils/requestFilters";
+import { LIVE, useLiveVersion } from "../../hooks/useLiveUpdates";
 
-const PAGE_SIZE = 5;
+const DEFAULT_PAGE_SIZE = 5;
 
 export default function Requests() {
   const navigate = useNavigate();
@@ -28,9 +30,17 @@ export default function Requests() {
   const unreadRequestIds = new Set(useUnreadNotifications(currentUser?.id).map((n) => n.request_id));
   const { filters, update, clear } = useRequestFilters();
   const [currentPage, setCurrentPage] = useState(1);
+  // How many requests a page shows; each browser remembers its choice.
+  const [pageSize, setPageSize] = usePageSize("requests-cityadmin", DEFAULT_PAGE_SIZE);
+  const changePageSize = (size) => {
+    setCurrentPage((p) => pageKeepingPlace(p, pageSize, size));
+    setPageSize(size);
+  };
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
 
+  // Loaded again when this data changes anywhere, so the page stays current without a reload.
+  const live = useLiveVersion(LIVE.requests);
   useEffect(() => {
     let cancelled = false;
     async function load() {
@@ -47,14 +57,14 @@ export default function Requests() {
     }
     load();
     return () => { cancelled = true; };
-  }, []);
+  }, [live]);
 
   const changeFilters = (changes) => { update(changes); setCurrentPage(1); };
   const clearFilters = () => { clear(); setCurrentPage(1); };
   const filtered = useMemo(() => sortRequests(filterRequests(requests, filters), filters.sort), [requests, filters]);
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const paginated = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const paginated = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   return (
     <div className="max-w-[1400px] mx-auto animate-fade-in pb-12">
@@ -165,7 +175,8 @@ export default function Requests() {
           totalPages={totalPages}
           onPageChange={setCurrentPage}
           totalItems={filtered.length}
-          pageSize={PAGE_SIZE}
+          pageSize={pageSize}
+          onPageSizeChange={changePageSize}
         />
       </div>
       </>

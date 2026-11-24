@@ -3,6 +3,7 @@ import { RefreshCw } from 'lucide-react';
 import api from '../../services/api';
 import { Badge, Card, EmptyState, Pagination, SearchBar } from '../../components/ui';
 import { useDebounce } from '../../hooks/useDebounce';
+import { LIVE, useLiveRefresh } from '../../hooks/useLiveUpdates';
 
 const PAGE_SIZE = 20;
 const STATUS_LABELS = {
@@ -38,9 +39,10 @@ export default function TaskStatusUpdates() {
   const debouncedSearch = useDebounce(search, 300);
   const totalPages = Math.max(1, Math.ceil(count / PAGE_SIZE));
 
-  const loadUpdates = useCallback(async () => {
+  // `quiet`: a background refresh, which keeps showing the rows instead of the loading state.
+  const loadUpdates = useCallback(async (quiet = false) => {
     const requestId = ++latestRequest.current;
-    setLoading(true);
+    if (!quiet) setLoading(true);
     setError('');
     try {
       const response = await api.taskStatusUpdates({
@@ -64,20 +66,25 @@ export default function TaskStatusUpdates() {
 
   useEffect(() => {
     let active = true;
-    const refresh = async () => {
+    // Later refreshes keep the rows on screen while they load.
+    const refresh = async (quiet = true) => {
       if (!active) return;
-      await loadUpdates();
+      await loadUpdates(quiet);
     };
-    refresh();
-    const interval = window.setInterval(refresh, 30000);
-    window.addEventListener('focus', refresh);
+    const refreshQuietly = () => refresh(true);
+    refresh(false);
+    const interval = window.setInterval(refreshQuietly, 30000);
+    window.addEventListener('focus', refreshQuietly);
     return () => {
       active = false;
       latestRequest.current += 1;
       window.clearInterval(interval);
-      window.removeEventListener('focus', refresh);
+      window.removeEventListener('focus', refreshQuietly);
     };
   }, [loadUpdates]);
+
+  // Shown as soon as a request, booking or robot changes, rather than at the next 30-second refresh.
+  useLiveRefresh([LIVE.requests, LIVE.schedules, LIVE.fleet], () => loadUpdates(true));
 
   const updateStatusFilter = (value) => {
     setStatusFilter(value);

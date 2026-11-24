@@ -7,6 +7,7 @@ import { setSession } from '../services/session';
 import ForceChangePasswordModal from '../components/ForceChangePasswordModal';
 import ForgotPasswordModal from '../components/ForgotPasswordModal';
 import LoadingModal from '../components/LoadingModal';
+import seal from '../assets/seal.png';
 
 // The hosted backend can take about a minute to wake up after sitting idle.
 const LOGIN_TIMEOUT_MS = 90000;
@@ -94,13 +95,7 @@ const Login = ({ onLogin }) => {
         
         {/* Seal Container */}
         <div className="mb-8">
-          {/* CSS Mockup of San Fernando City Seal */}
-          <div className="w-24 h-24 rounded-full border-4 border-[#b45309] bg-gradient-to-br from-blue-700 to-red-600 mx-auto mb-6 flex items-center justify-center shadow-[0_4px_16px_rgba(0,0,0,0.15)] relative overflow-hidden">
-            <div className="absolute inset-1 rounded-full border-2 border-white/50 flex flex-col items-center justify-center bg-blue-900 p-1">
-              <span className="text-[10px] font-bold text-white leading-tight uppercase tracking-wider">SF</span>
-              <span className="text-[7px] font-semibold text-blue-200 uppercase tracking-tighter">CENRO</span>
-            </div>
-          </div>
+          <img src={seal} alt="City of San Fernando seal" className="w-32 h-32 mx-auto mb-6 rounded-full shadow-[0_4px_16px_rgba(0,0,0,0.15)]" />
           <h2 className="text-[17px] font-bold text-slate-900 leading-snug px-2">
             City Environment and Natural Resources Office (CENRO) Aquatic Management System
           </h2>

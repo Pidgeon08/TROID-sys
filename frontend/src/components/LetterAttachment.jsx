@@ -4,9 +4,8 @@ import api from "../services/api";
 import DocumentPreview from "./DocumentPreview";
 import { base64ToBlob, letterKind } from "../utils/letters";
 
-// Shows a request's uploaded letter. Older requests have a typed letter instead,
-// which the page passes as children.
-export default function LetterAttachment({ request, children }) {
+// Shows a request's uploaded letter (PDF or Word) as it was sent, without reformatting it.
+export default function LetterAttachment({ request }) {
   const letter = request.letter;
   const hasFile = Boolean(letter?.contentType);
   const kind = letterKind(letter?.fileName, letter?.contentType);
@@ -36,7 +35,18 @@ export default function LetterAttachment({ request, children }) {
   }, [hasFile, requestId, kind]);
 
   if (!hasFile) {
-    return request.notes ? children : <p className="py-6 text-center text-sm text-slate-400">No letter attached.</p>;
+    // Older requests were sent without a file; what they typed is shown as plain notes.
+    return (
+      <>
+        <p className="py-6 text-center text-sm text-slate-400">No letter file was attached to this request.</p>
+        {request.notes && (
+          <div className="rounded-lg border border-slate-100 bg-slate-50 px-4 py-3">
+            <p className="mb-1 text-xs font-medium text-slate-500">Notes from the request</p>
+            <p className="whitespace-pre-line break-words text-sm text-slate-700">{request.notes}</p>
+          </div>
+        )}
+      </>
+    );
   }
 
   return (

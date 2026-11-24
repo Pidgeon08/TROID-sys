@@ -102,6 +102,16 @@ export async function clearOutline(page) {
   await page.evaluate(() => document.querySelectorAll('[data-manual-outline]').forEach((el) => el.remove()));
 }
 
+// On Windows, saving over an image that the editor or antivirus has open briefly fails with
+// "UNKNOWN: unknown error, open ...", so a failed save is tried again a few times.
 export async function shoot(page, file) {
-  await page.screenshot({ path: file, type: 'jpeg', quality: 80 });
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      await page.screenshot({ path: file, type: 'jpeg', quality: 80 });
+      return;
+    } catch (err) {
+      if (attempt >= 4 || !/UNKNOWN|EBUSY|EPERM/.test(err.message)) throw err;
+      await page.waitForTimeout(500 * attempt);
+    }
+  }
 }

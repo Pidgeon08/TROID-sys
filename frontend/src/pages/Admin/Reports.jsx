@@ -15,6 +15,7 @@ import {
   Clock,
   UserCircle2,
   GitCompareArrows,
+  ListChecks,
 } from "lucide-react";
 import jsPDF from 'jspdf';
 import * as XLSX from 'xlsx-js-style';
@@ -28,6 +29,7 @@ import {
   comparisonRows, formatChange, formatDay, formatMetric, noComparisonReason, priorityIn, reportPeriod,
   requestBarangay, summarize, toCollections, trendSeries, wasteBreakdown, withComparison,
 } from '../../utils/reportData';
+import { LIVE, useLiveVersion } from "../../hooks/useLiveUpdates";
 
 const CARD = "bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] print:shadow-none print:border-slate-300 print:break-inside-avoid";
 const CURRENT_COLOR = "#3B82F6";
@@ -35,8 +37,11 @@ const PREVIOUS_COLOR = "#94A3B8";
 
 const defaultFilters = () => {
   const today = manilaDate(new Date());
-  return { dateFrom: addDays(today, -29), dateTo: today, barangay: "", compare: "previous", compareFrom: "", compareTo: "" };
+  // requestIds: the finished cleanups chosen with Select requests; empty means all of them.
+  return { dateFrom: addDays(today, -29), dateTo: today, barangay: "", compare: "previous", compareFrom: "", compareTo: "", requestIds: [] };
 };
+
+const sameFilter = (a, b) => (Array.isArray(a) ? a.join("|") === b.join("|") : a === b);
 
 const generatedOn = () => new Date().toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
@@ -211,6 +216,8 @@ const Reports = () => {
   // Set when the browser blocked the preview tab.
   const [previewBlocked, setPreviewBlocked] = useState(false);
 
+  // Loaded again when this data changes anywhere, so the page stays current without a reload.
+  const live = useLiveVersion(LIVE.requests, LIVE.fleet);
   useEffect(() => {
     let cancelled = false;
     // Robot and operator names only add detail, so the report still loads without them.
@@ -226,25 +233,39 @@ const Reports = () => {
       })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, []);
+  }, [live]);
 
-  const { dateFrom, dateTo, barangay: selectedBarangay, compare, compareFrom, compareTo } = applied;
+  const { dateFrom, dateTo, barangay: selectedBarangay, compare, compareFrom, compareTo, requestIds } = applied;
+  // Only the chosen requests, when some are chosen. They have nothing in an earlier period to
+  // be compared with, so the comparison is off while they are.
+  const chosen = useMemo(() => new Set(requestIds), [requestIds]);
+  const choosing = chosen.size > 0;
   // The report's period, with what it is compared with as period.previous.
   const period = useMemo(
-    () => withComparison(reportPeriod(dateFrom, dateTo), compare, { from: compareFrom, to: compareTo }),
-    [dateFrom, dateTo, compare, compareFrom, compareTo]
+    () => withComparison(reportPeriod(dateFrom, dateTo), choosing ? "none" : compare, { from: compareFrom, to: compareTo }),
+    [dateFrom, dateTo, compare, compareFrom, compareTo, choosing]
   );
+  const noComparisonText = choosing ? "No comparison while specific requests are chosen" : noComparisonReason(period);
   const comparing = Boolean(period.previous);
   // Short name of the comparison for legends and headings ("Same dates last month").
   const compareName = comparing ? (period.compareMode === "custom" ? period.previous.label : COMPARE_OPTIONS[period.compareMode]) : "";
   const areaLabel = selectedBarangay || "All Areas";
-  const draftChanged = Object.keys(draft).some((key) => draft[key] !== applied[key]);
+  const draftChanged = Object.keys(draft).some((key) => !sameFilter(draft[key], applied[key]));
 
   const collections = useMemo(
     () => toCollections(data.requests, { boats: data.boats, operators: data.operators }),
     [data]
   );
-  const current = useMemo(() => collectionsIn(collections, period, selectedBarangay), [collections, period, selectedBarangay]);
+  const current = useMemo(
+    () => collectionsIn(collections, period, selectedBarangay).filter((c) => !choosing || chosen.has(c.requestId)),
+    [collections, period, selectedBarangay, choosing, chosen]
+  );
+  // What Select requests offers: the finished cleanups the filters being edited allow, newest first.
+  const candidates = useMemo(
+    () => collectionsIn(collections, reportPeriod(draft.dateFrom, draft.dateTo), draft.barangay)
+      .sort((a, b) => b.day.localeCompare(a.day) || b.requestId.localeCompare(a.requestId, undefined, { numeric: true })),
+    [collections, draft.dateFrom, draft.dateTo, draft.barangay]
+  );
   const previous = useMemo(
     () => (period.previous ? collectionsIn(collections, period.previous, selectedBarangay) : null),
     [collections, period, selectedBarangay]
@@ -270,11 +291,15 @@ const Reports = () => {
     return () => { cancelled = true; };
   }, [priorityDays, priorityByDay]);
 
+  // With requests chosen, the priority areas counted are the ones those cleanups were in.
+  const chosenAreas = useMemo(() => new Set(current.map((c) => c.areaKey).filter(Boolean)), [current]);
   const stats = useMemo(() => {
-    const now = summarize(current, priorityIn(priorityByDay[priorityDays.thisEnd], selectedBarangay));
+    const priorityNow = priorityIn(priorityByDay[priorityDays.thisEnd], selectedBarangay)
+      .filter((p) => !choosing || chosenAreas.has(String(p.collection_area?.id)));
+    const now = summarize(current, priorityNow);
     const before = previous ? summarize(previous, priorityIn(priorityByDay[priorityDays.previousEnd], selectedBarangay)) : null;
     return { now, before, rows: comparisonRows(now, before) };
-  }, [current, previous, priorityByDay, priorityDays, selectedBarangay]);
+  }, [current, previous, priorityByDay, priorityDays, selectedBarangay, choosing, chosenAreas]);
   const metric = (key) => stats.rows.find((r) => r.key === key);
 
   const trend = useMemo(
@@ -293,8 +318,10 @@ const Reports = () => {
   // The last few months or weeks up to the end of the report, each against the one before.
   const historyEnd = period.to || manilaDate(new Date());
   const historyRows = useMemo(
-    () => collectionHistory(collections, { unit: history.unit, count: history.count, end: historyEnd, barangay: selectedBarangay }),
-    [collections, history, historyEnd, selectedBarangay]
+    () => collectionHistory(choosing ? collections.filter((c) => chosen.has(c.requestId)) : collections, {
+      unit: history.unit, count: history.count, end: historyEnd, barangay: selectedBarangay,
+    }),
+    [collections, history, historyEnd, selectedBarangay, choosing, chosen]
   );
   const historyName = history.unit === "week" ? "week" : "month";
   const historyLabel = (row) => `${row.label}${row.partial ? " (so far)" : ""}`;
@@ -314,8 +341,9 @@ const Reports = () => {
 
   const overview = [
     { label: "Date Range", value: period.label, icon: Calendar },
-    { label: "Compared With", value: comparing ? `${period.previous.label} (${COMPARE_OPTIONS[period.compareMode].toLowerCase()})` : noComparisonReason(period), icon: GitCompareArrows },
+    { label: "Compared With", value: comparing ? `${period.previous.label} (${COMPARE_OPTIONS[period.compareMode].toLowerCase()})` : noComparisonText, icon: GitCompareArrows },
     { label: "Coverage Area", value: areaLabel, icon: MapPin },
+    { label: "Requests", value: choosing ? `${current.length} selected: ${current.map((c) => c.requestId).join(", ")}` : "All in the period", icon: ListChecks },
     { label: "Report Type", value: "Collection Report", icon: FileText },
     { label: "Generated On", value: generatedOn(), icon: Clock },
     { label: "Generated By", value: currentUser?.name || "CENRO Admin", icon: UserCircle2 },
@@ -328,15 +356,23 @@ const Reports = () => {
     { key: "priority", label: "Priority Collection Areas", suffix: "", icon: Target, tint: "bg-amber-50 text-amber-500" },
   ];
 
-  const reportScope = `${areaLabel} · ${period.label}`;
+  const reportScope = `${areaLabel} · ${period.label}${choosing ? ` · ${current.length} selected request${current.length === 1 ? "" : "s"}` : ""}`;
 
   const handleGenerate = () => {
-    setApplied(draft);
+    // A selection outside the period or barangay being applied can't be in the report.
+    const allowed = new Set(candidates.map((c) => c.requestId));
+    const next = { ...draft, requestIds: draft.requestIds.filter((id) => allowed.has(id)) };
+    setDraft(next);
+    setApplied(next);
+    const picked = next.requestIds.length;
     logAudit({
       currentUser,
       action: 'Report generated',
       module: 'Report Generation',
-      details: `Collection Report generated for ${draft.barangay || 'All Areas'} (${reportPeriod(draft.dateFrom, draft.dateTo).label}), compared with: ${COMPARE_OPTIONS[draft.compare].toLowerCase()}`,
+      details: `Collection Report generated for ${next.barangay || 'All Areas'} (${reportPeriod(next.dateFrom, next.dateTo).label}), `
+        + (picked
+          ? `covering ${picked} selected request${picked === 1 ? '' : 's'}: ${next.requestIds.join(', ')}`
+          : `compared with: ${COMPARE_OPTIONS[next.compare].toLowerCase()}`),
     });
   };
 
@@ -771,6 +807,7 @@ const Reports = () => {
         draft={draft}
         onChange={(changes) => setDraft((d) => ({ ...d, ...changes }))}
         barangays={barangays}
+        candidates={candidates}
         onGenerate={handleGenerate}
       >
         {draftChanged ? (
@@ -784,9 +821,10 @@ const Reports = () => {
           <span>
             Showing <span className="font-semibold text-slate-700">{period.label}</span>
             {selectedBarangay ? <> in <span className="font-semibold text-slate-700">{selectedBarangay}</span></> : ""}
+            {choosing && <> · <span className="font-semibold text-slate-700">{current.length} selected request{current.length === 1 ? "" : "s"}</span></>}
             {comparing
               ? <> compared with <span className="font-semibold text-slate-700">{period.previous.label}</span> ({COMPARE_OPTIONS[period.compareMode].toLowerCase()})</>
-              : ` · ${noComparisonReason(period).toLowerCase()}`}
+              : ` · ${noComparisonText.toLowerCase()}`}
           </span>
         )}
         {!draftChanged && period.overlaps && (
@@ -994,7 +1032,7 @@ const Reports = () => {
         <div className={`${CARD} p-6`}>
           <h2 className="text-sm font-bold text-slate-900">Period Comparison</h2>
           <p className="text-xs text-slate-400 mt-0.5 mb-4">
-            {comparing ? `${period.label} vs ${period.previous.label} (${compareName.toLowerCase()})` : `${period.label} · ${noComparisonReason(period).toLowerCase()}`}
+            {comparing ? `${period.label} vs ${period.previous.label} (${compareName.toLowerCase()})` : `${period.label} · ${noComparisonText.toLowerCase()}`}
           </p>
           <div className="overflow-x-auto -mx-2">
             <table className="w-full text-sm">

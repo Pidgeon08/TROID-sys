@@ -1,8 +1,11 @@
-import { Calendar, Check, FileText, GitCompareArrows, MapPin } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
+import { Calendar, Check, FileText, GitCompareArrows, ListChecks, MapPin, X } from "lucide-react";
 import { Popover } from "./ui/Popover";
-import { FILTER_CONTROL, FILTER_IDLE } from "./ui/filterStyles";
+import { SearchBar } from "./ui/SearchBar";
+import { FILTER_ACTIVE, FILTER_CONTROL, FILTER_IDLE } from "./ui/filterStyles";
 import {
-  COMPARE_OPTIONS, DATE_PRESETS, matchingPreset, noComparisonReason, presetRange, reportPeriod, withComparison,
+  COMPARE_OPTIONS, DATE_PRESETS, formatDay, matchingPreset, noComparisonReason, presetRange, reportPeriod, withComparison,
 } from "../utils/reportData";
 
 const DATE_INPUT = `${FILTER_CONTROL} ${FILTER_IDLE} w-full px-2 py-1.5`;
@@ -127,11 +130,173 @@ function CompareFilter({ draft, onChange }) {
 }
 
 /**
- * The Reports filter bar: one row of compact controls (period, barangay, comparison, report
- * type) and Generate Report, which wraps on narrow screens. Changes stay in `draft` until
- * Generate Report applies them; `children` is the status line shown under the controls.
+ * Which finished cleanups the report covers: all of them in the period and barangay (no
+ * selection), or only the ones ticked. `candidates` are the cleanups the period and barangay
+ * being edited allow; a selection outside them is dropped when the report is generated.
  */
-export default function ReportFilters({ draft, onChange, barangays, onGenerate, children }) {
+function RequestPicker({ draft, onChange, candidates }) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const chosen = useMemo(() => new Set(draft.requestIds), [draft.requestIds]);
+  const chosenHere = candidates.filter((c) => chosen.has(c.requestId)).length;
+  const label = chosenHere === 0 ? "All requests" : `${chosenHere} request${chosenHere === 1 ? "" : "s"} selected`;
+
+  const shown = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return candidates.filter((c) => !q || [c.requestId, c.zone, c.barangay, c.areaName, c.unit, c.operator, c.status]
+      .some((v) => (v || "").toLowerCase().includes(q)));
+  }, [candidates, search]);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const onKey = (e) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open]);
+
+  const setChosen = (ids) => onChange({ requestIds: candidates.map((c) => c.requestId).filter((id) => ids.has(id)) });
+  const toggle = (id) => {
+    const next = new Set(chosen);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    setChosen(next);
+  };
+  const allShownChosen = shown.length > 0 && shown.every((c) => chosen.has(c.requestId));
+  const toggleShown = () => {
+    const next = new Set(chosen);
+    shown.forEach((c) => (allShownChosen ? next.delete(c.requestId) : next.add(c.requestId)));
+    setChosen(next);
+  };
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className={`${FILTER_CONTROL} ${chosenHere ? FILTER_ACTIVE : FILTER_IDLE} ${SLOT} flex items-center gap-2 whitespace-nowrap`}
+      >
+        <ListChecks size={15} className="shrink-0" />
+        <span className="flex-1 text-left">{label}</span>
+        {chosenHere > 0 && <span className="rounded-full bg-blue-600 px-1.5 text-[10px] font-semibold leading-4 text-white">{chosenHere}</span>}
+      </button>
+
+      {open && createPortal(
+        <div className="fixed inset-0 z-100 flex items-center justify-center bg-slate-900/50 p-4" onClick={() => setOpen(false)}>
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Select requests for the report"
+            className="w-full max-w-3xl max-h-[85vh] flex flex-col rounded-2xl border border-slate-100 bg-white shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-6 pt-5 pb-4">
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Select requests</h3>
+                <p className="mt-0.5 text-xs text-slate-500">
+                  Finished cleanups with a trash report in {reportPeriod(draft.dateFrom, draft.dateTo).label}
+                  {draft.barangay ? ` in ${draft.barangay}` : ""}. Tick the ones the report should cover, or leave all unticked for every one of them.
+                </p>
+              </div>
+              <button type="button" onClick={() => setOpen(false)} aria-label="Close" className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600">
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="flex flex-col gap-3 border-b border-slate-100 px-6 py-3 sm:flex-row sm:items-center">
+              <SearchBar value={search} onChange={setSearch} placeholder="Search ID, area, barangay, robot..." className="flex-1" />
+              <button
+                type="button"
+                onClick={toggleShown}
+                disabled={shown.length === 0}
+                className="whitespace-nowrap rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+              >
+                {allShownChosen ? "Untick" : "Tick"} {search.trim() ? `the ${shown.length} shown` : `all ${shown.length}`}
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto px-6 py-2">
+              {shown.length === 0 ? (
+                <p className="py-12 text-center text-sm text-slate-400">
+                  {candidates.length === 0 ? "No finished cleanups in this period." : "No requests match your search."}
+                </p>
+              ) : (
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="sticky top-0 border-b border-slate-100 bg-white text-left uppercase tracking-wider text-slate-400">
+                      <th className="w-8 py-2" />
+                      <th className="py-2 pr-3 font-medium">Request</th>
+                      <th className="py-2 pr-3 font-medium">Finished</th>
+                      <th className="py-2 pr-3 font-medium">Area / Location</th>
+                      <th className="py-2 pr-3 font-medium">Robot</th>
+                      <th className="py-2 text-right font-medium">Bags</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50">
+                    {shown.map((c) => {
+                      const on = chosen.has(c.requestId);
+                      return (
+                        <tr
+                          key={c.requestId}
+                          onClick={() => toggle(c.requestId)}
+                          className={`cursor-pointer transition-colors ${on ? "bg-blue-50/70" : "hover:bg-slate-50"}`}
+                        >
+                          <td className="py-2.5">
+                            <input
+                              type="checkbox"
+                              checked={on}
+                              onChange={() => toggle(c.requestId)}
+                              onClick={(e) => e.stopPropagation()}
+                              aria-label={`Include ${c.requestId}`}
+                              className="h-4 w-4 rounded accent-[#1b4de4]"
+                            />
+                          </td>
+                          <td className="py-2.5 pr-3 font-semibold text-slate-800">{c.requestId}</td>
+                          <td className="py-2.5 pr-3 text-slate-500 whitespace-nowrap">{formatDay(c.day)}</td>
+                          <td className="py-2.5 pr-3 text-slate-700">
+                            {c.zone}
+                            {c.barangay && c.barangay !== c.zone && <span className="block text-[11px] text-slate-400">{c.barangay}</span>}
+                          </td>
+                          <td className="py-2.5 pr-3 text-slate-500">{c.unit}</td>
+                          <td className="py-2.5 text-right font-semibold tabular-nums text-slate-800">{c.bags}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-6 py-4">
+              <p className="text-xs text-slate-500">
+                {chosenHere === 0
+                  ? `The report will cover all ${candidates.length} cleanups.`
+                  : `${chosenHere} of ${candidates.length} selected. Comparison with an earlier period is off while requests are chosen.`}
+              </p>
+              <div className="flex gap-2">
+                {chosenHere > 0 && (
+                  <button type="button" onClick={() => onChange({ requestIds: [] })} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
+                    Use all requests
+                  </button>
+                )}
+                <button type="button" onClick={() => setOpen(false)} className="rounded-lg bg-[#1b4de4] px-4 py-2 text-sm font-semibold text-white hover:bg-[#153eb8]">
+                  Done
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+    </>
+  );
+}
+
+/**
+ * The Reports filter bar: one row of compact controls (period, barangay, comparison, requests)
+ * and Generate Report, which wraps on narrow screens. Changes stay in `draft` until Generate
+ * Report applies them; `children` is the status line shown under the controls.
+ */
+export default function ReportFilters({ draft, onChange, barangays, candidates = [], onGenerate, children }) {
+  const requestsChosen = candidates.some((c) => draft.requestIds.includes(c.requestId));
   return (
     <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] px-4 py-4 sm:px-5 mb-6 print:hidden">
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 xl:flex xl:items-center">
@@ -150,14 +315,18 @@ export default function ReportFilters({ draft, onChange, barangays, onGenerate, 
           </select>
         </div>
 
-        <CompareFilter draft={draft} onChange={onChange} />
+        {requestsChosen ? (
+          <span
+            className={`${FILTER_CONTROL} ${SLOT} border-slate-200 bg-slate-50 text-slate-400 inline-flex items-center gap-2 whitespace-nowrap`}
+            title="The chosen requests have nothing in an earlier period to compare with. Use all requests to compare again."
+          >
+            <GitCompareArrows size={15} /> No comparison
+          </span>
+        ) : (
+          <CompareFilter draft={draft} onChange={onChange} />
+        )}
 
-        <span
-          className={`${FILTER_CONTROL} border-slate-200 bg-slate-50 text-slate-500 hidden xl:inline-flex items-center gap-2 whitespace-nowrap`}
-          title="The only report type for now"
-        >
-          <FileText size={15} /> Collection Report
-        </span>
+        <RequestPicker draft={draft} onChange={onChange} candidates={candidates} />
 
         <button
           type="button"

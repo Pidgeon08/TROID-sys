@@ -12,7 +12,11 @@ import {
   areaCoverage, splitByArea, trailStats, isMeasurableArea, formatArea, formatDistance, formatDuration, TRAIL_GAP_MS,
 } from '../../utils/coverage';
 import { HeatmapLayer, PathLayer } from '../../components/MapLayers';
+import { BarangayOutline } from '../../components/AreaDrawing';
+import { EmptyState } from '../../components/ui/EmptyState';
+import { barangayBounds } from '../../utils/barangayBoundaries';
 import { MAP_LAYERS, PATHING, LEGEND_CLASSES, PATH_COLORS, PATH_START, formatClock } from '../../constants/mapLayers';
+import { LIVE, useLiveVersion } from '../../hooks/useLiveUpdates';
 
 // Default map view when there is nothing to show yet: San Fernando, La Union.
 const SAN_FERNANDO_CENTER = [16.6195, 120.314];
@@ -307,8 +311,9 @@ function MapLegend({ type, area, showCoverage, radiusM }) {
   );
 }
 
-function CoverageMap({ heatPoints, heatType, reports, area, coveragePoints, radiusM, showCoverage, fitKey, emptyText }) {
-  const bounds = area?.points?.length ? area.points : boundsOf(heatPoints);
+function CoverageMap({ heatPoints, heatType, reports, area, coveragePoints, radiusM, showCoverage, fitKey, emptyText, barangay }) {
+  // A barangay's own page starts on the whole barangay; CENRO's on wherever TROID found trash.
+  const bounds = area?.points?.length ? area.points : (barangay && barangayBounds(barangay)) || boundsOf(heatPoints);
   return (
     <div className="relative h-[460px] lg:h-[600px] rounded-2xl overflow-hidden border border-slate-200 bg-slate-50">
       <MapContainer
@@ -319,6 +324,7 @@ function CoverageMap({ heatPoints, heatType, reports, area, coveragePoints, radi
       >
         <TileLayer url={TILE_URL} attribution={TILE_ATTRIBUTION} />
         <FitBounds fitKey={fitKey} bounds={bounds} />
+        {barangay && <BarangayOutline barangay={barangay} fit={false} />}
         {heatType !== PATHING && <HeatmapLayer points={heatPoints} type={heatType} />}
         <CoverageOverlay area={area} points={coveragePoints} radiusM={radiusM} showCoverage={showCoverage} />
         {heatType === PATHING && <PathLayer reports={reports} />}
@@ -335,7 +341,13 @@ function CoverageMap({ heatPoints, heatType, reports, area, coveragePoints, radi
   );
 }
 
-const HeatmapView = () => {
+/**
+ * Where TROID found trash and how much of a collection area it covered. CENRO sees the whole
+ * city. Given `barangay`, it is a barangay or NGO account's own page (Bot Tracking): only that
+ * barangay's detections, collection areas and drives (the API limits those accounts the same way).
+ */
+const HeatmapView = ({ barangay }) => {
+  const scoped = barangay !== undefined;
   const [activeView, setActiveView] = useState('live'); // 'live' | 'comparison'
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [timeFilter, setTimeFilter] = useState('Today');
@@ -369,6 +381,8 @@ const HeatmapView = () => {
     }, [])
   );
 
+  // Loaded again when this data changes anywhere, so the page stays current without a reload.
+  const live = useLiveVersion(LIVE.requests, LIVE.areas);
   useEffect(() => {
     let cancelled = false;
     api.postCleanupComparison()
@@ -376,11 +390,11 @@ const HeatmapView = () => {
       .catch((err) => console.error('Failed to fetch post-cleanup comparison data:', err))
       .finally(() => { if (!cancelled) setComparisonLoading(false); });
     // Only areas a TROID-supported cleanup was sent to: unsupported cleanups had no robot to compare.
-    api.collectionAreas({ status: 'approved', troid_supported: true })
+    api.collectionAreas({ status: 'approved', troid_supported: true, barangay: barangay || undefined })
       .then((data) => { if (!cancelled) setAreas(Array.isArray(data) ? data : []); })
       .catch((err) => console.error('Failed to fetch collection areas:', err));
     return () => { cancelled = true; };
-  }, []);
+  }, [barangay, live]);
 
   useEffect(() => {
     let cancelled = false;
@@ -402,6 +416,7 @@ const HeatmapView = () => {
         const data = await api.getHeatmap({
           time_filter: timeFilter.toLowerCase(),
           category: selectedCategory === 'All' ? undefined : selectedCategory,
+          barangay: barangay || undefined,
           start: custom ? toIso(dateRange.from) : undefined,
           end: custom ? toIso(dateRange.to) : undefined,
         });
@@ -426,7 +441,7 @@ const HeatmapView = () => {
     fetchHeatmapData();
     const interval = setInterval(fetchHeatmapData, 5000);
     return () => { cancelled = true; clearInterval(interval); };
-  }, [selectedCategory, timeFilter, dateRange, realtimeNonce]);
+  }, [selectedCategory, timeFilter, dateRange, realtimeNonce, barangay]);
 
   // ---- Live view ----
   const heatPoints = useMemo(() => detections.map((p) => [p.latitude, p.longitude, p.weight || 0.5]), [detections]);
@@ -493,6 +508,17 @@ const HeatmapView = () => {
 
   const onlineBots = boats.filter((b) => b.is_online).length;
 
+  if (scoped && !barangay) {
+    return (
+      <div className="max-w-[1400px] mx-auto animate-fade-in pb-12">
+        <EmptyState
+          title="No barangay set for this account"
+          subtitle="Bot Tracking shows your barangay's cleanups. Ask CENRO to set your barangay in User Management."
+        />
+      </div>
+    );
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-[500px]">
@@ -505,9 +531,11 @@ const HeatmapView = () => {
     <div className="max-w-[1400px] mx-auto animate-fade-in pb-12">
       <header className="mb-5 flex flex-col lg:flex-row lg:items-end justify-between gap-4">
         <div>
-          <h1 className="text-[28px] font-bold text-slate-900 tracking-tight leading-none">Heatmap</h1>
+          <h1 className="text-[28px] font-bold text-slate-900 tracking-tight leading-none">{scoped ? 'Bot Tracking' : 'Heatmap'}</h1>
           <p className="text-slate-500 text-sm mt-1.5 font-medium">
-            Where TROID found trash, and how much of a collection area it covered.
+            {scoped
+              ? `Where TROID found trash in ${barangay}, and how much of your collection areas it covered.`
+              : 'Where TROID found trash, and how much of a collection area it covered.'}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
@@ -573,11 +601,13 @@ const HeatmapView = () => {
               </span>
               <select value={compareAreaId} onChange={(e) => setCompareAreaId(e.target.value)} className={`${selectClass} max-w-[240px]`}>
                 <option value="">{areasByBarangay.length === 0 ? 'No TROID-supported areas yet' : 'No collection area'}</option>
-                {areasByBarangay.map(([barangay, list]) => (
-                  <optgroup key={barangay} label={barangay}>
-                    {list.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-                  </optgroup>
-                ))}
+                {scoped
+                  ? areasByBarangay.flatMap(([, list]) => list).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)
+                  : areasByBarangay.map(([group, list]) => (
+                    <optgroup key={group} label={group}>
+                      {list.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                    </optgroup>
+                  ))}
               </select>
             </label>
           </div>
@@ -591,8 +621,9 @@ const HeatmapView = () => {
               coveragePoints={heatPoints}
               radiusM={radiusM}
               showCoverage={showCoverage}
-              fitKey={compareArea ? `area-${compareArea.id}` : `points-${timeFilter}-${selectedCategory}-${heatPoints.length > 0}`}
+              fitKey={compareArea ? `area-${compareArea.id}` : scoped ? `barangay-${barangay}` : `points-${timeFilter}-${selectedCategory}-${heatPoints.length > 0}`}
               emptyText="No detections in this period"
+              barangay={barangay}
             />
             <div className="flex flex-col gap-4">
               <CoveragePanel
@@ -602,7 +633,9 @@ const HeatmapView = () => {
                 onRadiusChange={setRadiusM}
                 showCoverage={showCoverage}
                 onToggleCoverage={setShowCoverage}
-                emptyText='Choose a collection area under "Compare with" to see how much of it TROID covered in this period. Only areas a TROID-supported cleanup was sent to are listed.'
+                emptyText={scoped
+                  ? 'Choose one of your collection areas under "Compare with" to see how much of it TROID covered in this period. Only areas a TROID-supported cleanup was sent to are listed.'
+                  : 'Choose a collection area under "Compare with" to see how much of it TROID covered in this period. Only areas a TROID-supported cleanup was sent to are listed.'}
               />
               <TrailPanel trail={liveTrail} count={detections.length} />
               <CategoryPanel categories={liveCategories} total={liveTotal} />
@@ -622,7 +655,9 @@ const HeatmapView = () => {
                 <CleanupTypeBadge type={selectedDrive.cleanup_type} className="ml-2" />
               </span>
             ) : (
-              <span className="text-sm text-slate-500">All completed cleanup drives. Select one to compare its collection area.</span>
+              <span className="text-sm text-slate-500">
+                {scoped ? `All completed cleanup drives in ${barangay}.` : 'All completed cleanup drives.'} Select one to compare its collection area.
+              </span>
             )}
             <div className="flex items-center gap-2">
               <select value={heatmapType} onChange={(e) => setHeatmapType(e.target.value)} className={selectClass} aria-label="Map layer">
@@ -654,7 +689,9 @@ const HeatmapView = () => {
             </div>
           ) : comparisonData.length === 0 ? (
             <div className="flex items-center justify-center h-50 rounded-2xl border border-slate-200 bg-white">
-              <span className="text-sm font-medium text-slate-400">No completed cleanup drives with trash reports yet.</span>
+              <span className="text-sm font-medium text-slate-400">
+                No completed cleanup drives with trash reports{scoped ? ` in ${barangay}` : ''} yet.
+              </span>
             </div>
           ) : (
             <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_340px] gap-4 items-start">
@@ -668,6 +705,7 @@ const HeatmapView = () => {
                 showCoverage={showCoverage}
                 fitKey={selectedDrive ? `drive-${selectedDrive.request_id}` : 'drives-all'}
                 emptyText={selectedDrive ? 'TROID reported no points for this drive' : 'TROID reported no points for these drives'}
+                barangay={barangay}
               />
               <div className="flex flex-col gap-4">
                 <CoveragePanel
@@ -766,13 +804,15 @@ const HeatmapView = () => {
               <SearchBar
                 value={requestSearch}
                 onChange={setRequestSearch}
-                placeholder="Search by request ID or barangay..."
+                placeholder={scoped ? 'Search by request ID...' : 'Search by request ID or barangay...'}
                 className="flex-1"
               />
-              <select value={requestBarangayFilter} onChange={(e) => setRequestBarangayFilter(e.target.value)} className={selectClass}>
-                <option value="All">All barangays</option>
-                {requestBarangays.map((b) => <option key={b} value={b}>{b}</option>)}
-              </select>
+              {!scoped && (
+                <select value={requestBarangayFilter} onChange={(e) => setRequestBarangayFilter(e.target.value)} className={selectClass}>
+                  <option value="All">All barangays</option>
+                  {requestBarangays.map((b) => <option key={b} value={b}>{b}</option>)}
+                </select>
+              )}
               <select value={requestStatusFilter} onChange={(e) => setRequestStatusFilter(e.target.value)} className={selectClass}>
                 <option value="All">All statuses</option>
                 {requestStatuses.map((s) => <option key={s} value={s} className="capitalize">{s}</option>)}

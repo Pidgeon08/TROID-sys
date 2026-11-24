@@ -1,10 +1,12 @@
 import { useEffect, useState, useMemo } from 'react';
 import api from '../services/api';
+import { useLiveVersion } from './useLiveUpdates';
 
 export function useOperators() {
   const [operators, setOperators] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState(null);
+  const live = useLiveVersion('fleet', 'users');
 
   const selected = useMemo(() => operators.find((o) => o.id === selectedId) || null, [operators, selectedId]);
 
@@ -39,7 +41,7 @@ export function useOperators() {
     }
     fetchOperators();
     return () => { cancelled = true; };
-  }, [selectedId]);
+  }, [selectedId, live]);
 
   const updateOperator = useMemo(() => (id, updates) => {
     setOperators((prev) => prev.map((o) => (o.id === id ? { ...o, ...updates } : o)));

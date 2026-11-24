@@ -3,12 +3,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import { MapContainer, TileLayer } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
-import { Calendar } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { ArrowUpRight } from 'lucide-react';
 import api from '../services/api';
 import { TILE_URL, TILE_ATTRIBUTION } from '../services/mapTiles';
 import { HeatmapLayer, PathLayer } from './MapLayers';
 import { BarangayOutline } from './AreaDrawing';
 import { LEGEND_CLASSES, MAP_LAYERS, PATHING, PATH_COLORS, PATH_START } from '../constants/mapLayers';
+import { LIVE, useLiveVersion } from '../hooks/useLiveUpdates';
 
 const SAN_FERNANDO_CENTER = [16.6195, 120.314];
 const PERIODS = [
@@ -20,31 +22,25 @@ const EMPTY_TEXT = {
   today: 'No trash detected today.',
   weekly: 'No trash detected in the last 7 days.',
   monthly: 'No trash detected in the last 30 days.',
-  custom: 'No trash detected in this range.',
 };
 
-/** The custom range's ISO start and end; an empty end is left open. */
-function customRange({ from, to }) {
-  const iso = (value) => (value ? new Date(value).toISOString() : undefined);
-  return { start: iso(from), end: iso(to) };
-}
-
-export default function HotspotsCard({ title, barangay, className = '', mapClassName = 'min-h-[380px]' }) {
+/** `moreTo` is the full heatmap page, linked as "View more". */
+export default function HotspotsCard({ title, barangay, moreTo, className = '', mapClassName = 'min-h-[380px]' }) {
   const [period, setPeriod] = useState('monthly');
-  const [dateRange, setDateRange] = useState({ from: '', to: '' });
   const [layer, setLayer] = useState(MAP_LAYERS[0]);
   const [reports, setReports] = useState([]);
   const [failed, setFailed] = useState(false);
   // The query the shown reports answer; it differs from `query` while the next one loads.
   const [loadedQuery, setLoadedQuery] = useState(null);
 
-  const query = useMemo(() => {
-    const params = { time_filter: period, barangay: barangay || undefined };
-    if (period === 'custom') Object.assign(params, customRange(dateRange));
-    return JSON.stringify(params);
-  }, [period, dateRange, barangay]);
+  const query = useMemo(
+    () => JSON.stringify({ time_filter: period, barangay: barangay || undefined }),
+    [period, barangay]
+  );
   const loading = loadedQuery !== query;
 
+  // Loaded again when this data changes anywhere, so the page stays current without a reload.
+  const live = useLiveVersion(LIVE.detections);
   useEffect(() => {
     let cancelled = false;
     api.getHeatmap(JSON.parse(query))
@@ -59,7 +55,7 @@ export default function HotspotsCard({ title, barangay, className = '', mapClass
       })
       .finally(() => { if (!cancelled) setLoadedQuery(query); });
     return () => { cancelled = true; };
-  }, [query]);
+  }, [query, live]);
 
   const heatPoints = useMemo(() => {
     if (layer === 'Trash Collected') {
@@ -96,17 +92,6 @@ export default function HotspotsCard({ title, barangay, className = '', mapClass
                 {label}
               </button>
             ))}
-            <button
-              type="button"
-              onClick={() => setPeriod('custom')}
-              aria-pressed={period === 'custom'}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer flex items-center gap-1 transition-all duration-200 ${
-                period === 'custom' ? 'bg-[#1b4de4] text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <span>Custom</span>
-              <Calendar className="w-3.5 h-3.5" />
-            </button>
           </div>
           <select
             value={layer}
@@ -116,28 +101,16 @@ export default function HotspotsCard({ title, barangay, className = '', mapClass
           >
             {MAP_LAYERS.map((t) => <option key={t} value={t}>{t}</option>)}
           </select>
+          {moreTo && (
+            <Link
+              to={moreTo}
+              className="inline-flex items-center gap-1 whitespace-nowrap rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-[#1b4de4] transition-all duration-200 hover:border-blue-200 hover:bg-blue-50"
+            >
+              View more <ArrowUpRight className="w-3.5 h-3.5" />
+            </Link>
+          )}
         </div>
       </div>
-
-      {period === 'custom' && (
-        <div className="flex flex-wrap items-center gap-2">
-          <input
-            type="datetime-local"
-            value={dateRange.from}
-            onChange={(e) => setDateRange({ ...dateRange, from: e.target.value })}
-            aria-label="From"
-            className="px-2 py-1 text-xs font-semibold border border-slate-200 rounded-lg bg-white text-slate-700 outline-none"
-          />
-          <span className="text-xs text-slate-400 font-medium">to</span>
-          <input
-            type="datetime-local"
-            value={dateRange.to}
-            onChange={(e) => setDateRange({ ...dateRange, to: e.target.value })}
-            aria-label="To"
-            className="px-2 py-1 text-xs font-semibold border border-slate-200 rounded-lg bg-white text-slate-700 outline-none"
-          />
-        </div>
-      )}
 
       <div className={`flex-1 rounded-xl overflow-hidden border border-slate-100 relative ${mapClassName}`}>
         <MapContainer

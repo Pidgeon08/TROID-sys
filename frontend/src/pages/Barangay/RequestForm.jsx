@@ -23,6 +23,7 @@ import { formatFileSize, formatTime12h } from "../../constants/requests";
 import LetterDropzone from "../../components/LetterDropzone";
 import DocumentPreview from "../../components/DocumentPreview";
 import { base64ToBlob, letterKind } from "../../utils/letters";
+import { LIVE, useLiveRefresh } from "../../hooks/useLiveUpdates";
 
 const REQUEST_TYPE = "Cleanup";
 
@@ -315,6 +316,9 @@ function RequestForm({ currentUser, forCenro = false }) {
       })
       .catch(() => setTtLoading(false));
   }, [showTimeTable, ttLoaded]);
+
+  // Someone else's booking may take a day: load the timetable again when bookings change.
+  useLiveRefresh([LIVE.schedules, LIVE.fleet], () => setTtLoaded(false));
 
   const selectDay = (d) => {
     if (d < minSelectableDate) return;

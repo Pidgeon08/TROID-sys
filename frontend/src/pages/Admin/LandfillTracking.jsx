@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { MapPin, Trash2, Truck, FileText, ChevronDown } from "lucide-react";
 import { api } from '../../services/api';
+import { LIVE, useLiveVersion } from "../../hooks/useLiveUpdates";
 
 function SummaryCard({ icon: Icon, label, value, sub }) {
   return (
@@ -24,6 +25,8 @@ export default function LandfillTracking() {
   const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(true);
 
+  // Loaded again when this data changes anywhere, so the page stays current without a reload.
+  const live = useLiveVersion(LIVE.records);
   useEffect(() => {
     let cancelled = false;
     api.landfillRecords().then((data) => {
@@ -43,7 +46,7 @@ export default function LandfillTracking() {
       setLoading(false);
     }).catch(() => setLoading(false));
     return () => { cancelled = true; };
-  }, []);
+  }, [live]);
 
   const filtered = records.filter((r) => {
     if (search) {

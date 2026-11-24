@@ -111,6 +111,7 @@ export const api = {
   postCleanupComparison: () => api.get('/requests/post-cleanup-comparison/'),
 
   notifications: (userId) => api.get(`/notifications/?user_id=${userId}`),
+  liveVersions: (userId) => request(`/live/${userId ? `?user_id=${userId}` : ''}`, { skipUnauthorizedEvent: true }),
   markNotificationRead: (id) => api.post(`/notifications/${id}/mark_read/`),
   markAllNotificationsRead: (userId) => api.post('/notifications/mark-all-read/', { user_id: userId }),
 
@@ -174,6 +175,7 @@ export const api = {
     if (params.category) qs.set('category', params.category);
     if (params.time_filter) qs.set('time_filter', params.time_filter);
     if (params.barangay) qs.set('barangay', params.barangay);
+    if (params.collection_area) qs.set('collection_area', params.collection_area);
     if (params.start) qs.set('start', params.start);
     if (params.end) qs.set('end', params.end);
     const q = qs.toString();

@@ -15,3 +15,7 @@ export function hasSession() {
 export function getAuthHeaders() {
   return session ? { Authorization: `Session ${session.id}:${session.token}` } : {};
 }
+
+export function sessionUserId() {
+  return session?.id ?? null;
+}

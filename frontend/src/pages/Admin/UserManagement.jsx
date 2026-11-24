@@ -7,6 +7,7 @@ import { Card } from "../../components/ui/Card";
 import { SearchBar } from "../../components/ui/SearchBar";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { BARANGAYS } from "../../utils/barangayBoundaries";
+import { LIVE, useLiveVersion } from "../../hooks/useLiveUpdates";
 
 const ROLE_STYLES = {
   Admin: "bg-blue-50 text-blue-700",
@@ -43,9 +44,11 @@ export default function UserManagement({ currentUser }) {
   const [page, setPage] = useState(1);
   const [pendingApproval, setPendingApproval] = useState(0);
 
+  // Loaded again when this data changes anywhere, so the page stays current without a reload.
+  const live = useLiveVersion(LIVE.users);
   useEffect(() => {
     api.pendingUserCount().then(res => setPendingApproval(res.pending_count || 0)).catch(() => {});
-  }, []);
+  }, [live]);
 
   const scopedUsers = useMemo(
     () => users.filter((u) => (showArchived ? u.status === 'Archived' : u.status !== 'Archived')),

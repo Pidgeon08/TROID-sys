@@ -1,10 +1,8 @@
 import { useSyncExternalStore } from "react";
 import api from "../services/api";
-import { subscribeRealtime } from "./useRealtime";
+import { LIVE, subscribeLive } from "./useLiveUpdates";
+import { chimeFor, markHeard } from "../utils/notificationSound";
 
-// The backend announces changes through the realtime relay as they happen; polling is only
-// the fallback for when the relay can't be reached.
-const POLL_INTERVAL = 30000;
 const CHANGED_EVENT = "troid:notifications-changed";
 const EMPTY = [];
 
@@ -24,6 +22,7 @@ function storeFor(userId) {
   const listeners = new Set();
   let unread = EMPTY;
   let latest = 0;
+  let loaded = false;
   let stop = null;
 
   const refresh = () => {
@@ -32,33 +31,27 @@ function storeFor(userId) {
       .then((list) => {
         // Only the newest answer counts, in case two fetches cross.
         if (ticket !== latest || !Array.isArray(list)) return;
+        const before = new Set(unread.map((n) => n.id));
         unread = list.filter((n) => !n.is_read);
+        const newest = Math.max(0, ...unread.map((n) => n.id));
+        // The ones already waiting when the page opened make no sound; new arrivals chime.
+        if (!loaded) markHeard(newest);
+        else if (unread.some((n) => !before.has(n.id))) chimeFor(newest);
+        loaded = true;
         listeners.forEach((listener) => listener());
       })
       .catch(() => {});
   };
 
+  // Fetched again whenever the live check (useLiveUpdates) sees the unread ones change,
+  // within a few seconds, or at once through the realtime relay.
   const start = () => {
     refresh();
-    const interval = setInterval(refresh, POLL_INTERVAL);
-    const onVisible = () => { if (document.visibilityState === "visible") refresh(); };
-    let connectedBefore = false;
-    const unsubscribe = subscribeRealtime((message) => {
-      if (message?.type === "realtime.connected") {
-        // A reconnect may have missed some announcements.
-        if (connectedBefore) refresh();
-        connectedBefore = true;
-      } else if (message?.type === "notifications.changed" && message.payload?.recipients?.includes(Number(userId))) {
-        refresh();
-      }
-    });
+    const unsubscribe = subscribeLive([LIVE.notifications], refresh);
     window.addEventListener(CHANGED_EVENT, refresh);
-    document.addEventListener("visibilitychange", onVisible);
     return () => {
-      clearInterval(interval);
       unsubscribe();
       window.removeEventListener(CHANGED_EVENT, refresh);
-      document.removeEventListener("visibilitychange", onVisible);
     };
   };
 
@@ -68,10 +61,11 @@ function storeFor(userId) {
       if (listeners.size === 1) stop = start();
       return () => {
         listeners.delete(listener);
+        // The store is kept (only its checking stops), so a component that unmounts and mounts
+        // again, as React's development mode does, finds the same store and its answers.
         if (listeners.size === 0) {
           stop?.();
           stop = null;
-          stores.delete(userId);
         }
       };
     },

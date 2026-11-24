@@ -7,6 +7,7 @@ import { useOperators } from "../../hooks/useOperators";
 import { Card } from "../../components/ui/Card";
 import { SearchBar } from "../../components/ui/SearchBar";
 import { EmptyState } from "../../components/ui/EmptyState";
+import { LIVE, useLiveVersion } from "../../hooks/useLiveUpdates";
 
 const AVAILABILITY_STYLES = {
   Assigned: "bg-green-50 text-green-800",
@@ -51,6 +52,8 @@ export default function OperatorManagement() {
   const [page, setPage] = useState(1);
   const [addOperatorError, setAddOperatorError] = useState('');
 
+  // Loaded again when this data changes anywhere, so the page stays current without a reload.
+  const live = useLiveVersion(LIVE.fleet, LIVE.schedules);
   useEffect(() => {
     api.boats().then((res) => setBots(Array.isArray(res) ? res : [])).catch(() => {});
     api.deploymentSchedules().then((res) => {
@@ -62,7 +65,7 @@ export default function OperatorManagement() {
       );
       setScheduledBotIds(ids);
     }).catch(() => {});
-  }, []);
+  }, [live]);
 
   const operatorsWithAvailability = useMemo(
     () => operators.map((o) => {

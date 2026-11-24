@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { MapPin, Recycle, Truck, FileText, ChevronDown } from "lucide-react";
 import { api } from '../../services/api';
+import { LIVE, useLiveVersion } from "../../hooks/useLiveUpdates";
 
 const CATEGORIES = ["Plastic Packaging", "Plastic Bottles", "Glass", "Metal Cans", "Organic Waste", "Mixed Recyclables"];
 
@@ -26,6 +27,8 @@ export default function RecyclingCenter() {
   const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(true);
 
+  // Loaded again when this data changes anywhere, so the page stays current without a reload.
+  const live = useLiveVersion(LIVE.records);
   useEffect(() => {
     let cancelled = false;
     api.recyclingRecords().then((data) => {
@@ -46,7 +49,7 @@ export default function RecyclingCenter() {
       setLoading(false);
     }).catch(() => setLoading(false));
     return () => { cancelled = true; };
-  }, []);
+  }, [live]);
 
   const filtered = records.filter((r) => {
     if (search) {

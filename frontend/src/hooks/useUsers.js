@@ -1,10 +1,12 @@
 import { useEffect, useState, useMemo } from 'react';
 import api from '../services/api';
+import { useLiveVersion } from './useLiveUpdates';
 
 export function useUsers() {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState(null);
+  const live = useLiveVersion('users');
 
   const selected = useMemo(() => users.find((u) => u.id === selectedId) || null, [users, selectedId]);
 
@@ -44,7 +46,7 @@ export function useUsers() {
     }
     fetchUsers();
     return () => { cancelled = true; };
-  }, [selectedId]);
+  }, [selectedId, live]);
 
   const updateUser = useMemo(() => (id, updates) => {
     setUsers((prev) => prev.map((u) => (u.id === id ? { ...u, ...updates } : u)));

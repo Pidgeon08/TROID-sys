@@ -5,6 +5,7 @@ import { useNavigate } from "react-router-dom";
 import { CalendarDays, ChevronRight, ClipboardList, X } from "lucide-react";
 import api from "../../services/api";
 import { REQUEST_STATUS_STYLES, formatTime12h, mapRequest } from "../../constants/requests";
+import { LIVE, useLiveVersion } from "../../hooks/useLiveUpdates";
 
 const ALL = "All";
 
@@ -30,6 +31,8 @@ export default function AreaRequestsModal({ area, onClose }) {
   const [error, setError] = useState("");
   const [statusFilter, setStatusFilter] = useState(ALL);
 
+  // Loaded again when this data changes anywhere, so the page stays current without a reload.
+  const live = useLiveVersion(LIVE.requests);
   useEffect(() => {
     let cancelled = false;
     api.requestsForArea(area.id)
@@ -40,7 +43,7 @@ export default function AreaRequestsModal({ area, onClose }) {
       })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [area.id]);
+  }, [area.id, live]);
 
   useEffect(() => {
     const onKey = (e) => { if (e.key === "Escape") onClose(); };
