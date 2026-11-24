@@ -57,7 +57,7 @@ export default function OperatorManagement() {
       const today = todayKey();
       const ids = new Set(
         (Array.isArray(res) ? res : [])
-          .filter((s) => s.day === today && s.status === "scheduled")
+          .filter((s) => s.bot != null && s.day === today && s.status === "scheduled")
           .map((s) => s.bot)
       );
       setScheduledBotIds(ids);

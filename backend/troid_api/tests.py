@@ -297,6 +297,49 @@ class RequestCleanupTypeTests(TestCase):
                 self.assertEqual(response.status_code, 201)
                 self.assertEqual(response.json()['cleanup_type'], saved)
 
+    def schedule(self, req, day='2026-12-01', **data):
+        return self.client.post('/api/deployment-schedules/', {
+            'day': day, 'status': 'scheduled', 'label': '09:00', 'request_id': req.request_id, **data,
+        }, format='json', **session_header(self.admin))
+
+    def test_a_non_troid_cleanup_is_scheduled_without_a_bot(self):
+        boat = Boat.objects.create(name='Bot')
+        first = Request.objects.create(cleanup_type='unsupported', location_name='Bridge', status='approved')
+        second = Request.objects.create(cleanup_type='unsupported', location_name='Plaza', status='approved')
+
+        no_bot = self.schedule(first)
+        bot_sent = self.schedule(second, bot=boat.id)
+
+        self.assertEqual((no_bot.status_code, bot_sent.status_code), (201, 201))
+        self.assertIsNone(no_bot.json()['bot'])
+        self.assertIsNone(bot_sent.json()['bot'])
+        # Neither takes up the bot's day.
+        self.assertEqual(self.schedule(Request.objects.create(collection_area=self.area, status='approved'), bot=boat.id).status_code, 201)
+
+    def test_a_troid_cleanup_needs_a_free_bot(self):
+        boat = Boat.objects.create(name='Bot')
+        req = Request.objects.create(collection_area=self.area, status='approved')
+        other = Request.objects.create(collection_area=self.area, status='approved')
+
+        response = self.schedule(req)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('bot', response.json())
+
+        self.assertEqual(self.schedule(req, bot=boat.id).status_code, 201)
+        self.assertEqual(self.schedule(other, bot=boat.id).status_code, 400)
+
+    def test_rescheduling_a_troid_cleanup_onto_its_own_day_is_allowed(self):
+        boat = Boat.objects.create(name='Bot')
+        req = Request.objects.create(collection_area=self.area, status='approved')
+        created = self.schedule(req, bot=boat.id).json()
+
+        response = self.client.put(f"/api/deployment-schedules/{created['id']}/", {
+            'bot': boat.id, 'day': '2026-12-01', 'status': 'scheduled', 'label': '10:00', 'request_id': req.request_id,
+        }, format='json', **session_header(self.admin))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['label'], '10:00')
+
     def test_existing_requests_take_their_type_from_their_deployments(self):
         from django.apps import apps
         migration = importlib.import_module('troid_api.migrations.0043_request_cleanup_type')

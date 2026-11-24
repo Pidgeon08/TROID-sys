@@ -17,6 +17,7 @@ import {
   X,
   Search,
   AlertTriangle,
+  Users,
 } from "lucide-react";
 import { api } from '../../services/api';
 import { logAudit } from '../../services/auditLog';
@@ -35,6 +36,11 @@ const DAYS = [
 const TIME_SLOTS = [
   "06:00", "07:00", "08:00", "09:00", "10:00", "11:00", "12:00",
   "13:00", "14:00", "15:00", "16:00", "17:00", "18:00",
+];
+
+const CLEANUP_OPTIONS = [
+  { value: "troid_supported", label: "TROID cleanup", hint: "A TROID bot and operator are deployed.", icon: Bot },
+  { value: "unsupported", label: "Non-TROID cleanup", hint: "A manual cleanup. No bot or operator needed.", icon: Users },
 ];
 
 const STATUS_STYLES = {
@@ -102,7 +108,12 @@ function Cell({ entry, onClick, dateObj }) {
         entry.status === 'scheduled' ? 'cursor-pointer hover:brightness-95' : ''
       } ${styles}`}
     >
-      <p className="font-semibold leading-tight">{formatTime12h(entry.label)}</p>
+      <p className="font-semibold leading-tight flex items-center gap-1">
+        {entry.status === 'scheduled' && (entry.cleanupType === 'unsupported'
+          ? <Users className="w-3 h-3 shrink-0" aria-label="Non-TROID cleanup" />
+          : <Bot className="w-3 h-3 shrink-0" aria-label="TROID cleanup" />)}
+        {formatTime12h(entry.label)}
+      </p>
       {entry.zone && <p className="mt-0.5 truncate leading-tight opacity-80 flex items-center gap-1"><MapPin className="w-3 h-3" />{entry.zone}</p>}
     </button>
   );
@@ -129,17 +140,20 @@ function ScheduleModal({ bots, operators, approvedRequests, priorityAreaIds = ne
 
   // Requests for priority collection areas (more bags per cleanup lately than the month
   // before) surface first, so they are the easiest to pick when scheduling a cleanup.
-  const orderedRequests = [...approvedRequests].sort((a, b) => {
+  const [cleanupType, setCleanupType] = useState(isEditing ? (editingSchedule.entry.cleanupType || "troid_supported") : "troid_supported");
+  const isUnsupported = cleanupType === 'unsupported';
+
+  const orderedRequests = approvedRequests.filter((r) => r.cleanupType === cleanupType).sort((a, b) => {
     const aPriority = isPriorityRequest(a) ? 0 : 1;
     const bPriority = isPriorityRequest(b) ? 0 : 1;
     return aPriority - bPriority;
   });
 
   const [selectedBots, setSelectedBots] = useState(
-    isEditing ? [editingSchedule.botId] : (prefillBot ? [prefillBot] : [])
+    isEditing ? (editingSchedule.botId != null ? [editingSchedule.botId] : []) : (prefillBot ? [prefillBot] : [])
   );
   const [selectedOperators, setSelectedOperators] = useState(() => {
-    if (!isEditing) return [];
+    if (!isEditing || editingSchedule.botId == null) return [];
     const currentOp = operators.find((o) => o.assigned_bot === editingSchedule.botId);
     return currentOp ? [currentOp.id] : [];
   });
@@ -148,25 +162,26 @@ function ScheduleModal({ bots, operators, approvedRequests, priorityAreaIds = ne
   const [selectedRequestId, setSelectedRequestId] = useState(isEditing ? (editingSchedule.entry.requestId || "") : "");
   const [zone, setZone] = useState(isEditing ? (editingSchedule.entry.zone || "") : (prefillZone || ""));
   const [landmark, setLandmark] = useState(isEditing ? (editingSchedule.entry.landmark || "") : "");
-  const [cleanupType, setCleanupType] = useState(isEditing ? (editingSchedule.entry.cleanupType || "troid_supported") : "troid_supported");
   const [confirmData, setConfirmData] = useState(null);
   const [showBotModal, setShowBotModal] = useState(false);
   const [showOperatorModal, setShowOperatorModal] = useState(false);
 
-  const isSelfSlot = (botId, date) => isEditing && String(botId) === String(editingSchedule.botId) && date === editingSchedule.day;
+  const isSelfSlot = (botId, date) => isEditing && editingSchedule.botId != null && String(botId) === String(editingSchedule.botId) && date === editingSchedule.day;
+
+  const changeCleanupType = (type) => {
+    if (isEditing || type === cleanupType) return;
+    setCleanupType(type);
+    setSelectedRequestId("");
+    setZone(prefillZone || "");
+    setSelectedBots([]);
+    setSelectedOperators([]);
+  };
 
   const selectRequest = (id) => {
     setSelectedRequestId(id);
     setIsRequestListOpen(false);
     const req = approvedRequests.find((r) => r.id === id);
     setZone(req ? requestBarangay(req) : '');
-    // The requester chose the cleanup type; an unsupported cleanup has no bot or operator.
-    const type = req?.cleanupType || 'troid_supported';
-    setCleanupType(type);
-    if (type === 'unsupported') {
-      setSelectedBots([]);
-      setSelectedOperators([]);
-    }
     if (req?.preferredDate) {
       handleDateChange({ target: { value: req.preferredDate } });
     }
@@ -174,8 +189,6 @@ function ScheduleModal({ bots, operators, approvedRequests, priorityAreaIds = ne
       setSelectedTime(req.preferredTime);
     }
   };
-
-  const isUnsupported = cleanupType === 'unsupported';
 
   const operatorsMatchBots = selectedBots.length > 0 && selectedOperators.length === selectedBots.length;
 
@@ -187,11 +200,15 @@ function ScheduleModal({ bots, operators, approvedRequests, priorityAreaIds = ne
   const busyBotsOnDate = selectedBots
     .map((id) => bots.find((b) => b.id === id))
     .filter((b) => b && isBooked(b.id, selectedDate) && !isSelfSlot(b.id, selectedDate));
-  const dateHasConflict = busyBotsOnDate.length > 0;
+  // Only a TROID cleanup takes up a bot's day; a manual one has no bot to clash with.
+  const dateHasConflict = !isUnsupported && busyBotsOnDate.length > 0;
+
+  const canSave = !!selectedRequestId && !!selectedDate && !!selectedTime
+    && (isUnsupported || (selectedBots.length > 0 && operatorsMatchBots && !dateHasConflict));
 
   const openConfirm = () => {
-    if (!selectedBots.length || !selectedRequestId || !selectedDate || !selectedTime || !operatorsMatchBots || dateHasConflict) return;
-    setConfirmData({ botIds: selectedBots, operatorIds: selectedOperators, date: selectedDate, time: selectedTime, zone, landmark, requestId: selectedRequestId, cleanupType });
+    if (!canSave) return;
+    setConfirmData({ botIds: isUnsupported ? [] : selectedBots, operatorIds: isUnsupported ? [] : selectedOperators, date: selectedDate, time: selectedTime, zone, landmark, requestId: selectedRequestId, cleanupType });
   };
 
   const doSave = () => {
@@ -201,7 +218,7 @@ function ScheduleModal({ bots, operators, approvedRequests, priorityAreaIds = ne
         editingSchedule.entry.id,
         editingSchedule.botId,
         editingSchedule.day,
-        confirmData.botIds[0],
+        confirmData.botIds[0] ?? null,
         confirmData.date,
         confirmData.time,
         confirmData.zone,
@@ -210,6 +227,8 @@ function ScheduleModal({ bots, operators, approvedRequests, priorityAreaIds = ne
         confirmData.operatorIds[0] || null,
         confirmData.cleanupType
       );
+    } else if (confirmData.cleanupType === 'unsupported') {
+      onSave(null, confirmData.date, confirmData.time, confirmData.zone, confirmData.landmark, confirmData.requestId, null, 'unsupported');
     } else {
       confirmData.botIds.forEach((botId, idx) => {
         onSave(botId, confirmData.date, confirmData.time, confirmData.zone, confirmData.landmark, confirmData.requestId, confirmData.operatorIds[idx], confirmData.cleanupType);
@@ -221,7 +240,6 @@ function ScheduleModal({ bots, operators, approvedRequests, priorityAreaIds = ne
     setSelectedRequestId("");
     setZone("");
     setLandmark("");
-    setCleanupType("troid_supported");
     setSelectedDate(toDateInput(new Date()));
     setSelectedTime("");
   };
@@ -283,10 +301,40 @@ function ScheduleModal({ bots, operators, approvedRequests, priorityAreaIds = ne
             </button>
           </div>
           <p className="text-xs text-slate-500 mt-1">
-            {isEditing ? 'Update the bot, operator, date, or time for this deployment.' : 'Assign a bot to an approved request location.'}
+            {isEditing
+              ? (isUnsupported ? 'Update the date or time for this non-TROID cleanup.' : 'Update the bot, operator, date, or time for this deployment.')
+              : 'Schedule a TROID or non-TROID cleanup for an approved request.'}
           </p>
         </div>
         <div className="p-7 space-y-5 overflow-y-auto flex-1">
+          <div>
+            <p className="block text-xs font-semibold text-slate-500 mb-1.5">Cleanup Type</p>
+            <div className="grid grid-cols-2 gap-1 rounded-lg border border-slate-200 bg-white p-0.5 text-sm" role="radiogroup" aria-label="Cleanup type">
+              {CLEANUP_OPTIONS.map(({ value, label, icon: Icon }) => {
+                const active = cleanupType === value;
+                return (
+                  <button
+                    key={value}
+                    type="button"
+                    role="radio"
+                    aria-checked={active}
+                    onClick={() => changeCleanupType(value)}
+                    disabled={isEditing && !active}
+                    className={`flex items-center justify-center gap-1.5 rounded-md px-3 py-2 font-semibold transition-colors ${
+                      active ? "bg-[#1b4de4] text-white shadow-sm" : "text-slate-500 hover:text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-slate-500"
+                    }`}
+                  >
+                    <Icon className="w-4 h-4" />
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="mt-1.5 text-[11px] text-slate-400">
+              {CLEANUP_OPTIONS.find((o) => o.value === cleanupType)?.hint}
+              {isEditing ? ' Set by the request.' : ' Only requests made as this type are listed.'}
+            </p>
+          </div>
           <div>
             <label className="block text-xs font-semibold text-slate-500 mb-1.5">Approved Request / Zone</label>
             {isEditing ? (
@@ -324,7 +372,7 @@ function ScheduleModal({ bots, operators, approvedRequests, priorityAreaIds = ne
                         );
                       })()
                     ) : (
-                      <span className="text-slate-400">-- Select Approved Request --</span>
+                      <span className="text-slate-400">-- Select Approved {isUnsupported ? 'Non-TROID' : 'TROID'} Request --</span>
                     )}
                     <ChevronDown className="shrink-0 w-4 h-4 text-slate-400" />
                   </button>
@@ -332,7 +380,7 @@ function ScheduleModal({ bots, operators, approvedRequests, priorityAreaIds = ne
                   {isRequestListOpen && (
                     <div className="absolute z-10 mt-1 w-full max-h-64 overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg py-1">
                       {orderedRequests.length === 0 && (
-                        <p className="px-3 py-2 text-sm text-slate-400">No approved requests available.</p>
+                        <p className="px-3 py-2 text-sm text-slate-400">No approved {isUnsupported ? 'non-TROID' : 'TROID'} requests available.</p>
                       )}
                       {orderedRequests.map((r) => {
                         const isScheduled = scheduledRequestIds.has(r.id);
@@ -429,22 +477,14 @@ function ScheduleModal({ bots, operators, approvedRequests, priorityAreaIds = ne
               </p>
             )}
           </div>
-          <div>
-            <p className="block text-xs font-semibold text-slate-500 mb-1.5">Cleanup Type</p>
-            <div className="w-full rounded-lg border border-slate-200 bg-slate-50 py-2.5 px-3 text-sm text-slate-700">
-              {selectedRequestId ? (isUnsupported ? 'Unsupported' : 'TROID Supported') : '—'}
-            </div>
-            <p className="mt-1.5 text-[11px] text-slate-400">
-              {selectedRequestId ? 'Set by the request.' : 'Set by the request you select.'}
-            </p>
-          </div>
+          {!isUnsupported && (
           <div className="grid grid-cols-2 gap-4">
-            <div className={isUnsupported || !hasTimeSlot ? "opacity-40 pointer-events-none transition-opacity" : "transition-opacity"}>
+            <div className={!hasTimeSlot ? "opacity-40 pointer-events-none transition-opacity" : "transition-opacity"}>
               <label className="block text-xs font-semibold text-slate-500 mb-1.5">Bots</label>
               <button
                 type="button"
                 onClick={() => setShowBotModal(true)}
-                disabled={isUnsupported || !hasTimeSlot}
+                disabled={!hasTimeSlot}
                 className="w-full flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white py-2.5 px-3 text-sm text-left outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30 hover:bg-slate-50 transition-colors"
               >
                 <span className={selectedBots.length ? "text-slate-700 font-medium" : "text-slate-400"}>
@@ -454,16 +494,16 @@ function ScheduleModal({ bots, operators, approvedRequests, priorityAreaIds = ne
                 </span>
                 <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />
               </button>
-              {!isUnsupported && hasTimeSlot && availableBots.length === 0 && (
+              {hasTimeSlot && availableBots.length === 0 && (
                 <p className="mt-1.5 text-xs text-amber-600">No bots are available on this date.</p>
               )}
             </div>
-            <div className={isUnsupported || !hasTimeSlot ? "opacity-40 pointer-events-none transition-opacity" : "transition-opacity"}>
+            <div className={!hasTimeSlot ? "opacity-40 pointer-events-none transition-opacity" : "transition-opacity"}>
               <label className="block text-xs font-semibold text-slate-500 mb-1.5">Operators</label>
               <button
                 type="button"
                 onClick={() => selectedBots.length && setShowOperatorModal(true)}
-                disabled={isUnsupported || !hasTimeSlot || !selectedBots.length}
+                disabled={!hasTimeSlot || !selectedBots.length}
                 className="w-full flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white py-2.5 px-3 text-sm text-left outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30 hover:bg-slate-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <span className={selectedOperators.length ? "text-slate-700 font-medium" : "text-slate-400"}>
@@ -473,18 +513,17 @@ function ScheduleModal({ bots, operators, approvedRequests, priorityAreaIds = ne
                 </span>
                 <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />
               </button>
-              {!isUnsupported && selectedBots.length > 0 && !operatorsMatchBots && (
+              {selectedBots.length > 0 && !operatorsMatchBots && (
                 <p className="mt-1.5 text-xs text-amber-600">
                   Select {selectedBots.length} operator{selectedBots.length === 1 ? "" : "s"} to match the {selectedBots.length} bot{selectedBots.length === 1 ? "" : "s"} chosen.
                 </p>
               )}
             </div>
           </div>
-          {isUnsupported ? (
-            <p className="-mt-3 text-xs text-slate-400">Bots and operators aren't required for unsupported cleanups.</p>
-          ) : !hasTimeSlot ? (
+          )}
+          {!isUnsupported && !hasTimeSlot && (
             <p className="-mt-3 text-xs text-slate-400">Select a date and time slot to see available bots and operators.</p>
-          ) : null}
+          )}
         </div>
         <div className="p-6 border-t border-slate-100 flex gap-3 shrink-0">
           <button
@@ -495,7 +534,7 @@ function ScheduleModal({ bots, operators, approvedRequests, priorityAreaIds = ne
           </button>
           <button
             onClick={openConfirm}
-            disabled={!selectedBots.length || !selectedRequestId || !selectedTime || !operatorsMatchBots || dateHasConflict}
+            disabled={!canSave}
             className="flex-1 rounded-lg bg-[#1b4de4] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#153eb8] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isEditing ? 'Save Changes' : 'Save Schedule'}
@@ -613,6 +652,12 @@ function ScheduleModal({ bots, operators, approvedRequests, priorityAreaIds = ne
               <p className="text-xs text-slate-500 mt-1">Please review the schedule details before saving.</p>
             </div>
             <div className="p-7 space-y-3 text-sm">
+              {confirmData.cleanupType === 'unsupported' ? (
+                <div className="flex justify-between gap-4">
+                  <span className="text-slate-500">Bots &amp; Operators</span>
+                  <span className="font-semibold text-slate-900 text-right">Manual cleanup — no bot</span>
+                </div>
+              ) : (
               <div>
                 <span className="text-slate-500">Bots &amp; Operators</span>
                 <div className="mt-1.5 space-y-1">
@@ -624,6 +669,7 @@ function ScheduleModal({ bots, operators, approvedRequests, priorityAreaIds = ne
                   ))}
                 </div>
               </div>
+              )}
               <div className="flex justify-between gap-4">
                 <span className="text-slate-500">Request</span>
                 <span className="font-semibold text-slate-900 text-right">{confirmRequest ? `${confirmRequest.id} - ${confirmRequest.location?.barangay || confirmRequest.requestedBy?.barangay || 'Unknown zone'}` : confirmData.requestId}</span>
@@ -638,7 +684,7 @@ function ScheduleModal({ bots, operators, approvedRequests, priorityAreaIds = ne
               </div>
               <div className="flex justify-between gap-4">
                 <span className="text-slate-500">Cleanup Type</span>
-                <span className="font-semibold text-slate-900">{confirmData.cleanupType === 'troid_supported' ? 'TROID Supported' : 'Unsupported'}</span>
+                <span className="font-semibold text-slate-900">{confirmData.cleanupType === 'troid_supported' ? 'TROID cleanup' : 'Non-TROID cleanup'}</span>
               </div>
               {confirmData.landmark && (
                 <div className="flex justify-between gap-4">
@@ -679,6 +725,7 @@ export default function DeploymentSchedule() {
   const [bots, setBots] = useState([]);
   const [operators, setOperators] = useState([]);
   const [schedule, setSchedule] = useState({});
+  const [manualSchedules, setManualSchedules] = useState([]);
   const [loading, setLoading] = useState(true);
   const [approvedRequests, setApprovedRequests] = useState([]);
   const [priorityAreaIds, setPriorityAreaIds] = useState(new Set());
@@ -714,7 +761,21 @@ export default function DeploymentSchedule() {
       }));
 
       const scheduleMap = {};
+      const manual = [];
       schedulesData.forEach((s) => {
+        // A non-TROID (manual) cleanup has no bot, so it gets its own row on the calendar.
+        if (s.bot == null) {
+          manual.push({
+            id: s.id,
+            day: s.day,
+            status: s.status || 'scheduled',
+            label: s.label || '',
+            zone: s.zone || '',
+            requestId: s.request_id || null,
+            cleanupType: s.cleanup_type || 'unsupported',
+          });
+          return;
+        }
         const botId = String(s.bot);
         scheduleMap[botId] = scheduleMap[botId] || {};
         scheduleMap[botId][s.day] = {
@@ -730,6 +791,7 @@ export default function DeploymentSchedule() {
       setBots(mappedBots);
       setOperators(operatorsData);
       setSchedule(scheduleMap);
+      setManualSchedules(manual);
       setApprovedRequests(approved);
       setPriorityAreaIds(new Set((priorityData || []).filter((p) => p.is_priority).map((p) => p.collection_area.id)));
       setLoading(false);
@@ -777,11 +839,16 @@ export default function DeploymentSchedule() {
     return days;
   };
 
-  const scheduledToday = Object.values(schedule).filter((s) => s?.[selectedDayKey]?.status === "scheduled").length;
+  const manualOn = (day) => manualSchedules
+    .filter((m) => m.day === day && m.status === "scheduled")
+    .sort((a, b) => a.label.localeCompare(b.label));
+
+  const scheduledToday = Object.values(schedule).filter((s) => s?.[selectedDayKey]?.status === "scheduled").length
+    + manualOn(selectedDayKey).length;
   const completedDeployments = Object.values(schedule).reduce(
     (acc, botSched) => acc + Object.values(botSched).filter((d) => d.status === "scheduled").length,
     0
-  );
+  ) + manualSchedules.filter((m) => m.status === "scheduled").length;
 
   const handleNext = () => {
     const newDate = new Date(selectedDate);
@@ -801,8 +868,38 @@ export default function DeploymentSchedule() {
       if (d.requestId) scheduledRequestIds.add(d.requestId);
     });
   });
+  manualSchedules.forEach((m) => { if (m.requestId) scheduledRequestIds.add(m.requestId); });
+
+  const closeModal = () => {
+    setShowModal(false);
+    setPrefillBot("");
+    setPrefillZone("");
+    setReschedulingEntry(null);
+  };
+
+  // Non-TROID cleanups: no bot or operator, just the request's date and time.
+  const saveManualSchedule = (scheduleId, day, timeSlot, zone, requestId) => {
+    const body = { bot: null, day, status: "scheduled", label: timeSlot, zone, request_id: requestId, cleanup_type: 'unsupported' };
+    const call = scheduleId ? api.updateDeploymentSchedule(scheduleId, body) : api.createDeploymentSchedule(body);
+    call.then((saved) => {
+      const entry = { id: saved?.id ?? scheduleId, day, status: "scheduled", label: timeSlot, zone, requestId, cleanupType: 'unsupported' };
+      setManualSchedules((prev) => [...prev.filter((m) => m.id !== entry.id), entry]);
+    }).catch(console.error);
+
+    closeModal();
+    logAudit({
+      currentUser,
+      action: scheduleId ? 'Schedule rescheduled' : 'Schedule edited',
+      module: 'Collection Schedule',
+      details: `Non-TROID cleanup ${requestId} ${scheduleId ? 'rescheduled' : 'scheduled'} for ${zone || 'unspecified zone'} on ${day} at ${timeSlot}`,
+    });
+  };
 
   const handleSaveSchedule = (botId, day, timeSlot, zone, landmark, requestId, operatorId, cleanupType) => {
+    if (cleanupType === 'unsupported') {
+      saveManualSchedule(null, day, timeSlot, zone, requestId);
+      return;
+    }
     const bot = bots.find(b => String(b.id) === String(botId));
     if (!bot) return;
 
@@ -852,6 +949,10 @@ export default function DeploymentSchedule() {
   };
 
   const handleRescheduleSchedule = (scheduleId, oldBotId, oldDay, botId, day, timeSlot, zone, landmark, requestId, operatorId, cleanupType) => {
+    if (cleanupType === 'unsupported') {
+      saveManualSchedule(scheduleId, day, timeSlot, zone, requestId);
+      return;
+    }
     const bot = bots.find((b) => String(b.id) === String(botId));
     if (!bot) return;
 
@@ -920,6 +1021,28 @@ export default function DeploymentSchedule() {
 
   const robotsOnDuty = operators.filter(op => op.availability === 'assigned' || op.assigned_bot).length;
 
+  const manualRowLabel = (
+    <div className="flex items-center gap-2">
+      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-violet-50 text-violet-500">
+        <Users className="h-4 w-4" />
+      </div>
+      <div className="min-w-0">
+        <p className="truncate text-sm font-semibold text-slate-900">Non-TROID</p>
+        <p className="truncate text-xs text-slate-400">Manual cleanups</p>
+      </div>
+    </div>
+  );
+
+  const manualCells = (entries, day, dateObj) => entries.length === 0
+    ? <Cell entry={null} />
+    : (
+      <div className="space-y-1">
+        {entries.map((m) => (
+          <Cell key={m.id} entry={m} onClick={(entry) => handleCellClick(entry, null, day)} dateObj={dateObj} />
+        ))}
+      </div>
+    );
+
   const renderWeekView = () => {
     const weekDays = getWeekDays();
     return (
@@ -966,6 +1089,12 @@ export default function DeploymentSchedule() {
                 No robots match the selected filters.
               </p>
             )}
+            <div className="grid grid-cols-[160px_repeat(7,1fr)] items-start gap-2 py-2.5">
+              {manualRowLabel}
+              {weekDays.map((d) => (
+                <div key={d.key}>{manualCells(manualOn(dateKey(d.dateObj)), dateKey(d.dateObj), d.dateObj)}</div>
+              ))}
+            </div>
           </div>
         </div>
       </div>
@@ -1027,6 +1156,17 @@ export default function DeploymentSchedule() {
                 No robots match the selected filters.
               </p>
             )}
+            <div
+              className="grid gap-1.5 p-2 items-start"
+              style={{ gridTemplateColumns: `160px repeat(${TIME_SLOTS.length}, minmax(64px, 1fr))` }}
+            >
+              <div className="bg-white sticky left-0 z-10 border-r border-slate-200 px-1 py-1">{manualRowLabel}</div>
+              {TIME_SLOTS.map((slot) => (
+                <div key={slot}>
+                  {manualCells(manualOn(dateKey(selectedDate)).filter((m) => m.label === slot), dateKey(selectedDate), selectedDate)}
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </div>
@@ -1056,7 +1196,7 @@ export default function DeploymentSchedule() {
                   const dayKey = dateKey(date);
                   const isToday = date.toDateString() === new Date().toDateString();
                   const isSelected = date.toDateString() === selectedDate.toDateString();
-                  const hasSchedule = filteredBots.some(bot => schedule[bot.id]?.[dayKey]?.status === 'scheduled');
+                  const hasSchedule = filteredBots.some(bot => schedule[bot.id]?.[dayKey]?.status === 'scheduled') || manualOn(dayKey).length > 0;
                   let statusClass = "border border-dashed border-slate-200";
                   if (hasSchedule) statusClass = "bg-emerald-50 border border-emerald-100";
 
@@ -1230,6 +1370,8 @@ export default function DeploymentSchedule() {
           <LegendDot className="bg-emerald-500" label="Scheduled" />
           <LegendDot className="bg-sky-500" label="Available" />
           <LegendDot className="bg-slate-300" label="No Schedule" />
+          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-500"><Bot className="h-3 w-3" />TROID cleanup</span>
+          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-500"><Users className="h-3 w-3" />Non-TROID cleanup</span>
         </div>
       </div>
 
@@ -1240,7 +1382,7 @@ export default function DeploymentSchedule() {
           approvedRequests={approvedRequests}
           priorityAreaIds={priorityAreaIds}
           scheduledRequestIds={scheduledRequestIds}
-          onClose={() => { setShowModal(false); setPrefillBot(""); setPrefillZone(""); setReschedulingEntry(null); }}
+          onClose={closeModal}
           onSave={handleSaveSchedule}
           onReschedule={handleRescheduleSchedule}
           onViewRequest={setOverviewId}

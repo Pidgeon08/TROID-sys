@@ -255,6 +255,8 @@ class RequestSerializer(serializers.ModelSerializer):
         }
 
 class DeploymentScheduleSerializer(serializers.ModelSerializer):
+    bot = serializers.PrimaryKeyRelatedField(queryset=Boat.objects.all(), required=False, allow_null=True)
+
     def validate(self, attrs):
         # A deployment for a request is the cleanup type the request was made as.
         request_id = attrs.get('request_id', getattr(self.instance, 'request_id', None))
@@ -262,11 +264,32 @@ class DeploymentScheduleSerializer(serializers.ModelSerializer):
             cleanup_type = Request.objects.filter(request_id=request_id).values_list('cleanup_type', flat=True).first()
             if cleanup_type:
                 attrs['cleanup_type'] = cleanup_type
+        cleanup_type = attrs.get('cleanup_type', getattr(self.instance, 'cleanup_type', 'troid_supported'))
+        status = attrs.get('status', getattr(self.instance, 'status', 'none'))
+
+        if cleanup_type == 'unsupported':
+            # A manual cleanup has no bot, so it never takes up a bot's day.
+            if not request_id:
+                raise serializers.ValidationError({'request_id': 'A non-TROID cleanup must be for a request.'})
+            attrs['bot'] = None
+            return attrs
+
+        bot = attrs['bot'] if 'bot' in attrs else getattr(self.instance, 'bot', None)
+        if bot is None:
+            raise serializers.ValidationError({'bot': 'A TROID cleanup needs a bot.' if status == 'scheduled' else 'This field is required.'})
+        day = attrs.get('day', getattr(self.instance, 'day', None))
+        taken = DeploymentSchedule.objects.filter(bot=bot, day=day)
+        if self.instance is not None:
+            taken = taken.exclude(pk=self.instance.pk)
+        if taken.exists():
+            raise serializers.ValidationError({'non_field_errors': ['This bot already has a schedule on that day.']})
         return attrs
 
     class Meta:
         model = DeploymentSchedule
         fields = ['id', 'bot', 'day', 'status', 'label', 'zone', 'request_id', 'cleanup_type']
+        # Bot + day uniqueness is checked in validate(): it only applies when there is a bot.
+        validators = []
 
 class LandfillRecordSerializer(serializers.ModelSerializer):
     class Meta:

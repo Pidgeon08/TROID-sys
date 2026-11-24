@@ -303,6 +303,8 @@ function RequestForm({ currentUser, forCenro = false }) {
         setBots((boatsData || []).map((b) => ({ id: b.id, name: b.name || `Bot ${b.id}` })));
         const map = {};
         (schedData || []).forEach((s) => {
+          // Non-TROID (manual) cleanups have no bot, so they take up no bot's day.
+          if (s.bot == null) return;
           const botId = String(s.bot);
           map[botId] = map[botId] || {};
           map[botId][s.day] = { status: s.status || "none", label: s.label || "", zone: s.zone || "" };

@@ -349,7 +349,9 @@ class DeploymentSchedule(models.Model):
         ('troid_supported', 'TROID Supported'),
         ('unsupported', 'Unsupported'),
     ]
-    bot = models.ForeignKey(Boat, on_delete=models.CASCADE, related_name='deployments')
+    # Only TROID-supported cleanups (and bot maintenance) have a bot; an unsupported
+    # (manual) cleanup is scheduled with just a date and time.
+    bot = models.ForeignKey(Boat, on_delete=models.CASCADE, related_name='deployments', null=True, blank=True)
     day = models.CharField(max_length=20)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='none')
     label = models.CharField(max_length=20, default='Available')
@@ -361,7 +363,7 @@ class DeploymentSchedule(models.Model):
         unique_together = ['bot', 'day']
 
     def __str__(self):
-        return f"{self.bot.name} - {self.day}"
+        return f"{self.bot.name if self.bot else 'Manual cleanup'} - {self.day}"
 
 class LandfillRecord(models.Model):
     record_id = models.CharField(max_length=20, unique=True)
