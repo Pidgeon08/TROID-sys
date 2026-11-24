@@ -548,11 +548,40 @@ export const RECIPES = {
       recent: { outline: (p) => card(p, 'Recent Activities') },
     },
     'collection-areas': {
-      draw: {
-        run: async (p) => { await button(p, 'Draw Area').click(); await settle(p); },
+      'add-area': { run: async (p) => { await button(p, 'Add Area').click(); await settle(p); } },
+      details: {
+        run: async (p) => { await button(p, 'Add Area').click(); await settle(p); },
+        outline: (p) => [p.getByText(/^Details/).first(), button(p, 'Submit Area')],
       },
-      status: { outline: (p) => [text(p, 'Pending Approval'), text(p, 'Approved')] },
-      approved: { outline: (p) => text(p, 'Poro Point Shoreline') },
+      'status-tabs': { outline: (p) => [p.getByRole('tab', { name: /^All/ }), p.getByRole('tab', { name: /^Archived/ })] },
+      'search-filters': {
+        run: async (p) => { await button(p, /^Filters/).click(); await settle(p, 300); },
+        outline: (p) => [p.getByPlaceholder(/Search name, ID/), button(p, /^Filters/)],
+      },
+      'select-area': {
+        run: (p) => selectArea(p, 'Poro Point Shoreline'),
+        outline: (p) => p.getByRole('button', { name: 'Close details' }).locator('xpath=ancestor::div[contains(@class,"shadow-xl")][1]'),
+      },
+      heatmap: {
+        run: async (p) => {
+          await selectArea(p, 'Poro Point Shoreline');
+          await p.getByRole('switch', { name: /Trash heatmap/ }).click();
+          await p.getByRole('button', { name: 'All time' }).click();
+          await p.getByText(/\d+ detections?/).first().waitFor();
+          await settle(p, 1500);
+        },
+        outline: (p) => [p.getByRole('switch', { name: /Trash heatmap/ }).locator('xpath=..'), button(p, /^Requests\s*\d/)],
+      },
+      edit: { run: async (p) => { await selectArea(p, 'Poro Point Shoreline'); await button(p, /^Edit$/).click(); await settle(p); } },
+      delete: {
+        run: async (p) => {
+          await p.getByRole('tab', { name: /^Pending/ }).click();
+          await settle(p, 300);
+          await p.locator('li[data-area-row] button').first().click();
+          await settle(p);
+        },
+        outline: (p) => button(p, /^Delete area$/),
+      },
     },
     requests: {
       filters: {

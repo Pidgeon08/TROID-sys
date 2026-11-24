@@ -327,9 +327,14 @@ class Notification(models.Model):
         ('area_redirected', 'Collection Area Changed'),
         ('merged', 'Merged'),
         ('unmerged', 'Unmerged'),
+        ('area_submitted', 'Collection Area Submitted'),
+        ('area_approved', 'Collection Area Approved'),
+        ('area_archived', 'Collection Area Archived'),
     ]
     recipient = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications')
     request = models.ForeignKey(Request, on_delete=models.CASCADE, null=True, blank=True, related_name='notifications')
+    # A notification about a collection area (submitted, approved or archived) rather than a request.
+    collection_area = models.ForeignKey('CollectionArea', on_delete=models.CASCADE, null=True, blank=True, related_name='notifications')
     notif_type = models.CharField(max_length=20, choices=TYPE_CHOICES)
     title = models.CharField(max_length=150)
     message = models.TextField(blank=True, default="")

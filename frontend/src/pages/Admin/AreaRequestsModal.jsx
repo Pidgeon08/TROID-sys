@@ -24,7 +24,7 @@ function collected(req) {
   return parts.join(" · ");
 }
 
-export default function AreaRequestsModal({ area, onClose }) {
+export default function AreaRequestsModal({ area, onClose, routePrefix = "admin" }) {
   const navigate = useNavigate();
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -121,7 +121,7 @@ export default function AreaRequestsModal({ area, onClose }) {
                   <li key={req.id}>
                     <button
                       type="button"
-                      onClick={() => navigate(`/admin/requests/${req.id}`)}
+                      onClick={() => navigate(`/${routePrefix}/requests/${req.id}`)}
                       className="flex w-full items-center gap-3 px-6 py-4 text-left transition-colors hover:bg-slate-50"
                     >
                       <div className="min-w-0 flex-1">

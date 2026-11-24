@@ -84,14 +84,30 @@ export function useUnreadNotifications(userId) {
   return useSyncExternalStore(store ? store.subscribe : subscribeNothing, store ? store.getSnapshot : getNothing);
 }
 
-/** Opening a request counts as seeing its notifications: they are marked read. */
-export function useMarkRequestRead(userId, requestId) {
+// A notification is about a collection area (submitted, approved, archived) or a request.
+export const isAreaNotification = (n) => Boolean(n.area_id);
+export const isRequestNotification = (n) => !n.area_id;
+
+function useMarkRead(userId, matches, key) {
   const unread = useUnreadNotifications(userId);
   useEffect(() => {
-    const seen = unread.filter((n) => requestId && n.request_id === requestId);
+    const seen = key ? unread.filter((n) => matches(n, key)) : [];
     if (seen.length === 0) return;
     Promise.all(seen.map((n) => api.markNotificationRead(n.id)))
       .then(notifyNotificationsChanged)
       .catch(() => {});
-  }, [unread, requestId]);
+  }, [unread, key, matches]);
+}
+
+const aboutRequest = (n, requestId) => n.request_id === requestId;
+const aboutArea = (n, areaId) => n.area_id === areaId;
+
+/** Opening a request counts as seeing its notifications: they are marked read. */
+export function useMarkRequestRead(userId, requestId) {
+  useMarkRead(userId, aboutRequest, requestId);
+}
+
+/** Opening a collection area's card counts as seeing its notifications. */
+export function useMarkAreaRead(userId, areaId) {
+  useMarkRead(userId, aboutArea, areaId);
 }

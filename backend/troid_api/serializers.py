@@ -429,7 +429,9 @@ class HeatmapDataSerializer(serializers.ModelSerializer):
 
 class NotificationSerializer(serializers.ModelSerializer):
     request_id = serializers.CharField(source='request.request_id', read_only=True, default=None)
+    area_id = serializers.CharField(source='collection_area.area_id', read_only=True, default=None)
 
     class Meta:
         model = Notification
-        fields = ['id', 'recipient', 'request', 'request_id', 'notif_type', 'title', 'message', 'is_read', 'created_at']
+        fields = ['id', 'recipient', 'request', 'request_id', 'collection_area', 'area_id', 'notif_type', 'title',
+                  'message', 'is_read', 'created_at']

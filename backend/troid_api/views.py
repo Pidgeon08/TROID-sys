@@ -197,6 +197,24 @@ def _notify_approvers(req, role, title):
     notifications_changed([approver.pk for approver in approvers])
 
 
+def notify_area_update(area, notif_type, title, message, recipients):
+    """In-app notifications about a collection area; they light the Collection Areas item."""
+    recipients = list(recipients)
+    Notification.objects.bulk_create(
+        Notification(recipient=user, collection_area=area, notif_type=notif_type, title=title, message=message)
+        for user in recipients
+    )
+    notifications_changed([user.pk for user in recipients])
+
+
+def barangay_accounts(barangay):
+    """The active barangay and NGO accounts assigned to this barangay."""
+    return [
+        user for user in User.objects.filter(role__in=REQUESTERS, status='active')
+        if barangay and own_barangay(user) == barangay
+    ]
+
+
 def actor_of(request, default):
     """(name, role label) of whoever made this API call, for StatusHistory."""
     user = getattr(request, 'user', None)
@@ -1876,7 +1894,13 @@ class CollectionAreaViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
             serializer.save(status='approved', reviewed_by=user.name, date_reviewed=timezone.now(),
                             submitted_by=serializer.validated_data.get('submitted_by') or user.name)
         else:
-            serializer.save(status='pending')
+            area = serializer.save(status='pending')
+            notify_area_update(
+                area, 'area_submitted', 'New collection area awaiting your approval',
+                f'{area.name} ({area.area_id}) in {area.barangay or "a barangay"} was submitted by '
+                f'{area.submitted_by or user.name} and needs your approval.',
+                User.objects.filter(role='admin', status='active'),
+            )
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
     def _check_own_barangay(self, area):
@@ -1903,6 +1927,11 @@ class CollectionAreaViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
         area.reviewed_by = self._actor_name(request)
         area.date_reviewed = timezone.now()
         area.save()
+        notify_area_update(
+            area, 'area_approved', 'Your collection area has been approved',
+            f'CENRO approved {area.name} ({area.area_id}). It can now be chosen for TROID-supported requests.',
+            barangay_accounts(area.barangay),
+        )
         return Response(CollectionAreaSerializer(area).data)
 
     @action(detail=True, methods=['post'])
@@ -1916,6 +1945,11 @@ class CollectionAreaViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
         area.reviewed_by = self._actor_name(request)
         area.date_reviewed = timezone.now()
         area.save()
+        notify_area_update(
+            area, 'area_archived', 'Your collection area was archived',
+            f'CENRO archived {area.name} ({area.area_id}).' + (f' Reason: {reason}' if reason else ''),
+            barangay_accounts(area.barangay),
+        )
         return Response(CollectionAreaSerializer(area).data)
 
     def destroy(self, request, *args, **kwargs):
@@ -1923,6 +1957,11 @@ class CollectionAreaViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
         self._check_own_barangay(area)
         area.archived = True
         area.save()
+        # A deleted area can't be opened, so its notifications would never clear.
+        unread = Notification.objects.filter(collection_area=area, is_read=False)
+        recipients = list(unread.values_list('recipient_id', flat=True).distinct())
+        if unread.update(is_read=True):
+            notifications_changed(recipients)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 

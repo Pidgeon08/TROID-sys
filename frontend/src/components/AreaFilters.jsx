@@ -44,8 +44,10 @@ function FiltersPanel({ filters, onChange, barangays }) {
       <div className="grid grid-cols-2 gap-2.5">
         <PanelSelect id="area-filter-priority" label="Priority" value={filters.priority} onChange={(priority) => onChange({ priority })}
           allLabel="Priority or not" options={Object.entries(PRIORITY)} />
-        <PanelSelect id="area-filter-barangay" label="Barangay" value={filters.barangay} onChange={(barangay) => onChange({ barangay })}
-          allLabel="All barangays" options={barangays.map((b) => [b, b])} />
+        {barangays.length > 0 && (
+          <PanelSelect id="area-filter-barangay" label="Barangay" value={filters.barangay} onChange={(barangay) => onChange({ barangay })}
+            allLabel="All barangays" options={barangays.map((b) => [b, b])} />
+        )}
         <PanelSelect id="area-filter-water" label="Water body" value={filters.water} onChange={(water) => onChange({ water })}
           allLabel="Any water body" options={[...WATER_BODY_TYPES.map((t) => [t.value, t.label]), [NO_WATER_BODY, "Not set"]]} />
         <PanelSelect id="area-filter-shape" label="Shape" value={filters.shape} onChange={(shape) => onChange({ shape })}

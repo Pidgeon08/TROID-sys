@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useNavigate } from "react-router-dom";
 import { Bell, Volume2, VolumeX } from "lucide-react";
 import api from "../services/api";
-import { notifyNotificationsChanged, useUnreadNotifications } from "../hooks/useUnreadNotifications";
+import { isRequestNotification, notifyNotificationsChanged, useUnreadNotifications } from "../hooks/useUnreadNotifications";
 import { isSoundMuted, setSoundMuted, subscribeSoundMuted } from "../utils/notificationSound";
 
 function routePrefix(userType) {
@@ -24,7 +24,8 @@ function timeAgo(dateString) {
 }
 
 const NotificationBell = ({ currentUser, userType, variant = "light" }) => {
-  const unread = useUnreadNotifications(currentUser?.id);
+  // Area notifications light Collection Areas instead.
+  const unread = useUnreadNotifications(currentUser?.id).filter(isRequestNotification);
   const unreadCount = unread.length;
   const muted = useSyncExternalStore(subscribeSoundMuted, isSoundMuted);
   const [notifications, setNotifications] = useState([]);
@@ -47,7 +48,7 @@ const NotificationBell = ({ currentUser, userType, variant = "light" }) => {
     if (!open || !currentUser?.id) return undefined;
     let cancelled = false;
     api.notifications(currentUser.id)
-      .then((list) => { if (!cancelled && Array.isArray(list)) setNotifications(list); })
+      .then((list) => { if (!cancelled && Array.isArray(list)) setNotifications(list.filter(isRequestNotification)); })
       .catch(() => {});
     return () => { cancelled = true; };
   }, [open, unread, currentUser?.id]);

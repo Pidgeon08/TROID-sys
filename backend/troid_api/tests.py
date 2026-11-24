@@ -493,6 +493,67 @@ class CollectionAreaBoundaryTests(TestCase):
         self.assertEqual(website_copy.read_bytes(), (Path(__file__).resolve().parent / 'data' / 'san_fernando_boundaries.json').read_bytes())
 
 
+class CollectionAreaNotificationTests(TestCase):
+    """Submitting, approving and archiving an area notify the other side, linked to the area."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.admin = make_user('admin')
+        self.barangay = make_user('barangay')
+        self.ngo = make_user('ngo')
+        self.elsewhere = User.objects.create(name='Catbangen', email='catbangen@example.com', password='x',
+                                             role='barangay', status='active', location='Catbangen',
+                                             session_token='catbangen-session')
+        User.objects.filter(pk__in=[self.barangay.pk, self.ngo.pk]).update(location='Poro')
+
+    def submit(self):
+        response = self.client.post('/api/collection-areas/', {
+            'name': 'Poro Shore', 'closed': True, 'color': '#1b4de4', 'points': around(*IN_PORO),
+        }, format='json', **session_header(self.barangay))
+        self.assertEqual(response.status_code, 201, response.content)
+        return CollectionArea.objects.get(area_id=response.json()['area_id'])
+
+    def test_cenro_is_told_when_a_barangay_submits_an_area(self):
+        area = self.submit()
+
+        notice = Notification.objects.get()
+        self.assertEqual((notice.recipient, notice.collection_area, notice.notif_type), (self.admin, area, 'area_submitted'))
+        listed = self.client.get('/api/notifications/', **session_header(self.admin)).json()
+        self.assertEqual((listed[0]['area_id'], listed[0]['request_id']), (area.area_id, None))
+
+    def test_the_barangays_accounts_are_told_when_cenro_decides(self):
+        for decision, data, notif_type in (('approve', {}, 'area_approved'), ('decline', {'reason': 'Overlaps Poro Shore'}, 'area_archived')):
+            with self.subTest(decision=decision):
+                Notification.objects.all().delete()
+                area = self.submit()
+                Notification.objects.all().delete()
+
+                response = self.client.post(f'/api/collection-areas/{area.area_id}/{decision}/', data, format='json',
+                                            **session_header(self.admin))
+
+                self.assertEqual(response.status_code, 200)
+                told = Notification.objects.filter(collection_area=area, notif_type=notif_type)
+                self.assertEqual(set(told.values_list('recipient', flat=True)), {self.barangay.pk, self.ngo.pk})
+                if decision == 'decline':
+                    self.assertIn('Overlaps Poro Shore', told.first().message)
+
+    def test_deleting_an_area_clears_its_notifications(self):
+        area = self.submit()
+
+        response = self.client.delete(f'/api/collection-areas/{area.area_id}/', **session_header(self.barangay))
+
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(Notification.objects.filter(is_read=False).exists())
+
+    def test_cenros_own_areas_notify_no_one(self):
+        response = self.client.post('/api/collection-areas/', {
+            'name': 'Poro Shore', 'barangay': 'Poro', 'closed': True, 'points': around(*IN_PORO),
+        }, format='json', **session_header(self.admin))
+
+        self.assertEqual(response.status_code, 201)
+        self.assertFalse(Notification.objects.exists())
+
+
 class CollectionAreaEditTests(TestCase):
     def setUp(self):
         self.client = APIClient()

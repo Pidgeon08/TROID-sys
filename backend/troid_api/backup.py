@@ -60,7 +60,7 @@ FEATURES = [
      'models': ['troid_api.detectionevent', 'troid_api.heatmapdata'], 'needs': ['fleet', 'requests']},
     {'key': 'notifications', 'label': 'Notifications',
      'description': 'The notifications sent to every account.',
-     'models': ['troid_api.notification'], 'needs': ['accounts', 'requests']},
+     'models': ['troid_api.notification'], 'needs': ['accounts', 'requests', 'collection_areas']},
     {'key': 'waste_records', 'label': 'Disposal & recycling records',
      'description': 'Landfill, recycling and segregation records.',
      'models': ['troid_api.landfillrecord', 'troid_api.recyclingrecord', 'troid_api.segregationrecord'],
