@@ -14,9 +14,10 @@ import {
 } from "lucide-react";
 import api from "../../services/api";
 import LetterAttachment from "../../components/LetterAttachment";
+import { AreaPreviewButton } from "../../components/AreaPreviewModal";
 import TrashReportSummary from "../../components/TrashReportSummary";
 import { Card } from "../../components/ui/Card";
-import NotificationBell from "../../components/NotificationBell";
+import { useMarkRequestRead } from "../../hooks/useUnreadNotifications";
 import { REQUEST_STATUS_STYLES, mapRequest, getDeploymentStatus, formatTime12h, toStatusLabel } from "../../constants/requests";
 import { MergedIntoCard, MergedRequestsCard } from "../../components/MergedRequestPanels";
 import { LIVE, useLiveVersion } from "../../hooks/useLiveUpdates";
@@ -32,6 +33,7 @@ export default function CityHallViewRequest() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { currentUser } = useOutletContext() || {};
+  useMarkRequestRead(currentUser?.id, id);
   const [request, setRequest] = useState(null);
   const [loading, setLoading] = useState(true);
   const [selectedPhotoIndex, setSelectedPhotoIndex] = useState(0);
@@ -119,7 +121,6 @@ export default function CityHallViewRequest() {
                   Back to Requests
                 </button>
                 <div className="flex items-center gap-2.5">
-                  <NotificationBell currentUser={currentUser} userType="mayorsoffice" requestId={id} />
                   <button className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
                     <FileText size={15} />
                     Download All
@@ -165,8 +166,7 @@ export default function CityHallViewRequest() {
                         <p className="font-semibold text-slate-800">{request.requestedBy?.name}</p>
                         <p className="text-slate-500 mt-0.5">{request.requestedBy?.role}</p>
                         <p className="text-slate-500">{request.requestedBy?.barangay}</p>
-                        <p className="text-slate-500 mt-1.5">Contact No. {request.requestedBy?.contact}</p>
-                        <p className="text-slate-500">{request.requestedBy?.email}</p>
+                        <p className="text-slate-500 mt-1.5">{request.requestedBy?.email}</p>
                       </div>
                     </div>
                   </Card>
@@ -194,7 +194,7 @@ export default function CityHallViewRequest() {
                     {request.collectionArea && (
                       <div className="mt-3 pt-3 border-t border-slate-100 text-sm">
                         <p className="text-xs text-slate-400 mb-0.5">Collection Area</p>
-                        <p className="font-medium text-slate-800">{request.collectionArea.name}</p>
+                        <AreaPreviewButton area={request.collectionArea} className="font-medium text-slate-800" />
                       </div>
                     )}
                   </Card>

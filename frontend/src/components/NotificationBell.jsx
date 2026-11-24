@@ -23,7 +23,7 @@ function timeAgo(dateString) {
   return `${days}d ago`;
 }
 
-const NotificationBell = ({ currentUser, userType, variant = "light", requestId = null }) => {
+const NotificationBell = ({ currentUser, userType, variant = "light" }) => {
   const unread = useUnreadNotifications(currentUser?.id);
   const unreadCount = unread.length;
   const muted = useSyncExternalStore(subscribeSoundMuted, isSoundMuted);
@@ -31,15 +31,6 @@ const NotificationBell = ({ currentUser, userType, variant = "light", requestId 
   const [open, setOpen] = useState(false);
   const panelRef = useRef(null);
   const navigate = useNavigate();
-
-  // Opening a request counts as seeing its notifications.
-  useEffect(() => {
-    const seen = unread.filter((n) => requestId && n.request_id === requestId);
-    if (seen.length === 0) return;
-    Promise.all(seen.map((n) => api.markNotificationRead(n.id)))
-      .then(notifyNotificationsChanged)
-      .catch(() => {});
-  }, [unread, requestId]);
 
   useEffect(() => {
     const handleClickOutside = (e) => {

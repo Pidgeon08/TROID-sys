@@ -21,7 +21,7 @@ export const USER_MANUALS = {
         { text: 'Check the "Trash Collected" and "Cleanup Drives Done" cards for the current month across all barangays. Hover over a graph to see the figure for each day.', shot: 'stat-cards' },
         { text: 'The Collective Hotspots map shows where TROID detected trash — switch between Today/Weekly/Monthly and switch the layer to Waste Density, Trash Collected, or Bot Pathing. Click View more to open the full heatmap, with custom date ranges.', shot: 'hotspots-map' },
         { text: 'The Priority Areas panel lists the collection areas collecting more per cleanup than last month, with their average bags per cleanup now and before. A collection area is a priority when its cleanups over the last 30 days brought in more bags on average than its cleanups in the 30 days before; the same or fewer is fine. It is worked out again every time, so an area stops being a priority once its average drops. Click "View areas" to see them on the Collection Areas page.', shot: 'priority-areas' },
-        { text: 'Most Trash Collected and Recent Activities give quick links into Reports and Requests for more detail. Click an activity to open its request, or the collection area named in it to open that area in Collection Areas.', shot: 'most-trash' },
+        { text: 'Most Trash Collected and Recent Activities give quick links into Reports and Requests for more detail. Click an activity to open its request, or the collection area named in it to see where the area is on a map without leaving the dashboard (with a link to open it in Collection Areas).', shot: 'most-trash' },
       ],
     },
     {
@@ -73,6 +73,7 @@ export const USER_MANUALS = {
         { text: 'Click "Send Request" to request a cleanup yourself. It is the same form barangays use: choose TROID Supported (pick the barangay and one of its approved collection areas) or Unsupported (pick the barangay and type the location), pick a date from the bot timetable (at least 7 days ahead) and a time, and attach the letter of request.', shot: 'send-request' },
         { text: 'Use the filter bar above the list: search by ID, requester, barangay or area; pick one or more statuses (each shows how many requests it has); filter by date submitted or preferred cleanup date (Today, Last/Next 7 or 30 days, This month, or a custom range); and narrow by cleanup type, barangay, collection area, requester, or whether an approved request is scheduled yet. Sort by submitted or preferred date. Remove a filter by clicking its chip, or click Clear all. Filters stay when you open a request and come back. Under the list, choose how many requests a page shows (Show … per page).', shot: 'filters' },
         { text: 'The letter of request is shown on the request page exactly as it was sent, and can be downloaded. PDF and Word (.docx) letters can be read there; older .doc files must be downloaded. Older requests sent without a file show what was typed instead, under "Notes from the request".', shot: 'letter' },
+        { text: 'On a request page, click the collection area\'s name under Location of Concern to see where it is on a map without leaving the page. Close the map with Close, Esc, or by clicking outside it; "Open in Collection Areas" goes to that area\'s page.', shot: 'area-preview' },
         { text: 'Before a TROID-supported cleanup starts, click "Change Area" to send it to another approved collection area, for example where the trash has drifted. A reason is required, and the requester is told where and why.', shot: 'change-area' },
         { text: 'Click "Merge" to fold other requests into the one you are viewing, so one cleanup covers them all. Only TROID-supported requests for the same collection area that have not started can be merged. If you change the main request\'s area, the merged requests move with it. Merged requests keep their own pages, show this request\'s status, schedule, history and trash report, and their requesters are told about every update. Their own deployment schedules are removed.', shot: 'merge' },
         { text: 'Click "Unmerge" on a merged request (or beside it in Merged Requests) to put it back where it was. Archiving the main request unmerges the rest.', shot: 'unmerge' },
@@ -193,7 +194,7 @@ export const USER_MANUALS = {
       steps: [
         'Pages update by themselves. When someone sends, approves or schedules a request, files a trash report, or changes an area or a robot, the page you have open shows it within a few seconds; there is no need to refresh.',
         { text: 'A red dot beside Requests in the sidebar means you have unread notifications, and a red dot in the list marks each request they are about.', shot: 'unread-dots' },
-        { text: 'Open a request and click the bell beside "Back to Requests" to see your notifications, newest first. Click one to open its request. Opening a request marks its notifications as read.', shot: 'bell' },
+        { text: 'Click the bell at the top of the Requests page to see your notifications, newest first. Click one to open its request. Opening a request marks its notifications as read.', shot: 'bell' },
         { text: 'A short chime plays when a new notification arrives, even if the tab is in the background (once, if you have several tabs open). Click "Sound on" at the top of the bell\'s list to turn it off, and "Sound off" to turn it back on. Browsers only play sound after you have clicked somewhere on the page.', shot: 'sound' },
       ],
     },
@@ -244,7 +245,7 @@ export const USER_MANUALS = {
       steps: [
         'Pages update by themselves. When someone sends, approves or schedules a request, files a trash report, or changes an area or a robot, the page you have open shows it within a few seconds; there is no need to refresh.',
         { text: 'A red dot beside Requests in the sidebar means you have unread notifications, and a red dot in the list marks each request they are about.', shot: 'unread-dots' },
-        { text: 'Open a request and click the bell beside "Back to Requests" to see your notifications, newest first. Click one to open its request. Opening a request marks its notifications as read.', shot: 'bell' },
+        { text: 'Click the bell at the top of the Requests page to see your notifications, newest first. Click one to open its request. Opening a request marks its notifications as read.', shot: 'bell' },
         { text: 'A short chime plays when a new notification arrives, even if the tab is in the background (once, if you have several tabs open). Click "Sound on" at the top of the bell\'s list to turn it off, and "Sound off" to turn it back on. Browsers only play sound after you have clicked somewhere on the page.', shot: 'sound' },
       ],
     },
@@ -274,7 +275,7 @@ export const USER_MANUALS = {
         { text: 'Check the "Trash Collected" and "Cleanup Drives Done" cards for the current month. Hover over a graph to see the figure for each day.', shot: 'stat-cards' },
         { text: 'The Waste Hotspots map shows where TROID detected trash in your barangay — switch between Today/Weekly/Monthly and switch the layer to Waste Density, Trash Collected, or Bot Pathing. Click View more to open the full heatmap, with custom date ranges.', shot: 'hotspots-map' },
         { text: 'The Priority Areas panel lists your collection areas that are collecting more per cleanup than last month. A collection area is a priority when its cleanups over the last 30 days brought in more bags on average than its cleanups in the 30 days before; the same or fewer is fine. It is worked out again every time, so an area stops being a priority once its average drops. Most Trash Collected ranks your collection areas by bags collected.', shot: 'priority-areas' },
-        { text: 'Recent Activities and Recent Requests list the latest requests for your barangay; click one to open the request, click the collection area named in an activity to see that area on the Collection Areas map, or click "View all" to go to My Requests.', shot: 'recent' },
+        { text: 'Recent Activities and Recent Requests list the latest requests for your barangay; click one to open the request, click the collection area named in an activity to see where it is on a map without leaving the dashboard, or click "View all" to go to Requests.', shot: 'recent' },
       ],
     },
     {
@@ -291,14 +292,16 @@ export const USER_MANUALS = {
     },
     {
       id: 'requests',
-      title: 'My Requests',
+      title: 'Requests',
       path: '/barangay/requests',
-      description: 'Track every cleanup request you\'ve submitted, from approval through completion.',
+      description: 'Submit cleanup requests and track every one, from approval through completion.',
       keywords: ['status', 'track', 'pending', 'completed', 'verified'],
       steps: [
+        { text: 'Open Requests in the sidebar. Click "Submit Request" at the top of the page to file a new one (see Submit Request); the bell beside it holds your notifications.', shot: 'submit-button' },
         { text: 'Use the filter bar to search your requests, pick one or more statuses, filter by date submitted or preferred cleanup date, and narrow by cleanup type or collection area. Sort by submitted or preferred date, and remove a filter by clicking its chip. Under the list, choose how many requests a page shows (Show … per page).', shot: 'filters' },
         { text: 'Click "View" on any request to see its full timeline, including the trash collection report once CENRO files it.', shot: 'view' },
         { text: 'When an approved cleanup is done, click "Mark as Finished" and fill in the required Trash Collection Report. The cleanup stays open until the report is filed. The Trash Collection Report follows the International Coastal Cleanup data card: the type of cleanup site (filled in from the collection area\'s water body when it has one), how many people worked and for how long, and the distance cleaned (optional); the pieces of each item collected (bags, plastic and glass bottles, cans, caps and lids, food wrappers and containers, straws, and the rest of the card, plus Other items), the bags filled and the weights; and, if any, entangled animals (alive or dead, and what they were caught in) and the most peculiar item found. Once filed, it shows on the request page under Trash Collection Report.', shot: 'finish' },
+        { text: 'On a request page, click the collection area\'s name under Location of Concern to see where it is on a map without leaving the page. Close the map with Close, Esc, or by clicking outside it; "Open in Collection Areas" goes to that area\'s page.', shot: 'area-preview' },
         { text: 'If CENRO merges your request into another, it shows "Merged". Its page then shows the other request\'s status, schedule and trash report, and you are notified of its updates.', shot: 'merged' },
         { text: 'A request still waiting for approval after 20 days can be resent from its page to remind the City Admin or CENRO.', shot: 'resend' },
       ],
@@ -310,12 +313,13 @@ export const USER_MANUALS = {
       description: 'File a new cleanup request for the City Admin and CENRO to review.',
       keywords: ['new request', 'submit', 'send request', 'cleanup'],
       steps: [
+        'Open Requests in the sidebar and click "Submit Request" at the top of the page.',
         { text: 'Choose the Cleanup Type. TROID Supported sends a TROID bot to one of your approved collection areas (the landmark is optional). Unsupported is a manual cleanup with no bot: type its location instead.', shot: 'cleanup-type' },
         { text: 'Pick a preferred date from the bot timetable and a time, and attach the letter of request.', shot: 'timetable' },
         { text: 'In the Review Request Overview, click "Preview" beside the letter to check it is the right file (PDF and .docx only).', shot: 'preview' },
         { text: 'Submit it; it first goes to the City Admin for approval, then to CENRO for scheduling.', shot: 'submit' },
         { text: 'If 20 days pass with no decision, open the request and click "Resend Request" to remind whoever it is waiting on. You can resend again 20 days later.', shot: 'resend' },
-        { text: 'Track its progress afterward in My Requests.', shot: 'track' },
+        { text: 'Track its progress afterward in Requests.', shot: 'track' },
       ],
     },
     {
@@ -340,8 +344,8 @@ export const USER_MANUALS = {
       keywords: ['notifications', 'bell', 'unread', 'sound', 'chime', 'mute', 'real time', 'live', 'refresh', 'alerts'],
       steps: [
         'Pages update by themselves. When someone sends, approves or schedules a request, files a trash report, or changes an area or a robot, the page you have open shows it within a few seconds; there is no need to refresh.',
-        { text: 'A red dot beside My Requests in the sidebar means you have unread notifications, and a red dot in the list marks each request they are about.', shot: 'unread-dots' },
-        { text: 'Open a request and click the bell beside "Back to Requests" to see your notifications, newest first. Click one to open its request. Opening a request marks its notifications as read.', shot: 'bell' },
+        { text: 'A red dot beside Requests in the sidebar means you have unread notifications, and a red dot in the list marks each request they are about.', shot: 'unread-dots' },
+        { text: 'Click the bell at the top of the Requests page to see your notifications, newest first. Click one to open its request. Opening a request marks its notifications as read.', shot: 'bell' },
         { text: 'A short chime plays when a new notification arrives, even if the tab is in the background (once, if you have several tabs open). Click "Sound on" at the top of the bell\'s list to turn it off, and "Sound off" to turn it back on. Browsers only play sound after you have clicked somewhere on the page.', shot: 'sound' },
       ],
     },

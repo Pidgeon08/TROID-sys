@@ -4,7 +4,7 @@ import { NavLink, useLocation } from 'react-router-dom';
 import { useUnreadNotifications } from '../hooks/useUnreadNotifications';
 import { UnreadDot } from './ui/UnreadDot';
 import seal from '../assets/seal.png';
-import { Home, Map, FileText, LogOut, Shield, Users, Bot, InboxIcon, Send, CalendarClock, MapPin, UserCog, Wrench, ChevronDown, LayoutGrid, ClipboardList } from 'lucide-react';
+import { Home, Map, FileText, LogOut, Shield, Users, Bot, InboxIcon, CalendarClock, MapPin, UserCog, Wrench, ChevronDown, LayoutGrid, ClipboardList } from 'lucide-react';
 
 const ITEM_PADDING = 'py-[clamp(0.3rem,1.1vh,0.75rem)]';
 
@@ -37,16 +37,14 @@ const navItems = {
   barangay: [
     { to: '/barangay/dashboard', icon: Home, label: 'Dashboard' },
     { to: '/barangay/areas', icon: MapPin, label: 'Collection Areas' },
-    { to: '/barangay/requests', icon: InboxIcon, label: 'My Requests', hasNotifications: true },
-    { to: '/barangay/request', icon: Send, label: 'Submit Request' },
+    { to: '/barangay/requests', icon: InboxIcon, label: 'Requests', hasNotifications: true, activeFor: /^\/barangay\/requests?(\/|$)/ },
     { to: '/barangay/heatmap', icon: Map, label: 'Bot Tracking' },
     { to: '/barangay/utilities', icon: Wrench, label: 'Utilities' },
   ],
   ngo: [
     { to: '/barangay/dashboard', icon: Home, label: 'Dashboard' },
     { to: '/barangay/areas', icon: MapPin, label: 'Collection Areas' },
-    { to: '/barangay/requests', icon: InboxIcon, label: 'My Requests', hasNotifications: true },
-    { to: '/barangay/request', icon: Send, label: 'Submit Request' },
+    { to: '/barangay/requests', icon: InboxIcon, label: 'Requests', hasNotifications: true, activeFor: /^\/barangay\/requests?(\/|$)/ },
     { to: '/barangay/heatmap', icon: Map, label: 'Bot Tracking' },
     { to: '/barangay/utilities', icon: Wrench, label: 'Utilities' },
   ],
@@ -84,6 +82,9 @@ const navItems = {
   const getNavLinkClass = (isActive) =>
     `flex items-center px-4 ${ITEM_PADDING} text-slate-300 hover:text-white hover:bg-white/5 rounded-xl transition-all duration-200 font-medium text-[15px] group ${isActive ? 'bg-[#1b4de4] text-white shadow-[0_4px_12px_rgba(27,77,228,0.25)]' : ''
     }`;
+
+  // An item can also be lit on other pages, e.g. the barangay's Requests on its Submit Request page.
+  const isAlsoActive = (item) => Boolean(item.activeFor?.test(location.pathname));
 
   const getIconClass = (isActive) =>
     `w-5 h-5 mr-3.5 transition-colors duration-200 ${isActive ? 'text-white' : 'text-slate-400 group-hover:text-white'
@@ -155,12 +156,12 @@ const navItems = {
                 <NavLink
                   to={item.to}
                   className={({ isActive }) =>
-                    `${getNavLinkClass(isActive)} transition-opacity duration-200 ${anyGroupOpen ? 'opacity-0 pointer-events-none' : 'opacity-100'}`
+                    `${getNavLinkClass(isActive || isAlsoActive(item))} transition-opacity duration-200 ${anyGroupOpen ? 'opacity-0 pointer-events-none' : 'opacity-100'}`
                   }
                 >
                   {({ isActive }) => (
                     <>
-                      <item.icon className={getIconClass(isActive)} />
+                      <item.icon className={getIconClass(isActive || isAlsoActive(item))} />
                       <span>{item.label}</span>
                       {item.hasNotifications && unreadCount > 0 && (
                         <UnreadDot className="ml-auto shadow-[0_0_8px_#ef4444]" />

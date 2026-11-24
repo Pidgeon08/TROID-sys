@@ -1,6 +1,7 @@
 // The pieces both dashboards are built from (CENRO's, and the barangay/NGO one), so they look
 // and behave the same: the month stat cards, the side panels, and their lists.
 import { Link, useNavigate } from 'react-router-dom';
+import { AreaPreviewButton } from './AreaPreviewModal';
 import { ChevronRight, MapPin } from 'lucide-react';
 import MonthSparkline from './MonthSparkline';
 import { REQUEST_STATUS_STYLES, requestArea, toStatusLabel } from '../constants/requests';
@@ -82,7 +83,8 @@ const LINK = 'font-semibold text-slate-900 hover:text-[#1b4de4] hover:underline 
 
 /**
  * The latest requests, each one a link to what it is about: the row and its request ID open
- * the request; its collection area, when it has one, opens that area (`areaPath`).
+ * the request; its collection area, when it has one, shows where it is on a map, with a link to
+ * its Collection Areas page (`areaPath`).
  */
 export function RecentActivityList({ requests, requestPath, areaPath }) {
   const navigate = useNavigate();
@@ -106,10 +108,10 @@ export function RecentActivityList({ requests, requestPath, areaPath }) {
                 Request{' '}
                 <Link to={requestPath(req)} onClick={(e) => e.stopPropagation()} className={LINK}>{req.request_id}</Link>
                 {' '}submitted for{' '}
-                {area && areaPath ? (
-                  <Link to={areaPath(area)} onClick={(e) => e.stopPropagation()} className={LINK} title={`Open ${area.name} in Collection Areas`}>
+                {area ? (
+                  <AreaPreviewButton area={{ areaId: area.area_id, name: area.name }} openPath={areaPath?.(area)} className={LINK}>
                     {place}
-                  </Link>
+                  </AreaPreviewButton>
                 ) : place}
               </p>
               <span className="text-[10px] font-semibold text-slate-400 mt-1 block">{shortTime(req.date_submitted)}</span>

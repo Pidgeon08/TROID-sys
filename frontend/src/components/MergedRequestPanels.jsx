@@ -2,6 +2,13 @@ import { Link } from "react-router-dom";
 import { GitMerge, Undo2 } from "lucide-react";
 import { Card } from "./ui/Card";
 import TrashReportSummary from "./TrashReportSummary";
+import { AreaPreviewButton } from "./AreaPreviewModal";
+
+// Where each side keeps its Collection Areas page; the City Admin has none.
+const areaPagePath = (routePrefix, area) => ({
+  admin: `/admin/collection-areas?area=${encodeURIComponent(area.areaId)}`,
+  barangay: `/barangay/areas?area=${encodeURIComponent(area.areaId)}`,
+}[routePrefix]);
 import { REQUEST_STATUS_STYLES, formatDate, formatTime12h, getDeploymentStatus } from "../constants/requests";
 
 const Row = ({ label, value }) => (
@@ -57,7 +64,9 @@ export function MergedIntoCard({ mergedInto, mergedAt, schedule, routePrefix, on
         {!schedule?.day && main.preferredDate && (
           <Row label="Preferred Date/Time" value={`${formatDate(`${main.preferredDate}T00:00:00`)}${main.preferredTime ? ` · ${formatTime12h(main.preferredTime)}` : ""}`} />
         )}
-        {main.collectionArea && <Row label="Collection Area" value={main.collectionArea.name} />}
+        {main.collectionArea && (
+          <Row label="Collection Area" value={<AreaPreviewButton area={main.collectionArea} openPath={areaPagePath(routePrefix, main.collectionArea)} />} />
+        )}
         {main.cleanupType === "unsupported" && main.locationName && <Row label="Location" value={main.locationName} />}
         <Row label="Requested by" value={[main.requestedByName, main.barangay].filter(Boolean).join(" · ") || "—"} />
         {main.sessionCompletedAt && <Row label="Cleanup finished" value={formatDate(main.sessionCompletedAt)} />}

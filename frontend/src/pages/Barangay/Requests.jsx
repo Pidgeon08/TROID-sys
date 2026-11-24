@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { FileText, Clock, CheckCircle2, Eye, MapPin, Recycle } from "lucide-react";
+import { FileText, Clock, CheckCircle2, Eye, MapPin, Plus, Recycle } from "lucide-react";
 import api from "../../services/api";
 import { useUnreadNotifications } from "../../hooks/useUnreadNotifications";
 import { UnreadDot } from "../../components/ui/UnreadDot";
@@ -8,6 +8,7 @@ import { formatDate, formatTime12h, mapRequest } from "../../constants/requests"
 import { SummaryCard } from "../../components/ui/SummaryCard";
 import { Badge } from "../../components/ui/Badge";
 import { Pagination } from "../../components/ui/Pagination";
+import NotificationBell from "../../components/NotificationBell";
 import { pageKeepingPlace, usePageSize } from "../../hooks/usePageSize";
 import RequestFilters from "../../components/RequestFilters";
 import { useRequestFilters } from "../../hooks/useRequestFilters";
@@ -74,8 +75,18 @@ export default function BarangayRequests({ currentUser }) {
       <>
       <header className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-[28px] font-bold text-slate-900 tracking-tight leading-none">My Requests</h1>
-          <p className="text-slate-500 text-sm mt-1.5 font-medium">Track all submitted cleanup requests and their current status.</p>
+          <h1 className="text-[28px] font-bold text-slate-900 tracking-tight leading-none">Requests</h1>
+          <p className="text-slate-500 text-sm mt-1.5 font-medium">Submit cleanup requests and track their status.</p>
+        </div>
+        <div className="flex items-center gap-2.5">
+          <NotificationBell currentUser={currentUser} userType={currentUser?.role === "ngo" ? "ngo" : "barangay"} />
+          <button
+            onClick={() => navigate("/barangay/request")}
+            className="flex items-center gap-2 rounded-lg bg-blue-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-blue-700"
+          >
+            <Plus size={15} />
+            Submit Request
+          </button>
         </div>
       </header>
 

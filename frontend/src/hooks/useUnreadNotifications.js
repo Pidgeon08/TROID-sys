@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import api from "../services/api";
 import { LIVE, subscribeLive } from "./useLiveUpdates";
 import { chimeFor, markHeard } from "../utils/notificationSound";
@@ -82,4 +82,16 @@ const getNothing = () => EMPTY;
 export function useUnreadNotifications(userId) {
   const store = userId ? storeFor(userId) : null;
   return useSyncExternalStore(store ? store.subscribe : subscribeNothing, store ? store.getSnapshot : getNothing);
+}
+
+/** Opening a request counts as seeing its notifications: they are marked read. */
+export function useMarkRequestRead(userId, requestId) {
+  const unread = useUnreadNotifications(userId);
+  useEffect(() => {
+    const seen = unread.filter((n) => requestId && n.request_id === requestId);
+    if (seen.length === 0) return;
+    Promise.all(seen.map((n) => api.markNotificationRead(n.id)))
+      .then(notifyNotificationsChanged)
+      .catch(() => {});
+  }, [unread, requestId]);
 }

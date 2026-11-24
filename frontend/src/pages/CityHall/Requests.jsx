@@ -15,6 +15,7 @@ import { UnreadDot } from "../../components/ui/UnreadDot";
 import { formatDate, formatTime12h, mapRequest } from "../../constants/requests";
 import { SummaryCard } from "../../components/ui/SummaryCard";
 import { Pagination } from "../../components/ui/Pagination";
+import NotificationBell from "../../components/NotificationBell";
 import { pageKeepingPlace, usePageSize } from "../../hooks/usePageSize";
 import { Badge } from "../../components/ui/Badge";
 import RequestFilters from "../../components/RequestFilters";
@@ -85,6 +86,7 @@ export default function Requests() {
           </div>
           <p className="text-slate-500 text-sm mt-1.5 font-medium">Review and approve or decline barangay requests for TROID bot deployment.</p>
         </div>
+        <NotificationBell currentUser={currentUser} userType="mayorsoffice" />
       </header>
 
       <div className="mb-6 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">

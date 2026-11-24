@@ -9,6 +9,7 @@ import { filterRequests, sortRequests } from "../../utils/requestFilters";
 import { Badge } from "../../components/ui/Badge";
 import { Card } from "../../components/ui/Card";
 import { Pagination } from "../../components/ui/Pagination";
+import NotificationBell from "../../components/NotificationBell";
 import { pageKeepingPlace, usePageSize } from "../../hooks/usePageSize";
 import { SummaryCard } from "../../components/ui/SummaryCard";
 import { EmptyState } from "../../components/ui/EmptyState";
@@ -109,6 +110,7 @@ export default function Requests({ userRole = "admin" }) {
           <p className="text-slate-500 text-sm mt-1.5 font-medium">View TROID bot deployment requests from barangays. Status updates will appear here.</p>
         </div>
         <div className="flex items-center gap-2.5">
+          <NotificationBell currentUser={currentUser} userType="admin" />
           <button
             onClick={() => navigate("/admin/request/send-request")}
             className="flex items-center gap-2 rounded-lg bg-blue-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-blue-700"

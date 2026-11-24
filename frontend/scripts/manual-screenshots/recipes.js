@@ -122,6 +122,13 @@ const SAMPLE_TROID_COUNT = {
   'Other items': 6,
 };
 
+// Opens the map preview of the request's collection area, and waits for the map.
+async function showAreaPreview(page) {
+  await page.getByTitle(/^Show where/).first().click();
+  await page.locator('[role=dialog] .leaflet-container').waitFor({ timeout: 10000 });
+  await settle(page, 1500);
+}
+
 // The request IDs listed on the page, in order.
 async function requestIdsOnPage(page) {
   const found = (await page.locator('main').innerText()).match(/REQ-\d+/g) || [];
@@ -184,7 +191,8 @@ function notificationRecipes(listPath, kind) {
   const openBell = async (p) => {
     const ids = await requestIdsOnPage(p);
     await fakeNotifications(p, kind, ids.slice(1, 4));
-    await openFirstRequest(listPath, '')(p);
+    await p.reload();
+    await settle(p, 1000);
     await p.getByRole('button', { name: 'Notifications' }).first().click();
     await settle(p, 500);
   };
@@ -290,6 +298,10 @@ export const RECIPES = {
       review: {
         run: openFirstRequest('/admin/requests', 'status=Pending Admin Approval'),
         outline: (p) => card(p, 'Decision'),
+      },
+      'area-preview': {
+        run: async (p) => { await openFirstRequest('/admin/requests', 'status=Approved&type=troid_supported')(p); await showAreaPreview(p); },
+        outline: (p) => p.getByRole('dialog'),
       },
       'troid-counted': {
         run: async (p) => {
@@ -548,6 +560,11 @@ export const RECIPES = {
         outline: (p) => button(p, 'All statuses'),
       },
       view: { outline: (p) => button(p, /^View$/) },
+      'submit-button': { outline: (p) => [p.getByRole('button', { name: 'Notifications' }), button(p, 'Submit Request')] },
+      'area-preview': {
+        run: async (p) => { await openFirstRequest('/barangay/requests', 'status=Approved&type=troid_supported')(p); await showAreaPreview(p); },
+        outline: (p) => p.getByRole('dialog'),
+      },
       finish: {
         run: openFirstRequest('/barangay/requests', 'status=Approved'),
         outline: (p) => button(p, /Mark as Finished/),
@@ -575,7 +592,7 @@ export const RECIPES = {
         run: openFirstRequest('/barangay/requests', 'status=Pending City Admin Approval,Pending Admin Approval'),
         outline: waitingCard,
       },
-      track: { outline: (p) => p.getByRole('link', { name: 'My Requests' }) },
+      track: { outline: (p) => p.locator('aside').getByRole('link', { name: 'Requests' }) },
     },
     heatmap: {
       filters: {
