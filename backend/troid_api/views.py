@@ -36,7 +36,8 @@ from .serializers import (
     BoatSerializer, UserSerializer, OperatorSerializer, RequestSerializer,
     DeploymentScheduleSerializer, LandfillRecordSerializer, RecyclingRecordSerializer,
     SegregationRecordSerializer, AuditLogSerializer, HeatmapDataSerializer, LoginSerializer,
-    CollectionAreaSerializer, NotificationSerializer, TrashReportSerializer, LetterUploadSerializer
+    CollectionAreaSerializer, NotificationSerializer, TrashReportSerializer, LetterUploadSerializer,
+    TRASH_REPORT_FIELDS,
 )
 from . import backup, boundaries, maintenance
 from .authentication import INACTIVE_STATUSES, CompanionTokenAuthentication, is_app_operator
@@ -1459,6 +1460,8 @@ class RequestViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
         req.non_usable_kg = report['non_usable_kg']
         req.recyclable_kg = report['recyclable_kg']
         req.trash_categories = report['trash_categories']
+        for field in TRASH_REPORT_FIELDS:
+            setattr(req, field, report[field])
 
         req.status = 'completed'
         req.save()

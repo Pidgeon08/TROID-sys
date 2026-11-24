@@ -1,7 +1,8 @@
 import { Link } from "react-router-dom";
 import { GitMerge, Undo2 } from "lucide-react";
 import { Card } from "./ui/Card";
-import { REQUEST_STATUS_STYLES, TRASH_CATEGORIES, formatDate, formatTime12h, getDeploymentStatus } from "../constants/requests";
+import TrashReportSummary from "./TrashReportSummary";
+import { REQUEST_STATUS_STYLES, formatDate, formatTime12h, getDeploymentStatus } from "../constants/requests";
 
 const Row = ({ label, value }) => (
   <div className="flex items-start justify-between gap-3 py-1.5 text-sm">
@@ -65,20 +66,7 @@ export function MergedIntoCard({ mergedInto, mergedAt, schedule, routePrefix, on
       {reported && (
         <div className="mt-4 rounded-lg border border-emerald-100 bg-emerald-50/60 p-3">
           <p className="text-xs font-semibold text-emerald-800 mb-2">Trash collected</p>
-          <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-            <span className="text-slate-500">Bags</span><span className="text-right font-medium text-slate-800">{main.bags}</span>
-            <span className="text-slate-500">Total weight</span><span className="text-right font-medium text-slate-800">{main.weightKg} kg</span>
-            <span className="text-slate-500">Non-usable</span><span className="text-right font-medium text-slate-800">{main.nonUsableKg} kg</span>
-            <span className="text-slate-500">Recyclable</span><span className="text-right font-medium text-slate-800">{main.recyclableKg} kg</span>
-          </div>
-          <div className="mt-2 pt-2 border-t border-emerald-100 grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-            {TRASH_CATEGORIES.map((category) => (
-              <div key={category} className="contents">
-                <span className="text-slate-500">{category}</span>
-                <span className="text-right font-medium text-slate-800">{main.trashCategories[category] ?? 0}</span>
-              </div>
-            ))}
-          </div>
+          <TrashReportSummary report={main} />
           {main.verifiedAt && <p className="mt-2 text-[11px] text-emerald-700">Verified by CENRO on {formatDate(main.verifiedAt)}</p>}
         </div>
       )}

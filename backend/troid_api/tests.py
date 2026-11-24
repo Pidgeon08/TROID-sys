@@ -12,11 +12,12 @@ import requests
 from django.conf import settings
 from django.contrib.auth.hashers import check_password
 from django.core.cache import cache
-from django.test import TestCase, override_settings
+from django.test import SimpleTestCase, TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from . import backup, bot_auth, live, mqtt_client, views
+from . import backup, bot_auth, drives, live, mqtt_client, views
+from .drives import TRASH_ITEMS
 from .models import (
     AuditLog, Boat, CollectionArea, DeploymentSchedule, DetectionEvent, LetterFile, Notification, Operator,
     Request, StatusHistory, SystemPause, User,
@@ -926,11 +927,14 @@ class TrashReportTests(TestCase):
     """Barangay and CENRO can't finish a cleanup without the collected-garbage figures."""
 
     REPORT = {
+        'site_type': 'river',
+        'people_count': 6,
+        'hours_spent': 2.5,
         'bags': 4,
         'weight_kg': 12.5,
         'non_usable_kg': 5.5,
         'recyclable_kg': 7,
-        'trash_categories': {'Plastic': 3, 'Metal': 1},
+        'trash_categories': {'Beverage bottles (plastic)': 3, 'Beverage cans': 1},
         'notes': ' Near the bridge ',
     }
 
@@ -959,14 +963,19 @@ class TrashReportTests(TestCase):
                 self.assertEqual(req.status, 'completed')
                 self.assertIsNotNone(req.session_completed_at)
                 self.assertEqual((req.bags, req.weight_kg, req.non_usable_kg, req.recyclable_kg), (4, 12.5, 5.5, 7))
-                self.assertEqual(req.trash_categories, {'Plastic': 3, 'Metal': 1})
+                self.assertEqual((req.site_type, req.people_count, req.hours_spent, req.distance_km), ('river', 6, 2.5, None))
+                # Every item on the data card is kept, those left out as 0.
+                self.assertEqual(req.trash_categories, {
+                    item: {'Beverage bottles (plastic)': 3, 'Beverage cans': 1}.get(item, 0) for item in TRASH_ITEMS
+                })
                 self.assertEqual(
                     list(req.status_history.order_by('id').values_list('label', 'details')),
                     [('Session Completed by CENRO', ''), ('Trash Report Filed by CENRO', 'Near the bridge')],
                 )
 
     def test_each_figure_is_mandatory(self):
-        for field in ('bags', 'weight_kg', 'non_usable_kg', 'recyclable_kg', 'trash_categories'):
+        for field in ('site_type', 'people_count', 'hours_spent', 'bags', 'weight_kg', 'non_usable_kg',
+                      'recyclable_kg', 'trash_categories'):
             with self.subTest(field=field):
                 data = {k: v for k, v in self.REPORT.items() if k != field}
 
@@ -981,7 +990,10 @@ class TrashReportTests(TestCase):
     def test_invalid_figures_are_rejected(self):
         for field, value in (
             ('bags', -1), ('weight_kg', -0.1), ('weight_kg', ''), ('recyclable_kg', None),
-            ('trash_categories', {}), ('trash_categories', {'Plastic': 'many'}),
+            ('trash_categories', {'Plastic': 3}), ('trash_categories', {'Balloons': 'many'}),
+            ('site_type', 'underwater'), ('people_count', 0), ('hours_spent', -1), ('distance_km', -2),
+            ('entangled_animals', [{'animal': 'Turtle', 'condition': 'sleeping'}]),
+            ('entangled_animals', [{'condition': 'alive'}]),
         ):
             with self.subTest(field=field, value=value):
                 response = self.submit({**self.REPORT, field: value})
@@ -990,11 +1002,29 @@ class TrashReportTests(TestCase):
 
     def test_zero_is_a_valid_answer(self):
         response = self.submit({
+            'site_type': 'shoreline', 'people_count': 1, 'hours_spent': 0,
             'bags': 0, 'weight_kg': 0, 'non_usable_kg': 0, 'recyclable_kg': 0,
-            'trash_categories': {'Plastic': 0},
+            'trash_categories': {},
         })
 
         self.assertEqual(response.status_code, 200)
+
+    def test_the_optional_parts_of_the_data_card_are_kept(self):
+        animals = [
+            {'animal': 'Sea turtle', 'condition': 'alive', 'entangled_in': 'Fishing line'},
+            {'animal': 'Gull', 'condition': 'dead', 'entangled_in': ''},
+        ]
+
+        response = self.submit({**self.REPORT, 'distance_km': 1.2, 'entangled_animals': animals,
+                                'peculiar_item': 'A bowling ball'})
+
+        self.assertEqual(response.status_code, 200)
+        self.req.refresh_from_db()
+        self.assertEqual((self.req.distance_km, self.req.peculiar_item), (1.2, 'A bowling ball'))
+        self.assertEqual(self.req.entangled_animals, animals)
+        shared = self.client.get(f'/api/requests/{self.req.request_id}/', **session_header(self.barangay)).json()
+        self.assertEqual(shared['entangled_animals'], animals)
+        self.assertEqual(shared['people_count'], 6)
 
     def test_sessions_finished_before_this_rule_can_still_file_their_report(self):
         finished_at = timezone.now()
@@ -2469,9 +2499,10 @@ class CleanupDriveTests(TestCase):
 
         self.assertEqual(DetectionEvent.objects.get().request, self.req)
 
-    def test_trash_report_is_pre_filled_with_the_report_categories(self, _):
+    def test_trash_report_is_pre_filled_with_the_data_card_items(self, _):
         self.start()
-        for label in ('Plastic', 'Plastic', 'Paper', 'Organic', 'Others', 'Metal', 'Glass'):
+        for label in ('Clear plastic bottle', 'Other plastic bottle', 'Drink can', 'Plastic bottle cap',
+                      'Plastic film', 'Glass bottle', 'Cigarette'):
             self.detect(label)
         admin = make_user('admin')
 
@@ -2480,8 +2511,8 @@ class CleanupDriveTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {
             'troid_assisted': True,
-            'categories': {'Plastic': 2, 'Paper/Cardboard': 1, 'Organic/Biodegradable': 1, 'Other': 1,
-                           'Metal': 1, 'Glass': 1},
+            'categories': {'Beverage bottles (plastic)': 2, 'Beverage cans': 1, 'Caps, lids': 1,
+                           'Food wrappers, containers': 1, 'Beverage bottles (glass)': 1, 'Other items': 1},
             'total': 7,
         })
 
@@ -2496,8 +2527,9 @@ class CleanupDriveTests(TestCase):
     def test_filing_the_report_closes_the_drive_without_a_verification_step(self, _):
         self.start()
         admin = make_user('admin')
-        report = {'bags': 1, 'weight_kg': 2, 'non_usable_kg': 1, 'recyclable_kg': 1,
-                  'trash_categories': {'Plastic': 9}, 'notes': ''}
+        report = {'site_type': 'shoreline', 'people_count': 2, 'hours_spent': 3,
+                  'bags': 1, 'weight_kg': 2, 'non_usable_kg': 1, 'recyclable_kg': 1,
+                  'trash_categories': {'Beverage bottles (plastic)': 9}, 'notes': ''}
 
         response = self.client.post(f'/api/requests/{self.req.request_id}/submit_trash_report/', report,
                                     format='json', **session_header(admin))
@@ -2505,8 +2537,33 @@ class CleanupDriveTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.req.refresh_from_db()
         self.assertEqual(self.req.status, 'completed')
-        self.assertEqual(self.req.trash_categories, {'Plastic': 9})  # The edited figure is what's kept.
+        self.assertEqual(self.req.trash_categories['Beverage bottles (plastic)'], 9)  # The edited figure is kept.
         self.assertIsNotNone(self.req.session_completed_at)
+
+
+class TrashItemMappingTests(SimpleTestCase):
+    """The robot's class names are counted as items of the Coastal Cleanup data card."""
+
+    def test_class_names_map_to_data_card_items(self):
+        for label, item in (
+            ('Clear plastic bottle', 'Beverage bottles (plastic)'),
+            ('Glass jar', 'Beverage bottles (glass)'),
+            ('Drink can', 'Beverage cans'),
+            ('Food Can', 'Food wrappers, containers'),
+            ('Metal bottle cap', 'Caps, lids'),
+            ('Single-use carrier bag', 'Bags (paper or plastic)'),
+            ('Disposable plastic cup', 'Cups, plates, forks, knives, spoons'),
+            ('Pop tab', 'Pull tabs'),
+            ('Six pack rings', '6-pack holders'),
+            ('Plastic straw', 'Straws, stirrers'),
+            ('Shoe', 'Clothing, shoes'),
+            ('Crisp packet', 'Food wrappers, containers'),
+            ('Balloons', 'Balloons'),
+            ('Cigarette', 'Other items'),
+            ('Scrap metal', 'Other items'),
+        ):
+            with self.subTest(label=label):
+                self.assertEqual(drives.report_category(label), item)
 
 
 def requester(name, email, role='barangay'):
@@ -2907,8 +2964,9 @@ class PriorityAreaTests(TestCase):
         req = Request.objects.create(barangay='Poro', collection_area=self.poro, status='approved', bot_id=boat)
 
         response = self.client.post(f'/api/requests/{req.request_id}/submit_trash_report/', {
+            'site_type': 'shoreline', 'people_count': 8, 'hours_spent': 4,
             'bags': 90, 'weight_kg': 300, 'non_usable_kg': 100, 'recyclable_kg': 200,
-            'trash_categories': {'Plastic': 90},
+            'trash_categories': {'Beverage bottles (plastic)': 90},
         }, format='json', **session_header(self.admin))
 
         self.assertEqual(response.status_code, 200)

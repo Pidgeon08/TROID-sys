@@ -18,22 +18,16 @@ import {
 } from "lucide-react";
 import api from "../../services/api";
 import LetterAttachment from "../../components/LetterAttachment";
+import TrashReportForm from "../../components/TrashReportForm";
+import TrashReportSummary from "../../components/TrashReportSummary";
 import { logAudit } from "../../services/auditLog";
 import { Card } from "../../components/ui/Card";
 import NotificationBell from "../../components/NotificationBell";
-import { REQUEST_STATUS_STYLES, TRASH_CATEGORIES, mapRequest, fillTroidCounts, getDeploymentStatus, formatTime12h, toStatusLabel, formatDate } from "../../constants/requests";
+import { REQUEST_STATUS_STYLES, mapRequest, getDeploymentStatus, formatTime12h, toStatusLabel, formatDate } from "../../constants/requests";
 import { MergedIntoCard, MergedRequestsCard } from "../../components/MergedRequestPanels";
 import { LIVE, useLiveVersion } from "../../hooks/useLiveUpdates";
 
 const AWAITING_DECISION = { "Pending City Admin Approval": "City Admin", "Pending Admin Approval": "CENRO" };
-
-function emptyCategoryValues() {
-  return TRASH_CATEGORIES.reduce((acc, cat) => ({ ...acc, [cat]: "" }), {});
-}
-
-function stripLeadingZero(raw) {
-  return raw.replace(/^0+(?=\d)/, "");
-}
 
 const Field = ({ label, value }) => (
   <div className="flex items-center justify-between py-2 text-sm">
@@ -53,15 +47,6 @@ export default function BarangayViewRequest() {
   const [schedule, setSchedule] = useState(null);
   const [reasonStep, setReasonStep] = useState(null);
   const [showTrashReport, setShowTrashReport] = useState(false);
-  const [trashCategoryValues, setTrashCategoryValues] = useState(emptyCategoryValues);
-  const [trashBags, setTrashBags] = useState("");
-  const [trashWeightKg, setTrashWeightKg] = useState("");
-  const [trashNonUsableKg, setTrashNonUsableKg] = useState("");
-  const [trashRecyclableKg, setTrashRecyclableKg] = useState("");
-  const [trashNotes, setTrashNotes] = useState("");
-  const [submittingTrashReport, setSubmittingTrashReport] = useState(false);
-  // What the robot counted, per category; null when it wasn't a TROID-assisted cleanup.
-  const [troidCount, setTroidCount] = useState(null);
   const [resending, setResending] = useState(false);
 
   // Loaded again when this data changes anywhere, so the page stays current without a reload.
@@ -109,61 +94,31 @@ export default function BarangayViewRequest() {
     }
   };
 
-  const openTrashReport = () => {
-    setTrashCategoryValues(emptyCategoryValues());
-    setTrashBags("");
-    setTrashWeightKg("");
-    setTrashNonUsableKg("");
-    setTrashRecyclableKg("");
-    setTrashNotes("");
-    setShowTrashReport(true);
-    setTroidCount(null);
-    api.troidCount(request.id)
-      .then((res) => {
-        if (!res.troid_assisted) return;
-        setTroidCount(res.categories);
-        setTrashCategoryValues((prev) => fillTroidCounts(prev, res.categories));
-      })
-      .catch((err) => console.error("Failed to load TROID counts:", err));
-  };
+  const openTrashReport = () => setShowTrashReport(true);
 
-  const handleSubmitTrashReport = async () => {
-    const trashCategoriesPayload = Object.fromEntries(
-      Object.entries(trashCategoryValues).map(([cat, v]) => [cat, Number(v)])
-    );
-    setSubmittingTrashReport(true);
-    try {
-      const res = await api.submitTrashReport(request.id, {
-        bags: Number(trashBags),
-        weight_kg: Number(trashWeightKg),
-        non_usable_kg: Number(trashNonUsableKg),
-        recyclable_kg: Number(trashRecyclableKg),
-        trash_categories: trashCategoriesPayload,
-        notes: trashNotes.trim(),
-      });
-      const newStatus = toStatusLabel(res.status);
-      setRequest((prev) => ({
-        ...prev,
-        status: newStatus,
-        bags: Number(trashBags),
-        weightKg: Number(trashWeightKg),
-        nonUsableKg: Number(trashNonUsableKg),
-        recyclableKg: Number(trashRecyclableKg),
-        trashCategories: trashCategoriesPayload,
-      }));
-      logAudit({
-        currentUser,
-        action: "Trash report filed",
-        module: "Requests",
-        details: `${request.id} (${request.location?.barangay || "unknown zone"}) trash report filed by Barangay`,
-      });
-      setShowTrashReport(false);
-    } catch (err) {
-      console.error("Failed to submit trash report:", err);
-      alert("Failed to submit trash report. Please try again.");
-    } finally {
-      setSubmittingTrashReport(false);
-    }
+  const handleTrashReportFiled = (report, res) => {
+    setRequest((prev) => ({
+      ...prev,
+      status: toStatusLabel(res.status),
+      bags: report.bags,
+      weightKg: report.weight_kg,
+      nonUsableKg: report.non_usable_kg,
+      recyclableKg: report.recyclable_kg,
+      trashCategories: report.trash_categories,
+      siteType: report.site_type,
+      peopleCount: report.people_count,
+      hoursSpent: report.hours_spent,
+      distanceKm: report.distance_km,
+      entangledAnimals: report.entangled_animals,
+      peculiarItem: report.peculiar_item,
+    }));
+    logAudit({
+      currentUser,
+      action: "Trash report filed",
+      module: "Requests",
+      details: `${request.id} (${request.location?.barangay || "unknown zone"}) trash report filed by Barangay`,
+    });
+    setShowTrashReport(false);
   };
 
   if (loading) {
@@ -432,6 +387,12 @@ export default function BarangayViewRequest() {
             )}
           </Card>
 
+          {Object.keys(request.trashCategories || {}).length > 0 && (
+            <Card title="Trash Collection Report">
+              <TrashReportSummary report={request} />
+            </Card>
+          )}
+
           <Card title="Status History">
             <div className="relative pl-5">
               <div className="absolute left-[5px] top-1.5 bottom-1.5 w-px bg-slate-200" />
@@ -487,125 +448,8 @@ export default function BarangayViewRequest() {
         </div>
       </div>
 
-      {showTrashReport && createPortal(
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 p-4">
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              handleSubmitTrashReport();
-            }}
-            className="w-full max-w-lg bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden max-h-[90vh] flex flex-col"
-          >
-            <div className="p-6 border-b border-slate-100">
-              <h3 className="text-lg font-bold text-slate-900">Trash Collection Report</h3>
-            </div>
-            <div className="px-6 pt-4 space-y-4 overflow-y-auto">
-              <div>
-                <p className="mb-1.5 text-xs font-semibold text-slate-500">Trash by category</p>
-                <div className="grid grid-cols-2 gap-3">
-                  {TRASH_CATEGORIES.map((cat) => (
-                    <div key={cat}>
-                      <label className="mb-1 flex flex-wrap items-center justify-between gap-x-2 text-[11px] text-slate-500">
-                        <span>{cat}</span>
-                        {troidCount && (
-                          <span className="font-semibold text-sky-700">TROID counted: {troidCount[cat] || 0}</span>
-                        )}
-                      </label>
-                      <input
-                        type="number"
-                        min="0"
-                        required
-                        value={trashCategoryValues[cat]}
-                        onChange={(e) => {
-                          const raw = stripLeadingZero(e.target.value);
-                          setTrashCategoryValues((prev) => ({ ...prev, [cat]: raw }));
-                        }}
-                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/20"
-                      />
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="mb-1.5 block text-xs font-semibold text-slate-500">Total Bags</label>
-                  <input
-                    type="number"
-                    min="0"
-                    required
-                    value={trashBags}
-                    onChange={(e) => setTrashBags(stripLeadingZero(e.target.value))}
-                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/20"
-                  />
-                </div>
-                <div>
-                  <label className="mb-1.5 block text-xs font-semibold text-slate-500">Total Weight (kg)</label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.1"
-                    required
-                    value={trashWeightKg}
-                    onChange={(e) => setTrashWeightKg(stripLeadingZero(e.target.value))}
-                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/20"
-                  />
-                </div>
-                <div>
-                  <label className="mb-1.5 block text-xs font-semibold text-slate-500">Non-usable (kg)</label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.1"
-                    required
-                    value={trashNonUsableKg}
-                    onChange={(e) => setTrashNonUsableKg(stripLeadingZero(e.target.value))}
-                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/20"
-                  />
-                </div>
-                <div>
-                  <label className="mb-1.5 block text-xs font-semibold text-slate-500">Recyclable (kg)</label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.1"
-                    required
-                    value={trashRecyclableKg}
-                    onChange={(e) => setTrashRecyclableKg(stripLeadingZero(e.target.value))}
-                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/20"
-                  />
-                </div>
-              </div>
-              <div>
-                <label className="mb-1.5 block text-xs font-semibold text-slate-500">Notes (optional)</label>
-                <textarea
-                  value={trashNotes}
-                  onChange={(e) => setTrashNotes(e.target.value)}
-                  rows={3}
-                  placeholder="Any additional observations..."
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/20"
-                />
-              </div>
-            </div>
-            <div className="p-6 flex gap-3 border-t border-slate-100">
-              <button
-                type="button"
-                onClick={() => setShowTrashReport(false)}
-                disabled={submittingTrashReport}
-                className="flex-1 rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors disabled:opacity-50"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={submittingTrashReport}
-                className="flex-1 rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-emerald-700 transition-colors disabled:opacity-50"
-              >
-                {submittingTrashReport ? "Submitting..." : "Submit Report"}
-              </button>
-            </div>
-          </form>
-        </div>,
-        document.body
+      {showTrashReport && (
+        <TrashReportForm request={request} onClose={() => setShowTrashReport(false)} onFiled={handleTrashReportFiled} />
       )}
 
       {reasonStep && createPortal(

@@ -36,9 +36,28 @@ from troid_api.models import (
 from troid_api.sample_data import (
     BOAT_PREFIX, EMAIL_DOMAIN, MANILA, MARKER, OPERATOR_PREFIX, PASSWORD, SUBMITTER,
 )
-CATEGORIES = ['Plastic', 'Metal', 'Glass', 'Paper/Cardboard', 'Organic/Biodegradable', 'Other']
-# Typical share of each kind of trash in a haul; plastic dominates.
-CATEGORY_MIX = [0.46, 0.08, 0.07, 0.12, 0.19, 0.08]
+# Typical share of each data card item (drives.TRASH_ITEMS) in a haul, and a class name the
+# robot's model reports it under (drives.report_category maps it back).
+ITEM_MIX = [
+    ('Bags (paper or plastic)', 0.14, 'Single-use carrier bag'),
+    ('Balloons', 0.005, 'Balloon'),
+    ('Beverage bottles (plastic)', 0.18, 'Clear plastic bottle'),
+    ('Beverage bottles (glass)', 0.04, 'Glass bottle'),
+    ('Beverage cans', 0.05, 'Drink can'),
+    ('Caps, lids', 0.08, 'Plastic bottle cap'),
+    ('Clothing, shoes', 0.02, 'Shoe'),
+    ('Cups, plates, forks, knives, spoons', 0.07, 'Disposable plastic cup'),
+    ('Food wrappers, containers', 0.25, 'Crisp packet'),
+    ('Pull tabs', 0.01, 'Pop tab'),
+    ('6-pack holders', 0.005, 'Six pack rings'),
+    ('Shotgun shells, wadding', 0.0, 'Shotgun shell'),
+    ('Straws, stirrers', 0.05, 'Plastic straw'),
+    ('Toys', 0.01, 'Toy'),
+    ('Other items', 0.07, 'Cigarette'),
+]
+ROBOT_LABEL = {item: label for item, _, label in ITEM_MIX}
+SITE_TYPE = {'coast': 'shoreline', 'estuary': 'river', 'river': 'river', 'creek': 'river', 'canal': 'river', 'pond': 'lake'}
+PECULIAR_ITEMS = ['A bowling ball', 'A rubber duck', 'A car tyre', 'A wedding photo album', 'A plastic Christmas tree']
 
 # The barangays with a collection area. `weight` is how often they request a cleanup and
 # `trend` how that changes toward today (above 1: more often lately; below 1: less often).
@@ -481,6 +500,18 @@ class Command(BaseCommand):
                 req.non_usable_kg = report['non_usable_kg']
                 req.recyclable_kg = report['recyclable_kg']
                 req.trash_categories = report['categories']
+                req.site_type = SITE_TYPE.get(info['water'][0], 'shoreline')
+                req.people_count = rng.randint(2, 4) if troid else rng.randint(8, 30)
+                req.hours_spent = round((finished - start).total_seconds() / 3600, 1)
+                req.distance_km = round(rng.uniform(0.4, 2.5), 1) if rng.random() < 0.8 else None
+                if rng.random() < 0.08:
+                    req.entangled_animals = [{
+                        'animal': rng.choice(['Sea turtle', 'Crab', 'Heron', 'Fish']),
+                        'condition': rng.choice(['alive', 'alive', 'dead']),
+                        'entangled_in': rng.choice(['Fishing line', 'Net', 'Rope', 'Plastic bag']),
+                    }]
+                if rng.random() < 0.1:
+                    req.peculiar_item = rng.choice(PECULIAR_ITEMS)
                 fields['session_completed_at'] = finished
                 step('Session Completed by CENRO', finished, cenro, 'Admin')
                 step('Trash Report Filed by CENRO', finished + timedelta(minutes=40), cenro, 'Admin',
@@ -528,7 +559,7 @@ class Command(BaseCommand):
         bags = max(2, round(base * load))
         items = bags * rng.randint(6, 11)
         categories = {}
-        for name, share in zip(CATEGORIES, CATEGORY_MIX):
+        for name, share, _ in ITEM_MIX:
             categories[name] = max(0, round(items * share * rng.uniform(0.6, 1.4)))
         weight = round(bags * rng.uniform(3.4, 5.6), 1)
         recyclable = round(weight * rng.uniform(0.32, 0.55), 1)
@@ -544,7 +575,8 @@ class Command(BaseCommand):
         for name, total in categories.items():
             for _ in range(round(total * rng.uniform(0.85, 1.05))):
                 bucket = counts[rng.randrange(stops)]
-                bucket[name] = bucket.get(name, 0) + 1
+                label = ROBOT_LABEL.get(name, name)
+                bucket[label] = bucket.get(label, 0) + 1
         span = (finished - start) / stops
         lat = lng = None
         for i, found in enumerate(counts):

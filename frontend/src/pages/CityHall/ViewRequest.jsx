@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import api from "../../services/api";
 import LetterAttachment from "../../components/LetterAttachment";
+import TrashReportSummary from "../../components/TrashReportSummary";
 import { Card } from "../../components/ui/Card";
 import NotificationBell from "../../components/NotificationBell";
 import { REQUEST_STATUS_STYLES, mapRequest, getDeploymentStatus, formatTime12h, toStatusLabel } from "../../constants/requests";
@@ -291,6 +292,12 @@ export default function CityHallViewRequest() {
               <p className="text-xs text-slate-400">No photos uploaded yet.</p>
             )}
                   </Card>
+
+                  {Object.keys(request.trashCategories || {}).length > 0 && (
+                    <Card title="Trash Collection Report">
+                      <TrashReportSummary report={request} />
+                    </Card>
+                  )}
 
                   <Card title="Status History">
                     <div className="relative pl-5">

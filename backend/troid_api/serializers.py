@@ -16,6 +16,11 @@ LETTER_TYPES = {
     '.docx': ('application/vnd.openxmlformats-officedocument.wordprocessingml.document', b'PK\x03\x04'),
 }
 
+from .drives import TRASH_ITEMS
+
+# Filed with the trash report (submit_trash_report), beside the bags, weights and item counts.
+TRASH_REPORT_FIELDS = ['site_type', 'people_count', 'hours_spent', 'distance_km', 'entangled_animals', 'peculiar_item']
+
 class LetterUploadSerializer(serializers.Serializer):
     """A request's letter: a PDF or Word file sent as base64 (a data URL is fine)."""
     name = serializers.CharField(max_length=255)
@@ -49,14 +54,33 @@ class LetterUploadSerializer(serializers.Serializer):
             'data': encoded,
         }
 
+class EntangledAnimalSerializer(serializers.Serializer):
+    animal = serializers.CharField(max_length=100)
+    condition = serializers.ChoiceField(choices=['alive', 'dead'])
+    entangled_in = serializers.CharField(max_length=100, allow_blank=True, default='')
+
+
 class TrashReportSerializer(serializers.Serializer):
-    """The collected-garbage figures required to finish a cleanup. 0 is a valid answer."""
+    """The trash report required to finish a cleanup, after the International Coastal Cleanup
+    data card. 0 is a valid answer; items left out count as 0."""
+    site_type = serializers.ChoiceField(choices=[c for c, _ in Request.SITE_TYPE_CHOICES])
+    people_count = serializers.IntegerField(min_value=1)
+    hours_spent = serializers.FloatField(min_value=0, max_value=24 * 7)
+    distance_km = serializers.FloatField(min_value=0, required=False, allow_null=True, default=None)
     bags = serializers.IntegerField(min_value=0)
     weight_kg = serializers.FloatField(min_value=0)
     non_usable_kg = serializers.FloatField(min_value=0)
     recyclable_kg = serializers.FloatField(min_value=0)
-    trash_categories = serializers.DictField(child=serializers.IntegerField(min_value=0), allow_empty=False)
+    trash_categories = serializers.DictField(child=serializers.IntegerField(min_value=0))
+    entangled_animals = EntangledAnimalSerializer(many=True, required=False, default=list)
+    peculiar_item = serializers.CharField(max_length=200, allow_blank=True, default='')
     notes = serializers.CharField(allow_blank=True, default='')
+
+    def validate_trash_categories(self, value):
+        unknown = sorted(set(value) - set(TRASH_ITEMS))
+        if unknown:
+            raise serializers.ValidationError(f'Not an item on the data card: {", ".join(unknown)}.')
+        return {item: value.get(item, 0) for item in TRASH_ITEMS}
 
 class DetectionEventSerializer(serializers.ModelSerializer):
     class Meta:
@@ -182,6 +206,7 @@ class RequestSerializer(serializers.ModelSerializer):
             'non_usable_kg': primary.non_usable_kg,
             'recyclable_kg': primary.recyclable_kg,
             'trash_categories': primary.trash_categories,
+            **{field: getattr(primary, field) for field in TRASH_REPORT_FIELDS},
             'verified_categories': primary.verified_categories,
             'verified_at': primary.verified_at,
             'status_history': StatusHistorySerializer(primary.status_history.all(), many=True).data,
@@ -208,6 +233,8 @@ class RequestSerializer(serializers.ModelSerializer):
             'id': obj.collection_area.id,
             'area_id': obj.collection_area.area_id,
             'name': obj.collection_area.name,
+            # The trash report's site type starts from it.
+            'water_body_type': obj.collection_area.water_body_type,
         }
 
     def validate(self, attrs):
@@ -233,8 +260,8 @@ class RequestSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Request
-        fields = ['id', 'request_id', 'request_type', 'cleanup_type', 'status', 'date_submitted', 'requested_by_name', 'requested_by_role', 'requested_by_barangay', 'contact', 'email', 'location_name', 'barangay', 'municipality', 'province', 'preferred_date', 'preferred_time', 'notes', 'decline_reason', 'parked_from_status', 'letter_file_name', 'letter_size', 'letter_content_type', 'bot_id', 'operator', 'collection_area', 'collection_area_detail', 'bags', 'weight_kg', 'non_usable_kg', 'recyclable_kg', 'session_completed_at', 'trash_categories', 'verified_categories', 'verification_notes', 'verified_at', 'archived', 'status_history', 'photos', 'resent_at', 'resend_available_at', 'can_resend', 'merged_into', 'merged_into_detail', 'merged_from_status', 'merged_at', 'merged_requests']
-        read_only_fields = ['resent_at', 'merged_from_status', 'merged_at']
+        fields = ['id', 'request_id', 'request_type', 'cleanup_type', 'status', 'date_submitted', 'requested_by_name', 'requested_by_role', 'requested_by_barangay', 'contact', 'email', 'location_name', 'barangay', 'municipality', 'province', 'preferred_date', 'preferred_time', 'notes', 'decline_reason', 'parked_from_status', 'letter_file_name', 'letter_size', 'letter_content_type', 'bot_id', 'operator', 'collection_area', 'collection_area_detail', 'bags', 'weight_kg', 'non_usable_kg', 'recyclable_kg', 'session_completed_at', 'trash_categories', *TRASH_REPORT_FIELDS, 'verified_categories', 'verification_notes', 'verified_at', 'archived', 'status_history', 'photos', 'resent_at', 'resend_available_at', 'can_resend', 'merged_into', 'merged_into_detail', 'merged_from_status', 'merged_at', 'merged_requests']
+        read_only_fields = ['resent_at', 'merged_from_status', 'merged_at', *TRASH_REPORT_FIELDS]
         extra_kwargs = {
             'request_id': {'required': False, 'allow_blank': True},
             'letter_file_name': {'read_only': True},

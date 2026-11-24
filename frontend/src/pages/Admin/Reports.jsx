@@ -27,7 +27,7 @@ import { REQUEST_STATUS_STYLES, manilaDate } from '../../constants/requests';
 import {
   COMPARE_OPTIONS, HISTORY_COUNTS, HISTORY_UNITS, addDays, collectionHistory, collectionsIn, compareGroups,
   comparisonRows, formatChange, formatDay, formatMetric, noComparisonReason, priorityIn, reportPeriod,
-  requestBarangay, summarize, toCollections, trendSeries, wasteBreakdown, withComparison,
+  requestBarangay, summarize, toCollections, trendSeries, wasteBreakdown, wasteChartSlices, withComparison,
 } from '../../utils/reportData';
 import { LIVE, useLiveVersion } from "../../hooks/useLiveUpdates";
 
@@ -307,6 +307,7 @@ const Reports = () => {
     [current, period, trendGranularity, previous]
   );
   const wasteTypes = useMemo(() => wasteBreakdown(current, previous), [current, previous]);
+  const wasteSlices = useMemo(() => wasteChartSlices(wasteTypes), [wasteTypes]);
 
   // Bags by barangay; once one barangay is chosen, by collection area inside it instead.
   const groupBy = selectedBarangay ? "Collection Area" : "Barangay";
@@ -688,7 +689,7 @@ const Reports = () => {
       ],
       wasteTypes,
       (w, ci) => [
-        { text: w.name, color: w.color.match(/\w\w/g).map((h) => parseInt(h, 16)), bold: true },
+        { text: w.name, bold: true },
         { text: w.value.toLocaleString(), bold: true },
         { text: `${w.pct}%` },
         { text: comparing ? w.previous.toLocaleString() : '-', color: SLATE_500 },
@@ -900,13 +901,13 @@ const Reports = () => {
             Waste Collection Distribution <span className="text-slate-400 font-medium">(by Type of Waste)</span>
           </h2>
           <div className="flex items-center gap-4">
-            <DonutChart data={wasteTypes} />
+            <DonutChart data={wasteSlices} />
             {wasteTypes.length === 0 ? (
               <p className="flex-1 text-xs text-slate-400">No trash reports were filed in this period.</p>
             ) : (
               <ul className="flex-1 space-y-2.5 min-w-0">
-                {wasteTypes.map((w) => (
-                  <li key={w.name} className="flex items-center gap-2 text-xs">
+                {wasteSlices.map((w) => (
+                  <li key={w.name} className="flex items-center gap-2 text-xs" title={w.items ? w.items.join(", ") : w.name}>
                     <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: w.color }} />
                     <span className="text-slate-600 font-medium truncate flex-1">{w.name}</span>
                     <span className="text-slate-900 font-semibold shrink-0">{w.value.toLocaleString()} ({w.pct}%)</span>

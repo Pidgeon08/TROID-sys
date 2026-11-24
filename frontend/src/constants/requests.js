@@ -21,7 +21,8 @@ export function formatDate(value) {
   return value ? new Date(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '';
 }
 
-export const TRASH_CATEGORIES = ["Plastic", "Metal", "Glass", "Paper/Cardboard", "Organic/Biodegradable", "Other"];
+// The items a trash report counts (the International Coastal Cleanup data card); see trashReport.js.
+export { TRASH_ITEMS as TRASH_CATEGORIES } from "./trashReport";
 
 // Shared search predicate for request tables: matches on ID, type, requester name,
 // and the request's site/location name (its "request name").
@@ -140,8 +141,20 @@ function mapStatusHistory(history) {
   }));
 }
 
+// The data card details filed with the trash report, beside the bags, weights and item counts.
+function mapTrashReportDetails(raw) {
+  return {
+    siteType: raw.site_type || '',
+    peopleCount: raw.people_count ?? null,
+    hoursSpent: raw.hours_spent ?? null,
+    distanceKm: raw.distance_km ?? null,
+    entangledAnimals: Array.isArray(raw.entangled_animals) ? raw.entangled_animals : [],
+    peculiarItem: raw.peculiar_item || '',
+  };
+}
+
 function mapCollectionArea(detail) {
-  return detail ? { id: detail.id, areaId: detail.area_id, name: detail.name } : null;
+  return detail ? { id: detail.id, areaId: detail.area_id, name: detail.name, waterBodyType: detail.water_body_type || '' } : null;
 }
 
 // The request a merged one was folded into: its cleanup, schedule and results are the merged one's too.
@@ -164,6 +177,7 @@ function mapMergedInto(raw) {
     nonUsableKg: raw.non_usable_kg || 0,
     recyclableKg: raw.recyclable_kg || 0,
     trashCategories: raw.trash_categories || {},
+    ...mapTrashReportDetails(raw),
     verifiedCategories: raw.verified_categories || {},
     verifiedAt: raw.verified_at || null,
     statusHistory: mapStatusHistory(raw.status_history),
@@ -219,6 +233,7 @@ export function mapRequest(raw) {
     recyclableKg: raw.recyclable_kg || 0,
     sessionCompletedAt: raw.session_completed_at || null,
     trashCategories: raw.trash_categories || {},
+    ...mapTrashReportDetails(raw),
     verifiedCategories: raw.verified_categories || {},
     verificationNotes: raw.verification_notes || '',
     verifiedAt: raw.verified_at || null,

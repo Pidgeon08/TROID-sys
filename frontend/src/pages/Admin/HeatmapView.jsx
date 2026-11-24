@@ -745,7 +745,7 @@ const HeatmapView = ({ barangay }) => {
                         return (
                           <li key={cat}>
                             <div className="flex items-center justify-between text-xs">
-                              <span className="font-medium text-slate-700 capitalize">{cat}</span>
+                              <span className="font-medium text-slate-700">{cat}</span>
                               <span className="tabular-nums">
                                 <span className="font-semibold text-[#1b4de4]">{troid}</span>
                                 <span className="text-slate-300"> / </span>

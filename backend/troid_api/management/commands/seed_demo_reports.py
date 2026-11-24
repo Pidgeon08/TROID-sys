@@ -11,7 +11,7 @@ from troid_api.priority import check_and_schedule_priority_followup
 DEMO_MARKER = '[DEMO DATA]'
 DEMO_SUBMITTER = 'Demo Barangay Officer'
 
-TRASH_CATEGORIES = ['Plastic', 'Metal', 'Glass', 'Paper/Cardboard', 'Organic/Biodegradable', 'Other']
+from troid_api.drives import TRASH_ITEMS as TRASH_CATEGORIES
 
 # Approximate barangay centers within San Fernando, La Union, spread out enough that
 # each polygon (and its heatmap marker) lands in a visually distinct spot on the map.

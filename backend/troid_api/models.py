@@ -250,7 +250,21 @@ class Request(models.Model):
     # When the operator pressed Start Cleanup Drive in the Companion app.
     drive_started_at = models.DateTimeField(null=True, blank=True)
     session_completed_at = models.DateTimeField(null=True, blank=True)
+    # The trash report, after the International Coastal Cleanup data card: pieces per item
+    # (drives.TRASH_ITEMS), and about the cleanup site and the people who worked it.
     trash_categories = models.JSONField(default=dict, blank=True)
+    SITE_TYPE_CHOICES = [
+        ('shoreline', 'Shoreline or beach'),
+        ('river', 'River, stream or tributary'),
+        ('lake', 'Lake or pond'),
+    ]
+    site_type = models.CharField(max_length=20, choices=SITE_TYPE_CHOICES, blank=True, default='')
+    people_count = models.PositiveIntegerField(null=True, blank=True)
+    hours_spent = models.FloatField(null=True, blank=True)
+    distance_km = models.FloatField(null=True, blank=True)
+    # [{"animal": "Sea turtle", "condition": "alive" | "dead", "entangled_in": "Fishing line"}]
+    entangled_animals = models.JSONField(default=list, blank=True)
+    peculiar_item = models.CharField(max_length=200, blank=True, default='')
     verified_categories = models.JSONField(default=dict, blank=True)
     verification_notes = models.TextField(blank=True, default="")
     verified_at = models.DateTimeField(null=True, blank=True)

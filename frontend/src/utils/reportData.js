@@ -250,14 +250,17 @@ export function compareGroups(current, previous, groupOf) {
 
 // --- waste types ------------------------------------------------------------------
 
-export const CATEGORY_COLORS = {
-  Plastic: "#3B82F6",
-  Metal: "#F59E0B",
-  Glass: "#06B6D4",
-  "Paper/Cardboard": "#A855F7",
-  "Organic/Biodegradable": "#22C55E",
-  Other: "#94A3B8",
+// The donut chart colours the six items usually found most (validated categorical slots 1-6, in
+// this fixed order so neighbouring slices stay distinct) and folds the rest into one grey slice.
+export const ITEM_COLORS = {
+  "Food wrappers, containers": "#2a78d6",
+  "Beverage bottles (plastic)": "#eb6834",
+  "Bags (paper or plastic)": "#1baf7a",
+  "Caps, lids": "#eda100",
+  "Cups, plates, forks, knives, spoons": "#e87ba4",
+  "Beverage cans": "#008300",
 };
+export const OTHER_ITEMS_COLOR = "#94A3B8";
 
 function categoryTotals(collections) {
   const totals = {};
@@ -282,8 +285,29 @@ export function wasteBreakdown(current, previous) {
     previous: previous ? before[name] || 0 : null,
     pct: total ? Math.round(((now[name] || 0) / total) * 100) : 0,
     change: previous ? pctChange(now[name] || 0, before[name] || 0) : null,
-    color: CATEGORY_COLORS[name] || "#94A3B8",
+    color: ITEM_COLORS[name] || OTHER_ITEMS_COLOR,
   }));
+}
+
+/**
+ * The donut chart's slices: the coloured items in their fixed order, then everything else as one
+ * grey slice (`items` names what it holds). wasteBreakdown keeps every item for the tables.
+ */
+export function wasteChartSlices(types) {
+  const colored = Object.keys(ITEM_COLORS).map((name) => types.find((t) => t.name === name)).filter(Boolean);
+  const rest = types.filter((t) => !ITEM_COLORS[t.name]);
+  if (rest.length <= 1) return [...colored, ...rest];
+  const sum = (key) => rest.reduce((total, t) => total + (t[key] || 0), 0);
+  const comparing = rest[0].previous !== null;
+  return [...colored, {
+    name: "All other items",
+    items: rest.map((t) => t.name),
+    value: sum("value"),
+    previous: comparing ? sum("previous") : null,
+    pct: Math.round((sum("value") / (types.reduce((total, t) => total + t.value, 0) || 1)) * 100),
+    change: comparing ? pctChange(sum("value"), sum("previous")) : null,
+    color: OTHER_ITEMS_COLOR,
+  }];
 }
 
 // --- trend ------------------------------------------------------------------------

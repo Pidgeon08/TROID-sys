@@ -115,6 +115,13 @@ async function openScheduleModal(page) {
   await settle(page, 300);
 }
 
+// What the robot counted on a drive, per data card item, for the trash report picture.
+const SAMPLE_TROID_COUNT = {
+  'Bags (paper or plastic)': 14, 'Beverage bottles (plastic)': 26, 'Beverage bottles (glass)': 3, 'Beverage cans': 7,
+  'Caps, lids': 11, 'Cups, plates, forks, knives, spoons': 9, 'Food wrappers, containers': 38, 'Straws, stirrers': 6,
+  'Other items': 6,
+};
+
 // The request IDs listed on the page, in order.
 async function requestIdsOnPage(page) {
   const found = (await page.locator('main').innerText()).match(/REQ-\d+/g) || [];
@@ -286,9 +293,13 @@ export const RECIPES = {
       },
       'troid-counted': {
         run: async (p) => {
+          // A drive that has just started has no counts yet, so the picture shows sample ones.
+          await fake(p, 'GET', /\/troid_count\/?$/, { troid_assisted: true, categories: SAMPLE_TROID_COUNT, total: 120 });
           await openFirstRequest('/admin/requests', 'status=Ongoing&type=troid_supported')(p);
           await button(p, /Mark Session Completed/).click();
           await settle(p);
+          await p.locator('form .overflow-y-auto').first().evaluate((el) => el.scrollBy(0, 330));
+          await settle(p, 300);
         },
         outline: (p) => text(p, 'TROID counted', false),
       },
