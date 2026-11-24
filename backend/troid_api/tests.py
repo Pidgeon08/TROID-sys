@@ -407,6 +407,39 @@ class CityAdminNotificationTests(TestCase):
         self.assertFalse(self.notified().exists())
 
 
+class CenroNotificationTests(TestCase):
+    """CENRO is told whenever a request starts waiting on its approval."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.city_admin = make_user('mayorsoffice')
+        self.admin = make_user('admin')
+        self.archived_admin = make_user('admin', status='archived')
+
+    def notified(self):
+        return Notification.objects.filter(notif_type='awaiting_approval')
+
+    def test_the_city_admins_approval_notifies_active_cenro_admins(self):
+        req = Request.objects.create(status='pending_mayor_approval', barangay='Poro')
+
+        response = self.client.post(f'/api/requests/{req.request_id}/mayor_approve/', **session_header(self.city_admin))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([n.recipient for n in self.notified()], [self.admin])
+        listed = self.client.get('/api/notifications/', **session_header(self.admin)).json()
+        self.assertEqual(listed[0]['request_id'], req.request_id)
+        self.assertIn('Poro', listed[0]['message'])
+
+    def test_unparking_back_to_cenro_notifies_cenro_unless_cenro_did_it(self):
+        by_city_admin = Request.objects.create(status='parked', parked_from_status='pending_admin_approval', barangay='Poro')
+        by_cenro = Request.objects.create(status='parked', parked_from_status='pending_admin_approval', barangay='Poro')
+
+        self.client.post(f'/api/requests/{by_city_admin.request_id}/unpark/', **session_header(self.city_admin))
+        self.client.post(f'/api/requests/{by_cenro.request_id}/unpark/', **session_header(self.admin))
+
+        self.assertEqual([(n.recipient, n.request) for n in self.notified()], [(self.admin, by_city_admin)])
+
+
 def around(lat, lng, d=0.0005):
     """A small triangle (about 55 m across) centred on a point."""
     return [[lat + d, lng], [lat - d, lng - d], [lat - d, lng + d]]

@@ -1329,6 +1329,8 @@ class RequestViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
                 )
         if request_obj.status == 'pending_mayor_approval':
             notify_city_admins(request_obj, 'New request awaiting your approval')
+        elif request_obj.status == 'pending_admin_approval' and getattr(request.user, 'role', None) != 'admin':
+            notify_cenro_admins(request_obj, 'New request awaiting your approval')
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=['get'])
@@ -1358,6 +1360,8 @@ class RequestViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
             role='City Admin',
             state='current'
         )
+        # It now waits on CENRO.
+        notify_cenro_admins(req, 'New request awaiting your approval')
         return Response({'status': req.status})
 
     @action(detail=True, methods=['post'])
@@ -1456,6 +1460,8 @@ class RequestViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
         # A City Admin who unparks it themselves doesn't need telling.
         if req.status == 'pending_mayor_approval' and getattr(request.user, 'role', None) != 'mayorsoffice':
             notify_city_admins(req, 'A request is back for your approval')
+        elif req.status == 'pending_admin_approval' and getattr(request.user, 'role', None) != 'admin':
+            notify_cenro_admins(req, 'A request is back for your approval')
         return Response({'status': req.status})
 
     @action(detail=True, methods=['post'])
