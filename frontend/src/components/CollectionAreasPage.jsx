@@ -249,14 +249,14 @@ function AreaCard({ area, side, busy, heat, onToggleHeat, onHeatPeriod, onClose,
 
       <div className="space-y-2 border-t border-slate-100 p-3">
         <HeatmapToggle heat={heat} onToggle={onToggleHeat} onPeriod={onHeatPeriod} />
-        {area.status !== "pending" && (
+        {onViewMore && area.status !== "pending" && (
           <button
             type="button"
             onClick={onViewMore}
-            title="Its heatmap and hotspot history, month by month, and a report comparing it with before"
+            title="Its hotspot history month by month, its heatmap and a report comparing it with before, on Report Generation"
             className={`${CARD_BUTTON} w-full border border-blue-200 text-blue-700 hover:bg-blue-50`}
           >
-            <History size={14} /> View more: history and report
+            <History size={14} /> View more: hotspot history
           </button>
         )}
         <div className="flex gap-2">
@@ -1004,7 +1004,11 @@ export default function CollectionAreasPage({ side = "admin" }) {
                 onToggleHeat={() => setHeatOn((on) => !on)}
                 onHeatPeriod={setHeatPeriod}
                 onClose={() => setActiveId(null)}
-                onViewMore={() => navigate(`${side === "barangay" ? "/barangay/areas" : "/admin/collection-areas"}/${encodeURIComponent(selectedArea.id)}/history`)}
+                // CENRO's: the area's hotspot history on Report Generation. Barangay and NGO
+                // accounts compare hotspots on their Bot Tracking page instead.
+                onViewMore={side === "admin"
+                  ? () => navigate(`/admin/reports?area=${encodeURIComponent(selectedArea.id)}&chart=hotspots`)
+                  : undefined}
                 onEdit={() => startEditing(selectedArea)}
                 onRequests={() => setRequestsArea(selectedArea)}
                 onApprove={() => setApproveTarget(selectedArea)}

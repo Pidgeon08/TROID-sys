@@ -337,18 +337,22 @@ function bucketIndex(day, from, granularity) {
 }
 
 function series(collections, from, to, granularity) {
-  const list = buckets(from, to, granularity).map((b) => ({ ...b, bags: 0 }));
+  const list = buckets(from, to, granularity).map((b) => ({ ...b, bags: 0, cleanups: 0 }));
   collections.forEach((c) => {
     if (c.day < from || c.day > to) return;
     const point = list[bucketIndex(c.day, from, granularity)];
-    if (point) point.bags += c.bags;
+    if (point) {
+      point.bags += c.bags;
+      point.cleanups += 1;
+    }
   });
   return list;
 }
 
 /**
- * Bags per bucket across the period, each point with the matching bucket of the previous
- * period (`previousBags`, null when there is no comparison) so both can be drawn together.
+ * Bags and cleanups per bucket across the period, each point with the matching bucket of the
+ * previous period (`previousBags`, `previousCleanups`; null when there is no comparison) so both
+ * can be drawn together.
  */
 export function trendSeries(current, period, granularity, previous, today = manilaDate(new Date())) {
   const to = period.to || today;
@@ -358,6 +362,7 @@ export function trendSeries(current, period, granularity, previous, today = mani
   return points.map((p, i) => ({
     ...p,
     previousBags: before ? before[i]?.bags ?? null : null,
+    previousCleanups: before ? before[i]?.cleanups ?? null : null,
     previousLabel: before ? before[i]?.label ?? "" : "",
   }));
 }
@@ -444,4 +449,25 @@ export function matchingPreset(from, to, today = manilaDate(new Date())) {
     const range = presetRange(key, today);
     return range.from === from && range.to === end;
   }) || "";
+}
+
+// --- the dashboards ---------------------------------------------------------------
+
+/**
+ * What the dashboards show: this month so far, compared with the same dates last month (Nov 1–26
+ * against Oct 1–26), so a month that isn't over yet is measured fairly. The Reports page opens
+ * on the same period when a dashboard sends someone there.
+ */
+export function monthToDate(today = manilaDate(new Date())) {
+  return withComparison(reportPeriod(`${today.slice(0, 7)}-01`, today, today), "month");
+}
+
+/** Requests submitted in a period (and barangay), for the "requests received" figures. */
+export function requestsSubmittedIn(requests, period, barangay) {
+  if (!period) return [];
+  return requests.filter((r) => {
+    if (r.archived || !r.date_submitted) return false;
+    if (barangay && requestBarangay(r) !== barangay) return false;
+    return inPeriod(manilaDate(new Date(r.date_submitted)), period);
+  });
 }

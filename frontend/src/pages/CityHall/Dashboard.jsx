@@ -1,90 +1,71 @@
-import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { ShieldCheck, Clock, CheckCircle2, Ban, TrendingUp, FileText } from "lucide-react";
+// The City Admin's dashboard: the requests waiting on their approval first, then the same picture
+// of the city's cleanups as CENRO's dashboard (this month so far against the same dates last month,
+// hotspots and priority areas), each chart opening the Reports page on the same figures.
+import { useEffect, useMemo, useState } from "react";
+import { useNavigate, useOutletContext } from "react-router-dom";
+import { AlertTriangle, CheckCircle2, ChevronRight, Clock, FileText, Inbox, ShieldCheck, Trash2 } from "lucide-react";
 import api from "../../services/api";
+import HotspotsCard from "../../components/HotspotsCard";
+import PriorityAreaList from "../../components/PriorityAreaList";
+import { DASHBOARD_CARD, Panel } from "../../components/DashboardPanels";
+import {
+  BagsChartCard, CleanupsChartCard, DashboardHeader, KpiCard, PlacesChartCard, WasteChartCard,
+} from "../../components/DashboardOverview";
+import { dashboardSummary, historyStepsIn, latestSteps, reportsLink } from "../../utils/dashboardData";
+import { cityAdminWording, requestArea } from "../../constants/requests";
 import { LIVE, useLiveVersion } from "../../hooks/useLiveUpdates";
 
-const STAT_COLORS = {
-  total: "bg-blue-100 text-blue-700",
-  pending: "bg-amber-100 text-amber-700",
-  approved: "bg-emerald-100 text-emerald-700",
-  parked: "bg-purple-100 text-purple-700",
-};
+const REPORTS = "/mayorsoffice/reports";
+const APPROVED_STEP = "Approved by City Admin";
+// A request waiting this long can be resent by its requester (Request.RESEND_AFTER_DAYS).
+const OVERDUE_DAYS = 7;
+const PENDING_FILTER = `/mayorsoffice/requests?status=${encodeURIComponent("Pending City Admin Approval")}`;
 
-function SummaryCard({ icon: Icon, label, value, sub, color }) {
-  return (
-    <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-6 flex items-center gap-4">
-      <div className={`w-12 h-12 rounded-full flex items-center justify-center shrink-0 ${color}`}>
-        <Icon className="w-6 h-6" strokeWidth={2} />
-      </div>
-      <div className="min-w-0">
-        <p className="text-sm font-medium text-slate-600">{label}</p>
-        <p className="text-2xl font-bold text-slate-900 mt-1">{value}</p>
-        <p className="text-xs text-slate-400 mt-1">{sub}</p>
-      </div>
-    </div>
-  );
-}
+const daysWaiting = (iso) => (iso ? Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 86400000)) : 0);
+const shortDay = (iso) => (iso ? new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "-");
+const shortTime = (iso) => (iso ? new Date(iso).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "");
+const isCityAdminStep = (step) => step.role === "City Admin" || /city admin/i.test(step.label || "");
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const [pendingRequests, setPendingRequests] = useState([]);
-  const [stats, setStats] = useState({});
-  const [recentDecisions, setRecentDecisions] = useState([]);
+  const { currentUser } = useOutletContext() || {};
+  const [requests, setRequests] = useState([]);
+  const [priority, setPriority] = useState([]);
   const [loading, setLoading] = useState(true);
 
   // Loaded again when this data changes anywhere, so the page stays current without a reload.
-  const live = useLiveVersion(LIVE.requests);
+  const live = useLiveVersion(LIVE.requests, LIVE.areas);
   useEffect(() => {
     let cancelled = false;
-    async function load() {
-      try {
-        const all = await api.requests();
-        const pending = all.filter((r) => r.status === "Pending").map((r) => ({
-          id: r.request_id,
-          barangay: r.barangay,
-          requestedBy: r.requested_by_name,
-          date: r.date_submitted
-            ? new Date(r.date_submitted).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-            : '-',
-          type: r.request_type,
-          priority: "High",
-          notes: r.notes || "",
-        }));
-        const approved = all.filter((r) => r.status === "Approved").length;
-        const parked = all.filter((r) => r.status === "Parked").length;
-        const recent = all
-          .filter((r) => r.status === "Approved" || r.status === "Parked")
-          .sort((a, b) => new Date(b.date_submitted) - new Date(a.date_submitted))
-          .slice(0, 3)
-          .map((r) => ({
-            id: r.request_id,
-            action: r.status === "Approved" ? "Approved" : "Parked",
-            barangay: r.barangay,
-            time: r.date_submitted
-              ? new Date(r.date_submitted).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-              : '-',
-          }));
-
-        if (!cancelled) {
-          setPendingRequests(pending);
-          setStats({
-            total: all.length,
-            pending: pending.length,
-            approved,
-            parked,
-          });
-          setRecentDecisions(recent);
-        }
-      } catch (err) {
-        console.error("Failed to load city hall dashboard", err);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-    load();
+    Promise.allSettled([api.requests(), api.priorityAreas()])
+      .then(([requestsRes, priorityRes]) => {
+        if (cancelled) return;
+        if (requestsRes.status === "rejected") console.error("Failed to load the City Admin dashboard:", requestsRes.reason);
+        setRequests(requestsRes.status === "fulfilled" && Array.isArray(requestsRes.value) ? requestsRes.value : []);
+        setPriority(priorityRes.status === "fulfilled" && Array.isArray(priorityRes.value) ? priorityRes.value.filter((p) => p.is_priority) : []);
+      })
+      .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [live]);
+
+  const summary = useMemo(() => dashboardSummary(requests), [requests]);
+  const link = (chart) => reportsLink(REPORTS, summary.period, chart);
+  const { now, before, change, received, period } = summary;
+
+  // Waiting on the City Admin, oldest first: those have waited longest.
+  const pending = useMemo(
+    () => requests
+      .filter((r) => !r.archived && r.status === "pending_mayor_approval")
+      .sort((a, b) => new Date(a.date_submitted) - new Date(b.date_submitted)),
+    [requests]
+  );
+  const overdue = pending.filter((r) => daysWaiting(r.date_submitted) >= OVERDUE_DAYS).length;
+  const approved = useMemo(() => ({
+    now: historyStepsIn(requests, period, (s) => s.label === APPROVED_STEP),
+    before: historyStepsIn(requests, period.previous, (s) => s.label === APPROVED_STEP),
+  }), [requests, period]);
+  const approvedChange = approved.before ? Math.round(((approved.now - approved.before) / approved.before) * 1000) / 10 : approved.now ? null : 0;
+  const decisions = useMemo(() => latestSteps(requests, isCityAdminStep, 6), [requests]);
 
   if (loading) {
     return (
@@ -96,112 +77,109 @@ export default function Dashboard() {
 
   return (
     <div className="max-w-[1400px] mx-auto animate-fade-in pb-12">
-      <header className="mb-6 flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <div className="flex items-center gap-2.5 mb-1">
-            <div className="w-9 h-9 rounded-full bg-blue-100 flex items-center justify-center text-blue-700">
-              <ShieldCheck className="w-5 h-5" />
-            </div>
-            <h1 className="text-[28px] font-bold text-slate-900 tracking-tight leading-none">City Admin Dashboard</h1>
-          </div>
-          <p className="text-slate-500 text-sm mt-1.5 font-medium">Overview of TROID bot requests from barangays. Review pending requests below.</p>
-        </div>
-      </header>
+      <DashboardHeader
+        title="City Admin Dashboard"
+        subtitle={`Welcome back, ${currentUser?.name || "City Admin"}`}
+        currentUser={currentUser}
+        userType="mayorsoffice"
+        reportsPath={REPORTS}
+        period={period}
+      />
 
-      <div className="mb-6 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
-        <SummaryCard icon={FileText} label="Total Requests" value={stats.total ?? 0} sub="All time" color={STAT_COLORS.total} />
-        <SummaryCard icon={Clock} label="Pending Review" value={stats.pending ?? 0} sub="Requires your action" color={STAT_COLORS.pending} />
-        <SummaryCard icon={CheckCircle2} label="Approved" value={stats.approved ?? 0} sub="Sent to CENRO" color={STAT_COLORS.approved} />
-        <SummaryCard icon={Ban} label="Parked" value={stats.parked ?? 0} sub="Not yet accepted" color={STAT_COLORS.parked} />
+      <div className="mb-6 grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
+        <KpiCard icon={Clock} tint="bg-amber-50 text-amber-600" label="Awaiting Your Approval" value={pending.length}
+          hint={overdue ? `${overdue} waiting ${OVERDUE_DAYS} days or more` : "None waiting long"} to={PENDING_FILTER} />
+        <KpiCard icon={Inbox} tint="bg-sky-50 text-sky-600" label="Requests Received" value={received.now}
+          previous={received.before} change={received.change} comparedLabel="last month" to="/mayorsoffice/requests?range=thisMonth" />
+        <KpiCard icon={CheckCircle2} tint="bg-emerald-50 text-emerald-600" label="Approved by You" value={approved.now}
+          previous={approved.before} change={approvedChange} comparedLabel="last month" to="/mayorsoffice/requests" />
+        <KpiCard icon={Trash2} tint="bg-blue-50 text-blue-600" label="Bags Collected" value={now.bags} unit="bags"
+          previous={before.bags} change={change.bags} comparedLabel="last month" to={link("bags")} />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] overflow-hidden">
-          <div className="p-5 border-b border-slate-100 flex items-center justify-between">
+      <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
+        <section className={`${DASHBOARD_CARD} overflow-hidden lg:col-span-2`}>
+          <div className="flex items-center justify-between border-b border-slate-100 p-5">
             <div className="flex items-center gap-2">
-              <h2 className="text-[17px] font-bold text-slate-900">Pending Approval</h2>
-              <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-amber-100 text-amber-700 text-xs font-bold">
-                {pendingRequests.length}
-              </span>
+              <ShieldCheck className="h-4 w-4 text-[#1b4de4]" />
+              <h2 className="text-[15px] font-bold text-slate-900">Pending Approval</h2>
+              <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-100 px-1.5 text-xs font-bold text-amber-700">{pending.length}</span>
             </div>
-            <button
-              onClick={() => navigate("/mayorsoffice/requests")}
-              className="text-xs font-semibold text-[#1b4de4] hover:text-[#153eb8]"
-            >
-              View all requests
-            </button>
+            <button onClick={() => navigate(PENDING_FILTER)} className="text-xs font-semibold text-[#1b4de4] hover:text-[#153eb8]">View all</button>
           </div>
-          <div className="divide-y divide-slate-50">
-            {pendingRequests.map((req) => (
-              <div key={req.id} className="p-5 flex flex-wrap items-start justify-between gap-4 hover:bg-slate-50/40 transition-colors">
-                <div className="flex items-start gap-4">
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500">
-                    <FileText className="h-5 w-5" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-semibold text-slate-900">{req.id}</p>
-                    <p className="text-xs text-slate-500 mt-0.5">{req.barangay} · {req.requestedBy}</p>
-                    <p className="text-xs text-slate-400 mt-0.5 line-clamp-2">{req.notes}</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-3">
-                  <span className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-medium ${
-                    req.priority === "High" ? "bg-red-50 text-red-700" : "bg-amber-50 text-amber-700"
-                  }`}>
-                    {req.priority}
-                  </span>
-                  <span className="text-xs text-slate-400">{req.date}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
+          {pending.length === 0 ? (
+            <p className="p-8 text-center text-sm text-slate-400">Nothing is waiting on your approval.</p>
+          ) : (
+            <ul className="max-h-[360px] divide-y divide-slate-50 overflow-y-auto">
+              {pending.slice(0, 8).map((r) => {
+                const waited = daysWaiting(r.date_submitted);
+                return (
+                  <li key={r.request_id}>
+                    <button
+                      type="button"
+                      onClick={() => navigate(`/mayorsoffice/requests/${r.request_id}`)}
+                      className="group flex w-full items-start gap-4 p-4 text-left transition-colors hover:bg-slate-50/60"
+                    >
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500"><FileText className="h-4 w-4" /></span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-sm font-semibold text-slate-900">{r.request_id}</span>
+                        <span className="block truncate text-xs text-slate-500">
+                          {[r.barangay, r.requested_by_name, requestArea(r) !== r.barangay ? requestArea(r) : ""].filter(Boolean).join(" · ")}
+                        </span>
+                        <span className="mt-0.5 block text-[11px] text-slate-400">
+                          {r.cleanup_type === "unsupported" ? "Non-TROID cleanup" : "TROID-supported"} · submitted {shortDay(r.date_submitted)}
+                        </span>
+                      </span>
+                      <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${waited >= OVERDUE_DAYS ? "bg-red-50 text-red-700" : "bg-amber-50 text-amber-700"}`}>
+                        {waited === 0 ? "Today" : `${waited} day${waited === 1 ? "" : "s"}`}
+                      </span>
+                      <ChevronRight className="mt-2 h-4 w-4 shrink-0 text-slate-300 group-hover:text-[#1b4de4]" />
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </section>
 
-        <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-5">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-[15px] font-bold text-slate-900">Recent Decisions</h2>
-            <button
-              onClick={() => navigate("/mayorsoffice/requests")}
-              className="text-xs font-semibold text-slate-500 hover:text-[#1b4de4] border border-slate-200 rounded-lg px-2.5 py-1 transition-colors"
-            >
-              View all
-            </button>
-          </div>
-          <div className="flex flex-col gap-4">
-            {recentDecisions.map((item) => (
-              <div key={item.id} className="flex items-start gap-3">
-                <div className={`mt-0.5 w-2.5 h-2.5 rounded-full shrink-0 ${
-                  item.action === "Approved" ? "bg-emerald-500 shadow-[0_0_6px_#10b981]" : "bg-purple-500 shadow-[0_0_6px_#a855f7]"
-                }`}></div>
-                <div>
-                  <p className="text-xs font-medium text-slate-700">{item.id} — <span className={item.action === "Approved" ? "text-emerald-600" : "text-purple-600"}>{item.action}</span></p>
-                  <p className="text-[11px] text-slate-400 mt-0.5">{item.barangay} · {item.time}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
+        <Panel title="Recent Decisions" icon={CheckCircle2} iconClassName="text-emerald-500" action={{ label: "View all", onClick: () => navigate("/mayorsoffice/requests") }}>
+          {decisions.length === 0 ? (
+            <p className="py-2 text-xs text-slate-400">No decisions yet.</p>
+          ) : (
+            <ul className="flex flex-col gap-3.5">
+              {decisions.map((step) => (
+                <li key={`${step.request.request_id}-${step.date}-${step.label}`}>
+                  <button type="button" onClick={() => navigate(`/mayorsoffice/requests/${step.request.request_id}`)} className="flex w-full items-start gap-3 text-left">
+                    <span className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${/approved/i.test(step.label) ? "bg-emerald-500" : /park/i.test(step.label) ? "bg-purple-500" : "bg-slate-400"}`} />
+                    <span className="min-w-0">
+                      <span className="block text-xs font-medium text-slate-700">
+                        {step.request.request_id} · <span className="font-semibold">{cityAdminWording(step.label)}</span>
+                      </span>
+                      <span className="block text-[11px] text-slate-400">{step.request.barangay} · {shortTime(step.date)}</span>
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Panel>
       </div>
 
-      <div className="mt-6 bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-6">
-        <div className="flex items-center gap-2 mb-4">
-          <TrendingUp className="w-5 h-5 text-blue-600" />
-          <h2 className="text-[15px] font-bold text-slate-900">Your Role in the Workflow</h2>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="rounded-xl border border-blue-100 bg-blue-50/50 p-4">
-            <p className="text-xs font-semibold text-blue-700 mb-1">1. Review Requests</p>
-            <p className="text-xs text-blue-600/80">Barangays submit TROID bot deployment requests through the system.</p>
-          </div>
-          <div className="rounded-xl border border-emerald-100 bg-emerald-50/50 p-4">
-            <p className="text-xs font-semibold text-emerald-700 mb-1">2. Approve or Park</p>
-            <p className="text-xs text-emerald-600/80">You are the only one authorized to approve or park requests from barangays.</p>
-          </div>
-          <div className="rounded-xl border border-amber-100 bg-amber-50/50 p-4">
-            <p className="text-xs font-semibold text-amber-700 mb-1">3. CENRO Takes Over</p>
-            <p className="text-xs text-amber-600/80">Once approved, CENRO schedules deployment and assigns operators and bots.</p>
-          </div>
-        </div>
+      <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <BagsChartCard summary={summary} reportTo={link("bags")} />
+        <CleanupsChartCard summary={summary} reportTo={link("cleanups")} />
+      </div>
+
+      <div className="mb-6 grid grid-cols-1 items-start gap-6 xl:grid-cols-[1fr_360px]">
+        <HotspotsCard title="Collective Hotspots" mapClassName="min-h-[380px]" />
+        <Panel title={`Priority Areas (${priority.length})`} icon={AlertTriangle}>
+          <PriorityAreaList areas={priority} emptyText="No collection area is bringing in more bags per cleanup than last month." />
+        </Panel>
+      </div>
+
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <WasteChartCard summary={summary} reportTo={link("waste")} />
+        <PlacesChartCard summary={summary} title="Bags by Barangay" reportTo={link("places")} />
       </div>
     </div>
   );

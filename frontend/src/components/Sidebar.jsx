@@ -32,6 +32,7 @@ const navItems = {
   mayorsoffice: [
     { to: '/mayorsoffice/dashboard', icon: Home, label: 'Dashboard' },
     { to: '/mayorsoffice/requests', icon: InboxIcon, label: 'Requests', hasNotifications: true },
+    { to: '/mayorsoffice/reports', icon: FileText, label: 'Reports' },
     { to: '/mayorsoffice/utilities', icon: Wrench, label: 'Utilities' },
   ],
   barangay: [
@@ -39,6 +40,7 @@ const navItems = {
     { to: '/barangay/areas', icon: MapPin, label: 'Collection Areas', hasAreaNotifications: true },
     { to: '/barangay/requests', icon: InboxIcon, label: 'Requests', hasNotifications: true, activeFor: /^\/barangay\/requests?(\/|$)/ },
     { to: '/barangay/heatmap', icon: Map, label: 'Bot Tracking' },
+    { to: '/barangay/reports', icon: FileText, label: 'Reports' },
     { to: '/barangay/utilities', icon: Wrench, label: 'Utilities' },
   ],
   ngo: [
@@ -46,6 +48,7 @@ const navItems = {
     { to: '/barangay/areas', icon: MapPin, label: 'Collection Areas', hasAreaNotifications: true },
     { to: '/barangay/requests', icon: InboxIcon, label: 'Requests', hasNotifications: true, activeFor: /^\/barangay\/requests?(\/|$)/ },
     { to: '/barangay/heatmap', icon: Map, label: 'Bot Tracking' },
+    { to: '/barangay/reports', icon: FileText, label: 'Reports' },
     { to: '/barangay/utilities', icon: Wrench, label: 'Utilities' },
   ],
 };

@@ -1,33 +1,12 @@
-// The pieces both dashboards are built from (CENRO's, and the barangay/NGO one), so they look
-// and behave the same: the month stat cards, the side panels, and their lists.
+// The side panels the dashboards share (CENRO, City Admin, barangay/NGO) and their lists; the KPIs
+// and charts are in DashboardOverview.
 import { Link, useNavigate } from 'react-router-dom';
 import { AreaPreviewButton } from './AreaPreviewModal';
-import { ChevronRight, MapPin } from 'lucide-react';
-import MonthSparkline from './MonthSparkline';
+import { ChevronRight } from 'lucide-react';
 import { REQUEST_STATUS_STYLES, requestArea, toStatusLabel } from '../constants/requests';
 
 export const DASHBOARD_CARD = 'bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)]';
 const PANEL_BUTTON = 'text-xs font-semibold text-slate-500 hover:text-[#1b4de4] border border-slate-200 rounded-lg px-2.5 py-1 transition-all cursor-pointer';
-
-export function StatCard({ icon: Icon, title, value, unit, days, color, sparkUnit }) {
-  return (
-    <div className={`${DASHBOARD_CARD} flex flex-col justify-between overflow-hidden relative group hover:shadow-[0_6px_24px_rgba(0,0,0,0.06)] transition-all duration-200`}>
-      <div className="p-6 pb-0 flex items-start gap-4">
-        <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 shrink-0">
-          <Icon className="w-6 h-6" />
-        </div>
-        <div className="flex-1 min-w-0">
-          <h3 className="text-[15px] font-semibold text-slate-900 truncate">{title}</h3>
-          <div className="flex items-baseline gap-2.5 mt-2">
-            <span className="text-3xl font-bold text-slate-950 tracking-tight">{value}</span>
-            <span className="text-sm font-semibold text-slate-500">{unit}</span>
-          </div>
-        </div>
-      </div>
-      <MonthSparkline days={days} color={color} unit={sparkUnit} />
-    </div>
-  );
-}
 
 /** A side panel: a title (with an optional icon), an optional button, and its content. */
 export function Panel({ title, icon: Icon, iconClassName = 'text-amber-500', action, children }) {
@@ -45,32 +24,6 @@ export function Panel({ title, icon: Icon, iconClassName = 'text-amber-500', act
         )}
       </div>
       {children}
-    </div>
-  );
-}
-
-/** The collection areas with the most bags (topCollectionAreas), as bars. */
-export function TopAreasList({ areas, showBarangay = true }) {
-  if (areas.length === 0) return <p className="text-xs text-slate-400 py-2">No collection data yet.</p>;
-  return (
-    <div className="flex flex-col gap-4">
-      {areas.map((item) => (
-        <div key={item.key} className="flex items-center gap-3.5">
-          <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-900 shrink-0">
-            <MapPin className="w-4 h-4" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className={`flex justify-between gap-2 text-xs font-bold text-slate-900 ${showBarangay ? '' : 'mb-1.5'}`}>
-              <span className="truncate">{item.name}</span>
-              <span className="shrink-0">{item.bags} Bags</span>
-            </div>
-            {showBarangay && <p className="truncate text-[11px] text-slate-500 mt-0.5 mb-1.5">{item.barangay}</p>}
-            <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
-              <div className="h-full bg-[#1b4de4] rounded-full transition-all duration-500" style={{ width: `${(item.bags / item.max) * 100}%` }} />
-            </div>
-          </div>
-        </div>
-      ))}
     </div>
   );
 }

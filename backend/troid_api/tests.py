@@ -1439,7 +1439,8 @@ class EndpointRoleTests(TestCase):
         self.assert_roles('delete', f'/api/collection-areas/{aid}/', REQUESTER_ROLES)
 
     def test_records_reports_and_logs(self):
-        self.assert_roles('get', '/api/priority-areas/', REQUESTER_ROLES)
+        # The City Admin sees them too (its dashboard and Reports), but only CENRO and requesters act on areas.
+        self.assert_roles('get', '/api/priority-areas/', STAFF_ROLES)
         for path in ('/api/landfill-records/', '/api/recycling-records/',
                      '/api/segregation-records/', '/api/heatmap-data/', '/api/audit-logs/'):
             self.assert_roles('get', path, ('admin',))
@@ -3231,7 +3232,8 @@ class HotspotHistoryTests(TestCase):
 
         self.assertEqual(len(many.json()['months']), priority.MAX_HISTORY_MONTHS)
         self.assertEqual(bad.status_code, 400)
-        self.assertEqual(city_admin.status_code, 403)
+        # The City Admin's dashboard shows the hotspots too.
+        self.assertEqual(city_admin.status_code, 200)
 
 
 @override_settings(API_AUTH_ENFORCED=True)
@@ -3274,19 +3276,22 @@ class AreaHistoryTests(TestCase):
         self.assertEqual(october['classes'], {'Plastic': 50, 'Metal': 4})
         self.assertEqual((october['detections'], october['detected_items']), (1, 3))
 
-    def test_barangay_accounts_only_get_their_own_areas(self):
+    def test_only_cenro_gets_an_areas_history(self):
         poro = make_user('barangay')
         User.objects.filter(pk=poro.pk).update(location='Poro')
 
-        own = self.client.get(f'/api/collection-areas/{self.area.area_id}/history/?months=2', **session_header(poro))
-        other = self.client.get(f'/api/collection-areas/{self.other.area_id}/history/', **session_header(poro))
+        cenro = self.client.get(f'/api/collection-areas/{self.area.area_id}/history/?months=2', **session_header(self.admin))
         bad = self.client.get(f'/api/collection-areas/{self.area.area_id}/history/?months=x', **session_header(self.admin))
 
-        self.assertEqual(own.status_code, 200, own.content)
-        self.assertEqual(len(own.json()['months']), 2)
-        self.assertEqual(own.json()['window_days'], 30)
-        self.assertEqual(other.status_code, 403)
+        self.assertEqual(cenro.status_code, 200, cenro.content)
+        self.assertEqual(len(cenro.json()['months']), 2)
+        self.assertEqual(cenro.json()['window_days'], 30)
         self.assertEqual(bad.status_code, 400)
+        # Even its own barangay's area: barangay, NGO and City Admin accounts compare hotspots elsewhere.
+        for user in (poro, make_user('ngo'), make_user('mayorsoffice')):
+            with self.subTest(role=user.role):
+                response = self.client.get(f'/api/collection-areas/{self.area.area_id}/history/', **session_header(user))
+                self.assertEqual(response.status_code, 403)
 
 
 class SampleDataRefreshTests(TestCase):

@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import { useOutletContext } from "react-router-dom";
+import { useOutletContext, useSearchParams } from "react-router-dom";
 import {
   Calendar,
   MapPin,
@@ -16,6 +16,8 @@ import {
   UserCircle2,
   GitCompareArrows,
   ListChecks,
+  LayoutDashboard,
+  X,
 } from "lucide-react";
 import jsPDF from 'jspdf';
 import * as XLSX from 'xlsx-js-style';
@@ -30,15 +32,37 @@ import {
   requestBarangay, summarize, toCollections, trendSeries, wasteBreakdown, wasteChartSlices, withComparison,
 } from '../../utils/reportData';
 import { LIVE, useLiveVersion } from "../../hooks/useLiveUpdates";
+import { CURRENT_COLOR, PREVIOUS_COLOR, Change, CompareBarChart, DonutChart, TrendChart } from "../../components/charts/CompareCharts";
+import { canonicalBarangay } from "../../utils/barangayBoundaries";
+import { mapArea } from "../../utils/collectionAreaInfo";
+import AreaHotspotHistory from "../../components/AreaHotspotHistory";
 
 const CARD = "bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] print:shadow-none print:border-slate-300 print:break-inside-avoid";
-const CURRENT_COLOR = "#3B82F6";
-const PREVIOUS_COLOR = "#94A3B8";
 
-const defaultFilters = () => {
+const defaultFilters = (params, lockedBarangay = "") => {
   const today = manilaDate(new Date());
+  const day = (key) => (/^\d{4}-\d{2}-\d{2}$/.test(params?.get(key) || "") ? params.get(key) : "");
+  const compare = params?.get("compare");
   // requestIds: the finished cleanups chosen with Select requests; empty means all of them.
-  return { dateFrom: addDays(today, -29), dateTo: today, barangay: "", compare: "previous", compareFrom: "", compareTo: "", requestIds: [] };
+  return {
+    dateFrom: day("from") || addDays(today, -29),
+    dateTo: day("to") || today,
+    barangay: lockedBarangay || params?.get("barangay") || "",
+    compare: COMPARE_OPTIONS[compare] && compare !== "custom" ? compare : "previous",
+    compareFrom: "",
+    compareTo: "",
+    requestIds: [],
+  };
+};
+
+// The charts a dashboard can send someone to (?chart=), by the anchor each has on this page.
+const CHART_NAMES = {
+  comparison: "Period Comparison",
+  bags: "Total Bags Collected Over Time",
+  cleanups: "Cleanups Finished Over Time",
+  waste: "Waste Collection Distribution",
+  places: "Bags by Barangay or Collection Area",
+  hotspots: "Collection Area Hotspot History",
 };
 
 const sameFilter = (a, b) => (Array.isArray(a) ? a.join("|") === b.join("|") : a === b);
@@ -47,164 +71,39 @@ const generatedOn = () => new Date().toLocaleString('en-US', { month: 'short', d
 
 // --- Reusable Sub-components ---
 
-/** Up/down arrow and percent for a change; green is more, red is less, grey is none. */
-const Change = ({ change, className = "" }) => {
-  if (change === undefined) return null;
-  const tone = change === null || change === 0 ? "text-slate-400" : change > 0 ? "text-emerald-600" : "text-rose-600";
-  return (
-    <span className={`inline-flex items-center gap-0.5 font-semibold whitespace-nowrap ${tone} ${className}`}>
-      {change !== null && change !== 0 && (
-        <svg width="9" height="9" viewBox="0 0 10 10" fill="none" className={change > 0 ? "" : "rotate-180"} aria-hidden="true">
-          <path d="M5 1L9 6H1L5 1Z" fill="currentColor" />
-        </svg>
-      )}
-      {formatChange(change)}
-    </span>
-  );
-};
-
-// Line chart of bags collected per day / week / month, with the previous period dashed behind it.
-const TrendChart = ({ data, comparing }) => {
-  const [hover, setHover] = useState(null);
-  const hasData = data.some((d) => d.bags > 0 || (d.previousBags || 0) > 0);
-  if (!hasData) {
-    return (
-      <div className="h-[240px] flex items-center justify-center text-sm text-slate-400">
-        No bags were collected in this period.
-      </div>
-    );
-  }
-
-  const width = 600;
-  const height = 220;
-  const padX = 12;
-  const padTop = 14;
-  const padBottom = 24;
-  const max = Math.max(...data.map((d) => Math.max(d.bags, d.previousBags || 0)), 1) * 1.15;
-  const innerW = width - padX * 2;
-  const innerH = height - padTop - padBottom;
-  const stepX = innerW / Math.max(data.length - 1, 1);
-  const xAt = (i) => (data.length === 1 ? width / 2 : padX + i * stepX);
-  const yAt = (v) => padTop + innerH - (v / max) * innerH;
-
-  const path = (key) => data.map((d, i) => `${i === 0 ? "M" : "L"}${xAt(i)},${yAt(d[key] || 0)}`).join(" ");
-  const linePath = path("bags");
-  const areaPath = `${linePath} L${xAt(data.length - 1)},${padTop + innerH} L${xAt(0)},${padTop + innerH} Z`;
-  const labelEvery = Math.max(1, Math.ceil(data.length / 8));
-  const showMarkers = data.length <= 45;
-  const point = hover !== null ? data[hover] : null;
-
-  return (
-    <div className="relative" onMouseLeave={() => setHover(null)}>
-      <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-[240px]" preserveAspectRatio="none" role="img" aria-label="Bags collected over time">
-        <defs>
-          <linearGradient id="bagsFill" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={CURRENT_COLOR} stopOpacity="0.18" />
-            <stop offset="100%" stopColor={CURRENT_COLOR} stopOpacity="0" />
-          </linearGradient>
-        </defs>
-        {[0, 0.25, 0.5, 0.75, 1].map((g) => (
-          <line key={g} x1={padX} x2={width - padX} y1={padTop + innerH * g} y2={padTop + innerH * g} stroke="#F1F5F9" strokeWidth="1" />
-        ))}
-        <path d={areaPath} fill="url(#bagsFill)" />
-        {comparing && (
-          <path d={path("previousBags")} fill="none" stroke={PREVIOUS_COLOR} strokeWidth="2" strokeDasharray="5 4" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
-        )}
-        <path d={linePath} fill="none" stroke={CURRENT_COLOR} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
-        {hover !== null && (
-          <line x1={xAt(hover)} x2={xAt(hover)} y1={padTop} y2={padTop + innerH} stroke="#CBD5E1" strokeWidth="1" vectorEffect="non-scaling-stroke" />
-        )}
-        {data.map((d, i) => (showMarkers || hover === i) && (
-          <circle key={d.key} cx={xAt(i)} cy={yAt(d.bags)} r={hover === i ? 4.5 : 3} fill={CURRENT_COLOR} stroke="#fff" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
-        ))}
-        {data.map((d, i) => (i % labelEvery === 0 ? (
-          <text key={d.key} x={xAt(i)} y={height - 6} fontSize="10" fill="#94A3B8" textAnchor="middle">{d.label}</text>
-        ) : null))}
-        {/* Hover targets: one full-height column per point, wider than the marker */}
-        {data.map((d, i) => (
-          <rect
-            key={d.key}
-            x={xAt(i) - Math.max(stepX, 8) / 2}
-            y={0}
-            width={Math.max(stepX, 8)}
-            height={padTop + innerH}
-            fill="transparent"
-            onMouseEnter={() => setHover(i)}
-          />
-        ))}
-      </svg>
-      {point && (
-        <div
-          className="pointer-events-none absolute top-0 z-10 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs shadow-lg print:hidden"
-          style={{ left: `${(xAt(hover) / width) * 100}%`, transform: `translateX(${hover > data.length / 2 ? "-105%" : "5%"})` }}
-        >
-          <p className="font-semibold text-slate-800">{point.label}</p>
-          <p className="mt-1 flex items-center gap-1.5 text-slate-600">
-            <span className="h-2 w-2 rounded-full" style={{ backgroundColor: CURRENT_COLOR }} />
-            {point.bags.toLocaleString()} bags
-          </p>
-          {comparing && point.previousBags !== null && (
-            <p className="mt-0.5 flex items-center gap-1.5 text-slate-500">
-              <span className="h-0.5 w-2.5" style={{ backgroundColor: PREVIOUS_COLOR }} />
-              {point.previousBags.toLocaleString()} bags ({point.previousLabel})
-            </p>
-          )}
-        </div>
-      )}
-    </div>
-  );
-};
-
-// Donut chart of trash items by waste type.
-const DonutChart = ({ data }) => {
-  const size = 140;
-  const radius = 60;
-  const stroke = 20;
-  const circumference = 2 * Math.PI * radius;
-  const total = data.reduce((sum, d) => sum + d.value, 0);
-
-  let running = 0;
-  const segments = total > 0 ? data.filter((d) => d.value > 0).map((d) => {
-    const dash = (d.value / total) * circumference;
-    const rotation = (running / total) * 360;
-    running += d.value;
-    return (
-      <circle
-        key={d.name}
-        cx={size / 2}
-        cy={size / 2}
-        r={radius}
-        fill="none"
-        stroke={d.color}
-        strokeWidth={stroke}
-        strokeDasharray={`${dash} ${circumference - dash}`}
-        transform={`rotate(${rotation} ${size / 2} ${size / 2})`}
-      >
-        <title>{`${d.name}: ${d.value.toLocaleString()} (${d.pct}%)`}</title>
-      </circle>
-    );
-  }) : [];
-
-  return (
-    <div className="relative w-[140px] h-[140px] shrink-0">
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="-rotate-90">
-        {segments.length ? segments : <circle cx={70} cy={70} r={60} fill="none" stroke="#E5E7EB" strokeWidth={20} />}
-      </svg>
-      <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-        <span className="text-lg font-bold text-slate-900">{total.toLocaleString()}</span>
-        <span className="text-[10px] font-semibold text-slate-400">Total Items</span>
-      </div>
-    </div>
-  );
-};
-
 // --- Main Reports Page Component ---
-const Reports = () => {
+// CENRO's page, also opened by the City Admin (every barangay) and barangay/NGO accounts (their own
+// barangay only: it can't be changed).
+const Reports = ({ side = "admin" }) => {
   const { currentUser } = useOutletContext() || {};
+  const [params] = useSearchParams();
+  const lockedBarangay = side === "barangay" ? canonicalBarangay(currentUser?.location || "") || (currentUser?.location || "").trim() : "";
   const [search, setSearch] = useState("");
   // The filters being edited, and the ones the shown report was generated with.
-  const [draft, setDraft] = useState(defaultFilters);
-  const [applied, setApplied] = useState(defaultFilters);
+  const [draft, setDraft] = useState(() => defaultFilters(params, lockedBarangay));
+  const [applied, setApplied] = useState(() => defaultFilters(params, lockedBarangay));
+  // The chart a dashboard sent the reader to: scrolled to and outlined until they dismiss it.
+  // (The hotspot history is CENRO's only.)
+  const [focus, setFocus] = useState(() => {
+    const chart = params.get("chart");
+    return CHART_NAMES[chart] && (chart !== "hotspots" || side === "admin") ? chart : "";
+  });
+  const [outlined, setOutlined] = useState(Boolean(focus));
+  // CENRO's hotspot history of one collection area (?area=, from "View more" on its card).
+  const [hotspotArea, setHotspotArea] = useState(() => (side === "admin" ? params.get("area") || "" : ""));
+  const [areaList, setAreaList] = useState([]);
+  useEffect(() => {
+    if (side !== "admin") return undefined;
+    let cancelled = false;
+    api.collectionAreas()
+      .then((list) => {
+        if (!cancelled && Array.isArray(list)) {
+          setAreaList(list.map(mapArea).filter((a) => a.status !== "pending").sort((a, b) => a.name.localeCompare(b.name)));
+        }
+      })
+      .catch((err) => console.error("Failed to load collection areas:", err));
+    return () => { cancelled = true; };
+  }, [side]);
   const [trendGranularity, setTrendGranularity] = useState("Daily");
   // The history table: calendar months or Monday–Sunday weeks, and how many of them.
   const [history, setHistory] = useState({ unit: "month", count: 6 });
@@ -327,11 +226,28 @@ const Reports = () => {
   const historyName = history.unit === "week" ? "week" : "month";
   const historyLabel = (row) => `${row.label}${row.partial ? " (so far)" : ""}`;
 
-  // Barangay filter options: derived from actual submitted requests, not a fixed list.
+  // Barangay filter options: derived from actual submitted requests, not a fixed list. A barangay
+  // or NGO account only has its own.
   const barangays = useMemo(
-    () => Array.from(new Set(data.requests.map(requestBarangay).filter(Boolean))).sort(),
-    [data.requests]
+    () => (lockedBarangay ? [lockedBarangay] : Array.from(new Set(data.requests.map(requestBarangay).filter(Boolean))).sort()),
+    [data.requests, lockedBarangay]
   );
+
+  // Scroll to the chart a dashboard sent the reader to, once the report is on screen; its outline
+  // fades after a few seconds.
+  useEffect(() => {
+    if (loading || !focus) return undefined;
+    const target = document.querySelector(`[data-report-chart="${focus}"]`);
+    target?.scrollIntoView({ behavior: "smooth", block: "center" });
+    const timer = setTimeout(() => setOutlined(false), 6000);
+    return () => clearTimeout(timer);
+  }, [loading, focus]);
+  // The areas to choose from: the report's barangay's, when one is chosen (and the chosen area anyway).
+  const hotspotAreas = useMemo(
+    () => areaList.filter((a) => !selectedBarangay || a.barangay === selectedBarangay || a.id === hotspotArea),
+    [areaList, selectedBarangay, hotspotArea]
+  );
+  const chartFrame = (id) => (outlined && focus === id ? "ring-4 ring-blue-400/70 ring-offset-2 transition-shadow" : "transition-shadow");
 
   const filteredCollections = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -347,7 +263,7 @@ const Reports = () => {
     { label: "Requests", value: choosing ? `${current.length} selected: ${current.map((c) => c.requestId).join(", ")}` : "All in the period", icon: ListChecks },
     { label: "Report Type", value: "Collection Report", icon: FileText },
     { label: "Generated On", value: generatedOn(), icon: Clock },
-    { label: "Generated By", value: currentUser?.name || "CENRO Admin", icon: UserCircle2 },
+    { label: "Generated By", value: currentUser?.name || "TROID", icon: UserCircle2 },
   ];
 
   const kpis = [
@@ -803,7 +719,38 @@ const Reports = () => {
       )}
 
       {/* Filter bar: the period, barangay and comparison, applied by Generate Report */}
+      {focus && (
+        <div className="mb-4 flex flex-wrap items-center gap-2 rounded-xl border border-blue-100 bg-blue-50 px-4 py-2.5 text-sm text-blue-900 print:hidden" role="status">
+          <LayoutDashboard size={16} className="shrink-0 text-blue-600" />
+          {focus === "hotspots" ? (
+            <span className="flex-1">
+              From Collection Areas: <span className="font-semibold">{CHART_NAMES[focus]}</span>
+              {areaList.find((a) => a.id === hotspotArea) ? ` of ${areaList.find((a) => a.id === hotspotArea).name}` : ""}, month by month for the last year.
+            </span>
+          ) : (
+            <span className="flex-1">
+              From the dashboard: <span className="font-semibold">{CHART_NAMES[focus]}</span>, for {period.label}
+              {comparing ? ` against ${period.previous.label}` : ""}.
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={() => {
+              setOutlined(true);
+              document.querySelector(`[data-report-chart="${focus}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+            }}
+            className="text-xs font-semibold text-blue-700 hover:text-blue-800"
+          >
+            Show it
+          </button>
+          <button type="button" onClick={() => setFocus("")} className="rounded p-0.5 text-blue-400 hover:text-blue-700" aria-label="Dismiss">
+            <X size={14} />
+          </button>
+        </div>
+      )}
+
       <ReportFilters
+        lockedBarangay={lockedBarangay}
         draft={draft}
         onChange={(changes) => setDraft((d) => ({ ...d, ...changes }))}
         barangays={barangays}
@@ -862,7 +809,7 @@ const Reports = () => {
 
       {/* Charts section: trend line + waste type donut chart side-by-side */}
       <div className="grid grid-cols-1 lg:grid-cols-[1.6fr_1fr] gap-5 mb-6">
-        <div className={`${CARD} p-6`}>
+        <div data-report-chart="bags" className={`${CARD} p-6 scroll-mt-24 ${chartFrame("bags")}`}>
           <div className="flex flex-wrap items-center justify-between gap-3 mb-2">
             <h2 className="text-sm font-bold text-slate-900">Total Bags Collected Over Time</h2>
             <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg print:hidden">
@@ -895,7 +842,7 @@ const Reports = () => {
           <TrendChart data={trend} comparing={comparing} />
         </div>
 
-        <div className={`${CARD} p-6`}>
+        <div data-report-chart="waste" className={`${CARD} p-6 scroll-mt-24 ${chartFrame("waste")}`}>
           <h2 className="text-sm font-bold text-slate-900 mb-4">
             Waste Collection Distribution <span className="text-slate-400 font-medium">(by Type of Waste)</span>
           </h2>
@@ -925,6 +872,41 @@ const Reports = () => {
           )}
         </div>
       </div>
+
+      {/* Cleanups finished per day / week / month, against the compared period */}
+      <div data-report-chart="cleanups" className={`${CARD} p-6 mb-6 scroll-mt-24 ${chartFrame("cleanups")}`}>
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-2">
+          <div>
+            <h2 className="text-sm font-bold text-slate-900">Cleanups Finished Over Time</h2>
+            <p className="text-xs text-slate-400 mt-0.5">Cleanups with a filed trash report, with a robot or by hand. Same steps as the bags chart ({trendGranularity.toLowerCase()}).</p>
+          </div>
+          {comparing ? (
+            <div className="flex flex-wrap items-center gap-4 text-xs text-slate-500">
+              <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: CURRENT_COLOR }} /> This period</span>
+              <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm opacity-60" style={{ backgroundColor: PREVIOUS_COLOR }} /> {compareName}</span>
+              <span>
+                {formatMetric(stats.now.drives)} vs {formatMetric(stats.before.drives)} cleanups <Change change={metric("drives").change} className="ml-1" />
+              </span>
+            </div>
+          ) : (
+            <span className="text-xs text-slate-500">{formatMetric(stats.now.drives)} cleanups</span>
+          )}
+        </div>
+        <CompareBarChart data={trend} comparing={comparing} height={220} />
+      </div>
+
+      {/* CENRO: one collection area's hotspot history and condition report */}
+      {side === "admin" && (
+        <div data-report-chart="hotspots" className={`${CARD} p-6 mb-6 min-h-[260px] scroll-mt-24 ${chartFrame("hotspots")}`}>
+          <AreaHotspotHistory
+            areas={hotspotAreas}
+            areaId={hotspotArea}
+            onAreaChange={setHotspotArea}
+            initialMonth={params.get("month") || ""}
+            currentUser={currentUser}
+          />
+        </div>
+      )}
 
       {/* Bottom section: collection summary table + report overview / export actions */}
       <div className="grid grid-cols-1 lg:grid-cols-[1.6fr_1fr] gap-5 mb-6">
@@ -1029,7 +1011,7 @@ const Reports = () => {
 
       {/* Comparative data: this period against the one before it, overall and per place */}
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_1fr] gap-5 mb-6">
-        <div className={`${CARD} p-6`}>
+        <div data-report-chart="comparison" className={`${CARD} p-6 scroll-mt-24 ${chartFrame("comparison")}`}>
           <h2 className="text-sm font-bold text-slate-900">Period Comparison</h2>
           <p className="text-xs text-slate-400 mt-0.5 mb-4">
             {comparing ? `${period.label} vs ${period.previous.label} (${compareName.toLowerCase()})` : `${period.label} · ${noComparisonText.toLowerCase()}`}
@@ -1058,7 +1040,7 @@ const Reports = () => {
           </div>
         </div>
 
-        <div className={`${CARD} p-6`}>
+        <div data-report-chart="places" className={`${CARD} p-6 scroll-mt-24 ${chartFrame("places")}`}>
           <h2 className="text-sm font-bold text-slate-900">Bags by {groupBy}</h2>
           <p className="text-xs text-slate-400 mt-0.5 mb-4">
             {selectedBarangay ? `Collection areas in ${selectedBarangay}` : "Every barangay with a filed trash report"}

@@ -154,7 +154,7 @@ export const api = {
     return api.get(`/collection-areas/${q ? `?${q}` : ''}`);
   },
   collectionAreaDetail: (id) => api.get(`/collection-areas/${id}/`),
-  // The area month by month, the way hotspots are decided (priority.area_history). months: how many, oldest first.
+  // CENRO: the area month by month, the way hotspots are decided (priority.area_history). months: how many, oldest first.
   collectionAreaHistory: (id, months = 12) => api.get(`/collection-areas/${id}/history/?months=${months}`),
   createCollectionArea: (data) => api.post('/collection-areas/', data),
   updateCollectionArea: (id, data) => api.put(`/collection-areas/${id}/`, data),

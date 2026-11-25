@@ -1,12 +1,19 @@
-import { Trash2, Ship, AlertTriangle } from 'lucide-react';
-import { useEffect, useState } from 'react';
+// CENRO's dashboard: this month so far against the same dates last month, citywide. Every KPI and
+// chart opens the Reports page on the same figures.
+import { AlertTriangle, Inbox, Scale, Ship, Trash2 } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useOutletContext } from 'react-router-dom';
 import api from '../../services/api';
 import HotspotsCard from '../../components/HotspotsCard';
 import PriorityAreaList from '../../components/PriorityAreaList';
-import { Panel, RecentActivityList, StatCard, TopAreasList } from '../../components/DashboardPanels';
-import { cleanupsThisMonth, topCollectionAreas } from '../../constants/requests';
+import { Panel, RecentActivityList } from '../../components/DashboardPanels';
+import {
+  BagsChartCard, CleanupsChartCard, DashboardHeader, KpiCard, PlacesChartCard, WasteChartCard,
+} from '../../components/DashboardOverview';
+import { dashboardSummary, reportsLink } from '../../utils/dashboardData';
 import { LIVE, useLiveVersion } from '../../hooks/useLiveUpdates';
+
+const REPORTS = '/admin/reports';
 
 const Dashboard = () => {
   const navigate = useNavigate();
@@ -36,10 +43,9 @@ const Dashboard = () => {
     fetchData();
   }, [live]);
 
-  const monthDays = cleanupsThisMonth(requestsData);
-  const monthBags = monthDays.reduce((sum, day) => sum + day.bags, 0);
-  const monthDrives = monthDays.reduce((sum, day) => sum + day.drives, 0);
-  const monthName = new Date().toLocaleDateString('en-US', { month: 'long', timeZone: 'Asia/Manila' });
+  const summary = useMemo(() => dashboardSummary(requestsData), [requestsData]);
+  const link = (chart) => reportsLink(REPORTS, summary.period, chart);
+  const { now, before, change, received } = summary;
 
   if (loading) {
     return (
@@ -50,69 +56,58 @@ const Dashboard = () => {
   }
 
   return (
-    <div className="h-full max-w-[1400px] mx-auto animate-fade-in flex flex-col overflow-hidden">
+    <div className="max-w-[1400px] mx-auto animate-fade-in pb-12">
+      <DashboardHeader
+        subtitle={`Welcome back, ${currentUser?.name || 'Admin'}`}
+        currentUser={currentUser}
+        userType="admin"
+        reportsPath={REPORTS}
+        period={summary.period}
+      />
 
-      {/* Page header */}
-      <header className="mb-6 shrink-0">
-        <h1 className="text-[28px] font-bold text-slate-900 tracking-tight leading-none">Dashboard</h1>
-        <p className="text-slate-500 text-sm mt-1.5 font-medium">Welcome back, {currentUser?.name || 'Admin'}</p>
-      </header>
+      {/* KPIs: this month so far against the same dates last month */}
+      <div className="mb-6 grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
+        <KpiCard icon={Trash2} tint="bg-blue-50 text-blue-600" label="Bags Collected" value={now.bags} unit="bags"
+          previous={before.bags} change={change.bags} comparedLabel="last month" to={link('bags')} />
+        <KpiCard icon={Ship} tint="bg-emerald-50 text-emerald-600" label="Cleanups Finished" value={now.drives}
+          previous={before.drives} change={change.drives} comparedLabel="last month" to={link('cleanups')} />
+        <KpiCard icon={Scale} tint="bg-violet-50 text-violet-600" label="Weight Collected" value={now.weightKg} unit="kg"
+          previous={before.weightKg} change={change.weightKg} comparedLabel="last month" to={link('comparison')} />
+        <KpiCard icon={Inbox} tint="bg-amber-50 text-amber-600" label="Requests Received" value={received.now}
+          previous={received.before} change={received.change} comparedLabel="last month"
+          to="/admin/requests?range=thisMonth" hint="Open this month's requests" />
+      </div>
 
-      {/* Two-column layout */}
-      <div className="grid grid-cols-1 xl:grid-cols-[1fr_360px] gap-6 items-start flex-1 min-h-0 overflow-hidden">
+      <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <BagsChartCard summary={summary} reportTo={link('bags')} />
+        <CleanupsChartCard summary={summary} reportTo={link('cleanups')} />
+      </div>
 
-        {/* ── LEFT COLUMN ── */}
-        <div className="flex flex-col gap-6 h-full min-h-0">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 shrink-0">
-            <StatCard
-              icon={Trash2}
-              title="Trash Collected"
-              value={monthBags}
-              unit={`Bags in ${monthName}`}
-              days={monthDays.map((d) => ({ date: d.date, value: d.bags }))}
-              color="#2563eb"
-              sparkUnit="bag"
-            />
-            <StatCard
-              icon={Ship}
-              title="Cleanup Drives Done"
-              value={monthDrives}
-              unit={`Drives in ${monthName}`}
-              days={monthDays.map((d) => ({ date: d.date, value: d.drives }))}
-              color="#10b981"
-              sparkUnit="drive"
-            />
-          </div>
+      <div className="mb-6 grid grid-cols-1 items-start gap-6 xl:grid-cols-[1fr_360px]">
+        <HotspotsCard title="Collective Hotspots" moreTo="/admin/heatmap" mapClassName="min-h-[380px]" />
+        {/* Collection areas whose cleanups bring in more bags each lately (last 30 days) than the month before. */}
+        <Panel
+          title={`Priority Areas (${priorityAreas.length})`}
+          icon={AlertTriangle}
+          action={{ label: 'View areas', onClick: () => navigate('/admin/collection-areas?priority=priority') }}
+        >
+          <PriorityAreaList
+            areas={priorityAreas}
+            emptyText="No collection area is bringing in more bags per cleanup than last month."
+          />
+        </Panel>
+      </div>
 
-          <HotspotsCard title="Collective Hotspots" moreTo="/admin/heatmap" className="flex-1 min-h-0" mapClassName="min-h-0" />
-        </div>
-
-        {/* ── RIGHT COLUMN (Sidebar Panels) ── */}
-        <div className="flex flex-col gap-6 h-full min-h-0 overflow-y-auto">
-          {/* Collection areas whose cleanups bring in more bags each lately (last 30 days) than the month before. */}
-          <Panel
-            title="Priority Areas"
-            icon={AlertTriangle}
-            action={{ label: 'View areas', onClick: () => navigate('/admin/collection-areas?priority=priority') }}
-          >
-            <PriorityAreaList
-              areas={priorityAreas}
-              emptyText="No collection area is bringing in more bags per cleanup than last month."
-            />
-          </Panel>
-
-          <Panel title="Most Trash Collected" action={{ label: 'View all', onClick: () => navigate('/admin/reports') }}>
-            <TopAreasList areas={topCollectionAreas(requestsData)} />
-          </Panel>
-
-          <Panel title="Recent Activities" action={{ label: 'View all', onClick: () => navigate('/admin/requests') }}>
-            <RecentActivityList
-              requests={requestsData.slice(0, 5)}
-              requestPath={(req) => `/admin/requests/${req.request_id}`}
-              areaPath={(area) => `/admin/collection-areas?q=${encodeURIComponent(area.name)}&area=${encodeURIComponent(area.area_id)}`}
-            />
-          </Panel>
-        </div>
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 xl:grid-cols-3">
+        <WasteChartCard summary={summary} reportTo={link('waste')} />
+        <PlacesChartCard summary={summary} title="Bags by Barangay" reportTo={link('places')} />
+        <Panel title="Recent Activities" action={{ label: 'View all', onClick: () => navigate('/admin/requests') }}>
+          <RecentActivityList
+            requests={requestsData.slice(0, 6)}
+            requestPath={(req) => `/admin/requests/${req.request_id}`}
+            areaPath={(area) => `/admin/collection-areas?q=${encodeURIComponent(area.name)}&area=${encodeURIComponent(area.area_id)}`}
+          />
+        </Panel>
       </div>
     </div>
   );

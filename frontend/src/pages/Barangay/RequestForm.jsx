@@ -26,6 +26,8 @@ import AreaPickerModal from "../../components/AreaPickerModal";
 import DocumentPreview from "../../components/DocumentPreview";
 import { base64ToBlob, letterKind } from "../../utils/letters";
 import { LIVE, useLiveRefresh } from "../../hooks/useLiveUpdates";
+import { MonthAvailability, WeekTimetable } from "../../components/BotTimetable";
+import { availabilityByDay, freeBots } from "../../utils/botAvailability";
 
 const REQUEST_TYPE = "Cleanup";
 
@@ -35,7 +37,6 @@ const CLEANUP_TYPES = [
   { value: "unsupported", label: "Unsupported", hint: "A manual cleanup with no bot; give its location", icon: Users },
 ];
 
-const DAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const TIME_SLOTS = [
   "06:00", "07:00", "08:00", "09:00", "10:00", "11:00", "12:00",
@@ -60,159 +61,6 @@ function getWeekDays(center) {
     return d;
   });
 }
-const STATUS_STYLES = {
-  scheduled: "bg-emerald-50 text-emerald-700 border border-emerald-100",
-  maintenance: "bg-amber-50 text-amber-700 border border-amber-100",
-  available: "bg-sky-50 text-sky-700 border border-sky-100",
-  none: "bg-slate-50 text-slate-400 border border-slate-100",
-};
-
-function TimeTable({ days, bots, scheduleMap, selectedDate, onSelectDate, minSelectableDate }) {
-  const gridCols = `160px repeat(${days.length}, minmax(40px, 1fr))`;
-  const minWidth = Math.max(640, 160 + days.length * 48);
-  return (
-    <div className="border border-slate-100 rounded-xl overflow-hidden">
-      <div className="overflow-auto">
-        <div style={{ minWidth }}>
-          <div
-            className="grid gap-1 p-2 border-b border-slate-100 bg-slate-50 sticky top-0 z-20"
-            style={{ gridTemplateColumns: gridCols }}
-          >
-            <div className="bg-slate-50 sticky left-0 z-20 border-r border-slate-200">
-              <span className="block px-2 py-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">Bot</span>
-            </div>
-            {days.map((d) => {
-              const isSelected = selectedDate === dateKey(d);
-              const isDisabled = d < minSelectableDate;
-              return (
-                <button
-                  key={d.toISOString()}
-                  type="button"
-                  disabled={isDisabled}
-                  onClick={() => onSelectDate(d)}
-                  className={`flex flex-col items-center py-1 rounded-md transition-colors ${
-                    isDisabled
-                      ? "bg-slate-50 opacity-40 cursor-not-allowed"
-                      : isSelected
-                        ? "bg-[#1b4de4] hover:bg-[#153eb8]"
-                        : "bg-slate-50 hover:bg-slate-100"
-                  }`}
-                >
-                  <span className={`text-[11px] font-semibold ${isSelected && !isDisabled ? "text-white" : "text-slate-500"}`}>{DAY_SHORT[d.getDay()]}</span>
-                  <span className={`text-sm font-bold ${isSelected && !isDisabled ? "text-white" : "text-slate-800"}`}>{d.getDate()}</span>
-                </button>
-              );
-            })}
-          </div>
-          <div className="divide-y divide-slate-50">
-            {bots.length === 0 && (
-              <p className="p-6 text-center text-sm text-slate-400">No bots available.</p>
-            )}
-            {bots.map((bot) => (
-              <div
-                key={bot.id}
-                className="grid gap-1 p-1 items-center"
-                style={{ gridTemplateColumns: gridCols }}
-              >
-                <div className="bg-white sticky left-0 z-10 border-r border-slate-200">
-                  <span className="block px-2 py-2 text-xs font-semibold text-slate-600 truncate" title={bot.name}>
-                    {bot.name}
-                  </span>
-                </div>
-                {days.map((d) => {
-                  const entry = scheduleMap[String(bot.id)]?.[dateKey(d)];
-                  const isSelected = selectedDate === dateKey(d);
-                  const isDisabled = d < minSelectableDate;
-                  const styles = isDisabled
-                    ? "bg-slate-50 text-slate-300 cursor-not-allowed"
-                    : `${STATUS_STYLES[entry?.status] || STATUS_STYLES.none}${isSelected ? " ring-2 ring-blue-500" : ""}`;
-                  return (
-                    <button
-                      key={d.toISOString()}
-                      type="button"
-                      disabled={isDisabled}
-                      onClick={() => onSelectDate(d)}
-                      className={`h-9 rounded-lg text-[11px] font-medium transition-colors ${styles}`}
-                    >
-                      {!isDisabled && entry?.status === "scheduled" ? entry.label : ""}
-                    </button>
-                  );
-                })}
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-      <div className="flex flex-wrap items-center gap-4 border-t border-slate-100 p-3 text-xs text-slate-400">
-        <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />Scheduled</span>
-        <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-sky-500" />Available</span>
-        <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-amber-500" />Maintenance</span>
-        <span className="ml-auto text-slate-400">Click a day header to select it, then Confirm.</span>
-      </div>
-    </div>
-  );
-}
-
-function MonthCalendar({ anchor, scheduleMap, bots, selectedDate, onSelectDate, minSelectableDate }) {
-  const year = anchor.getFullYear();
-  const month = anchor.getMonth();
-  const first = new Date(year, month, 1);
-  const startWeekday = first.getDay();
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const cells = [];
-  for (let i = 0; i < startWeekday; i++) cells.push(null);
-  for (let d = 1; d <= daysInMonth; d++) cells.push(new Date(year, month, d));
-
-  return (
-    <div className="border border-slate-100 rounded-xl overflow-hidden">
-      <div className="grid grid-cols-7 gap-px bg-slate-100">
-        {DAY_SHORT.map((d) => (
-          <div key={d} className="bg-slate-50 py-2 text-center text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-            {d}
-          </div>
-        ))}
-      </div>
-      <div className="grid grid-cols-7 gap-px bg-slate-100">
-        {cells.map((d, idx) =>
-          d === null ? (
-            <div key={`blank-${idx}`} className="bg-white h-12" />
-          ) : (
-            (() => {
-              const key = dateKey(d);
-              const isToday = key === dateKey(new Date());
-              const isSelected = selectedDate === key;
-              const isDisabled = d < minSelectableDate;
-              const scheduled = bots.filter((b) => scheduleMap[String(b.id)]?.[key]?.status === "scheduled");
-              return (
-                <button
-                  key={idx}
-                  type="button"
-                  disabled={isDisabled}
-                  onClick={() => onSelectDate(d)}
-                  className={`h-12 flex flex-col items-center justify-center p-1 transition-colors ${
-                    isDisabled
-                      ? "bg-white opacity-40 cursor-not-allowed"
-                      : isSelected
-                        ? "bg-[#b8dbff] ring-1 ring-inset ring-[#d6ecff]"
-                        : "bg-white hover:bg-slate-50"
-                  }`}
-                >
-                  <span className={`text-sm font-semibold ${isSelected && !isDisabled ? "text-[#0369a1]" : isToday && !isDisabled ? "text-[#1b4de4]" : "text-slate-700"}`}>{d.getDate()}</span>
-                  {!isDisabled && scheduled.length > 0 && (
-                    <span className="mt-0.5 text-[10px] font-medium text-emerald-600">
-                      {scheduled.length} bot{scheduled.length > 1 ? "s" : ""}
-                    </span>
-                  )}
-                </button>
-              );
-            })()
-          )
-        )}
-      </div>
-    </div>
-  );
-}
-
 // The same form for Barangay/NGO accounts and for CENRO (forCenro), which also picks the barangay.
 function RequestForm({ currentUser, forCenro = false }) {
   const navigate = useNavigate();
@@ -247,16 +95,17 @@ function RequestForm({ currentUser, forCenro = false }) {
   const [selectedPhotoIndex, setSelectedPhotoIndex] = useState(0);
   const [showTimeTable, setShowTimeTable] = useState(false);
   const [bots, setBots] = useState([]);
-  const [scheduleMap, setScheduleMap] = useState({});
-  const [ttLoading, setTtLoading] = useState(false);
+  const [schedules, setSchedules] = useState([]);
   const [ttLoaded, setTtLoaded] = useState(false);
+  const [ttFailed, setTtFailed] = useState(false);
   const [ttFilter, setTtFilter] = useState("month");
   const [ttAnchor, setTtAnchor] = useState(new Date());
   const [ttSelected, setTtSelected] = useState("");
-  const [ttBotPage, setTtBotPage] = useState(0);
-  const BOTS_PER_PAGE = 6;
-  const totalBotPages = Math.max(1, Math.ceil(bots.length / BOTS_PER_PAGE));
-  const pagedBots = bots.slice(ttBotPage * BOTS_PER_PAGE, (ttBotPage + 1) * BOTS_PER_PAGE);
+  // The time picked in the week's timetable, if one was ("08:00").
+  const [ttTime, setTtTime] = useState("");
+  // Until the first answer comes in; a reload after a booking changes keeps the old one on screen.
+  const ttLoading = showTimeTable && !ttLoaded && bots.length === 0 && !ttFailed;
+  const availability = useMemo(() => availabilityByDay(bots, schedules), [bots, schedules]);
   const minSelectableDate = new Date();
   minSelectableDate.setHours(0, 0, 0, 0);
   minSelectableDate.setDate(minSelectableDate.getDate() + 7);
@@ -301,32 +150,32 @@ function RequestForm({ currentUser, forCenro = false }) {
   }, [barangayLocation, forCenro]);
 
   useEffect(() => {
-    if (!showTimeTable || ttLoaded) return;
-    setTtLoading(true);
+    if (!showTimeTable || ttLoaded) return undefined;
+    let cancelled = false;
     Promise.all([api.boats(), api.deploymentSchedules()])
       .then(([boatsData, schedData]) => {
-        setBots((boatsData || []).map((b) => ({ id: b.id, name: b.name || `Bot ${b.id}` })));
-        const map = {};
-        (schedData || []).forEach((s) => {
-          // Non-TROID (manual) cleanups have no bot, so they take up no bot's day.
-          if (s.bot == null) return;
-          const botId = String(s.bot);
-          map[botId] = map[botId] || {};
-          map[botId][s.day] = { status: s.status || "none", label: s.label || "", zone: s.zone || "" };
-        });
-        setScheduleMap(map);
+        if (cancelled) return;
+        // The fleet: every robot that isn't archived.
+        setBots((boatsData || []).filter((b) => !b.archived).map((b) => ({ id: b.id, name: b.name || `Bot ${b.id}` })));
+        setSchedules(Array.isArray(schedData) ? schedData : []);
+        setTtFailed(false);
         setTtLoaded(true);
-        setTtLoading(false);
       })
-      .catch(() => setTtLoading(false));
+      .catch((err) => {
+        console.error("Failed to load the bot timetable:", err);
+        if (!cancelled) setTtFailed(true);
+      });
+    return () => { cancelled = true; };
   }, [showTimeTable, ttLoaded]);
 
   // Someone else's booking may take a day: load the timetable again when bookings change.
   useLiveRefresh([LIVE.schedules, LIVE.fleet], () => setTtLoaded(false));
 
-  const selectDay = (d) => {
+  // A day (from its header) or a day and time (from the week's timetable).
+  const selectDay = (d, slot = "") => {
     if (d < minSelectableDate) return;
     setTtSelected(dateKey(d));
+    if (slot) setTtTime(slot);
   };
 
   const jumpToWeek = (d) => {
@@ -337,9 +186,11 @@ function RequestForm({ currentUser, forCenro = false }) {
   };
 
   const confirmTtDate = () => {
-    setFormData({ ...formData, date: ttSelected });
+    setFormData({ ...formData, date: ttSelected, ...(ttTime ? { time: ttTime } : {}) });
     setShowTimeTable(false);
   };
+  const selectedInfo = ttSelected ? availability[ttSelected] : null;
+  const selectedFree = freeBots(selectedInfo, bots.length);
 
   const handleTtPrev = () => {
     const a = new Date(ttAnchor);
@@ -639,6 +490,7 @@ function RequestForm({ currentUser, forCenro = false }) {
                         setTtAnchor(minSelectableDate);
                         setTtSelected(dateKey(minSelectableDate));
                       }
+                      setTtTime(formData.time || "");
                       setShowTimeTable(true);
                     }}
                     className="w-full flex items-center rounded-lg border border-slate-200 bg-white py-2.5 pl-9 pr-9 text-sm text-left outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
@@ -962,12 +814,18 @@ function RequestForm({ currentUser, forCenro = false }) {
 
       {showTimeTable && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/40 p-4">
-          <div className="w-full max-w-4xl bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden max-h-[90vh] flex flex-col">
-            <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+          <div className="w-full max-w-5xl bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden max-h-[92vh] flex flex-col">
+            <div className="p-6 border-b border-slate-100 flex items-center justify-between gap-3">
               <div>
                 <h3 className="text-lg font-bold text-slate-900">Bot Availability Timetable</h3>
-                <p className="text-xs text-slate-500 mt-1">Pick a preferred date based on TROID bot deployment schedules. Dates within the next 7 days are unavailable.</p>
+                <p className="text-xs text-slate-500 mt-1">
+                  Pick a preferred date (and, in the week, a time) from the cleanups already booked. Dates within the next 7 days are unavailable.
+                </p>
               </div>
+              <span className="ml-auto inline-flex shrink-0 items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-600">
+                <Bot size={14} className="text-[#1b4de4]" />
+                {bots.length} robot{bots.length === 1 ? "" : "s"} in the fleet
+              </span>
               <button
                 onClick={() => setShowTimeTable(false)}
                 className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 transition-colors"
@@ -1017,23 +875,27 @@ function RequestForm({ currentUser, forCenro = false }) {
               </div>
             </div>
 
-            <div className="p-4 overflow-auto h-[380px]">
+            <div className="p-4 overflow-auto h-[470px]">
               {ttLoading ? (
                 <div className="flex items-center justify-center h-48 text-sm text-slate-500">Loading timetable...</div>
+              ) : ttFailed && bots.length === 0 ? (
+                <div className="flex items-center justify-center h-48 text-sm text-red-600">The timetable couldn&apos;t be loaded. Close it and try again.</div>
               ) : ttFilter === "week" ? (
-                <TimeTable
+                <WeekTimetable
                   days={getWeekDays(ttAnchor)}
-                  bots={pagedBots}
-                  scheduleMap={scheduleMap}
+                  slots={TIME_SLOTS}
+                  availability={availability}
+                  fleetSize={bots.length}
                   selectedDate={ttSelected}
-                  onSelectDate={selectDay}
+                  selectedTime={ttTime}
+                  onSelect={selectDay}
                   minSelectableDate={minSelectableDate}
                 />
               ) : (
-                <MonthCalendar
+                <MonthAvailability
                   anchor={ttAnchor}
-                  scheduleMap={scheduleMap}
-                  bots={bots}
+                  availability={availability}
+                  fleetSize={bots.length}
                   selectedDate={ttSelected}
                   onSelectDate={jumpToWeek}
                   minSelectableDate={minSelectableDate}
@@ -1041,51 +903,20 @@ function RequestForm({ currentUser, forCenro = false }) {
               )}
             </div>
 
-            {ttFilter === "week" && (
-              <div className="px-4 py-3 border-t border-slate-100 flex items-center justify-between">
-                <span className="text-xs text-slate-400">Page {ttBotPage + 1} of {totalBotPages}</span>
-                <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => setTtBotPage((p) => Math.max(0, p - 1))}
-                    disabled={ttBotPage === 0}
-                    aria-label="Previous page"
-                    className="flex items-center justify-center rounded-lg border border-slate-200 w-8 h-8 text-slate-500 hover:bg-slate-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <ChevronLeft size={16} />
-                  </button>
-                  {Array.from({ length: totalBotPages }).map((_, i) => (
-                    <button
-                      key={i}
-                      type="button"
-                      onClick={() => setTtBotPage(i)}
-                      className={`flex items-center justify-center rounded-lg border w-8 h-8 text-xs font-medium transition-colors ${
-                        i === ttBotPage
-                          ? "border-[#1b4de4] bg-[#1b4de4] text-white"
-                          : "border-slate-200 text-slate-500 hover:bg-slate-50"
-                      }`}
-                    >
-                      {i + 1}
-                    </button>
-                  ))}
-                  <button
-                    type="button"
-                    onClick={() => setTtBotPage((p) => Math.min(totalBotPages - 1, p + 1))}
-                    disabled={ttBotPage >= totalBotPages - 1}
-                    aria-label="Next page"
-                    className="flex items-center justify-center rounded-lg border border-slate-200 w-8 h-8 text-slate-500 hover:bg-slate-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <ChevronRight size={16} />
-                  </button>
-                </div>
-              </div>
-            )}
-
             <div className="p-4 border-t border-slate-100 flex items-center justify-between gap-2">
-              <span className="text-xs text-slate-400">
-                {ttSelected
-                  ? `Selected: ${new Date(ttSelected + "T00:00:00").toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`
-                  : "Select a day to continue."}
+              <span className="text-xs text-slate-500">
+                {ttSelected ? (
+                  <>
+                    Selected: <span className="font-semibold text-slate-700">
+                      {new Date(ttSelected + "T00:00:00").toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}
+                      {ttTime ? ` at ${formatTime12h(ttTime)}` : ""}
+                    </span>
+                    {" · "}{selectedFree} of {bots.length} robot{bots.length === 1 ? "" : "s"} free, {selectedInfo?.cleanups || 0} cleanup{selectedInfo?.cleanups === 1 ? "" : "s"} booked
+                    {isTroid && selectedFree === 0 && (
+                      <span className="mt-0.5 block font-medium text-amber-600">No robot is free that day, so CENRO may have to move the cleanup.</span>
+                    )}
+                  </>
+                ) : "Select a day to continue."}
               </span>
               <div className="flex items-center gap-2">
                 <button

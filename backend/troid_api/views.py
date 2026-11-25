@@ -1867,7 +1867,8 @@ class CollectionAreaViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
     serializer_class = CollectionAreaSerializer
     lookup_field = 'area_id'
     action_roles = {
-        'history': ADMIN + REQUESTERS,
+        # An area's hotspot history and condition report are CENRO's (on Report Generation).
+        'history': ADMIN,
         'create': ADMIN + REQUESTERS,
         'partial_update': ADMIN + REQUESTERS,
         'destroy': ADMIN + REQUESTERS,
@@ -1921,12 +1922,9 @@ class CollectionAreaViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
     def history(self, request, area_id=None):
         """The area's last ?months= calendar months (default 12, at most 24), oldest first, split
         the way hotspots are decided (priority.area_history): whether it was a hotspot at each
-        month's end and what its cleanups in the 30 days before brought in. Barangay and NGO
-        accounts only see their own barangay's areas."""
+        month's end and what its cleanups in the 30 days before brought in. CENRO only: barangay
+        and NGO accounts compare hotspots on their Bot Tracking page instead."""
         area = self.get_object()
-        if getattr(request.user, 'role', None) in REQUESTERS:
-            require(request, bool(own_barangay(request.user)) and area.barangay == own_barangay(request.user),
-                    'area belongs to another barangay')
         try:
             months = int(request.query_params.get('months') or 12)
         except ValueError:
@@ -2001,7 +1999,7 @@ class DeploymentScheduleViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
 
 
 @api_view(['GET'])
-@permission_classes([HasRole(*ADMIN, *REQUESTERS)])
+@permission_classes([HasRole(*ADMIN, *MAYOR, *REQUESTERS)])
 def priority_areas(request):
     """Each collection area with recent cleanups, and whether it is a priority: its average
     bags per cleanup over the last 30 days is higher than over the 30 days before (see
@@ -2022,7 +2020,7 @@ def priority_areas(request):
 
 
 @api_view(['GET'])
-@permission_classes([HasRole(*ADMIN, *REQUESTERS)])
+@permission_classes([HasRole(*ADMIN, *MAYOR, *REQUESTERS)])
 def hotspots(request):
     """The collection areas that were hotspots (priority areas: more bags per cleanup than the
     month before) in each of the last ?months= calendar months (default 12, at most 24), oldest

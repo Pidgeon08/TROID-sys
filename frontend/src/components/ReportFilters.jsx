@@ -295,7 +295,7 @@ function RequestPicker({ draft, onChange, candidates }) {
  * and Generate Report, which wraps on narrow screens. Changes stay in `draft` until Generate
  * Report applies them; `children` is the status line shown under the controls.
  */
-export default function ReportFilters({ draft, onChange, barangays, candidates = [], onGenerate, children }) {
+export default function ReportFilters({ draft, onChange, barangays, candidates = [], onGenerate, lockedBarangay = "", children }) {
   const requestsChosen = candidates.some((c) => draft.requestIds.includes(c.requestId));
   return (
     <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] px-4 py-4 sm:px-5 mb-6 print:hidden">
@@ -307,6 +307,9 @@ export default function ReportFilters({ draft, onChange, barangays, candidates =
           <select
             value={draft.barangay}
             onChange={(e) => onChange({ barangay: e.target.value })}
+            // A barangay or NGO account only reports on its own barangay.
+            disabled={Boolean(lockedBarangay)}
+            title={lockedBarangay ? `Your account reports on Barangay ${lockedBarangay} only` : undefined}
             aria-label="Barangay"
             className={`${FILTER_CONTROL} ${draft.barangay ? "border-blue-300 bg-blue-50 text-blue-700" : FILTER_IDLE} w-full cursor-pointer pl-9 pr-8 xl:w-[200px]`}
           >
