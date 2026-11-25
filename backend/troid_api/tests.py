@@ -16,7 +16,7 @@ from django.test import SimpleTestCase, TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from . import backup, bot_auth, drives, live, mqtt_client, priority, views
+from . import backup, bot_auth, drives, live, mqtt_client, priority, views, water
 from .drives import TRASH_ITEMS
 from .models import (
     AuditLog, Boat, CollectionArea, DeploymentSchedule, DetectionEvent, LetterFile, Notification, Operator,
@@ -449,9 +449,12 @@ def around(lat, lng, d=0.0005):
     return [[lat + d, lng], [lat - d, lng - d], [lat - d, lng + d]]
 
 
-# Points well inside barangays (about 400 m from their borders), and out on the water west of Poro.
-IN_PORO = (16.61604, 120.28626)
-IN_CATBANGEN = (16.60797, 120.31252)
+# Points in barangays whose triangle (around) takes in some of their river, since an area needs
+# waterway inside it; a point on the Poro river itself; one on dry land; and out at sea west of Poro.
+IN_PORO = (16.6124, 120.3086)
+IN_CATBANGEN = (16.6082, 120.3109)
+ON_PORO_RIVER = [16.612354, 120.308746]
+PORO_DRY_LAND = (16.61604, 120.28626)
 SEA_500_M_OFF_PORO = [16.61828, 120.27289]
 SEA_2_KM_OFF_PORO = [16.61828, 120.25789]
 IN_BAUANG = [16.53, 120.33]
@@ -492,13 +495,46 @@ class CollectionAreaBoundaryTests(TestCase):
         self.assertFalse(CollectionArea.objects.exists())
 
     def test_water_near_the_barangay_is_allowed_but_not_far_out_or_another_town(self):
-        near = self.add(self.admin, barangay='Poro', closed=False, points=[list(IN_PORO), SEA_500_M_OFF_PORO])
-        far = self.add(self.admin, barangay='Poro', closed=False, points=[list(IN_PORO), SEA_2_KM_OFF_PORO])
+        near = self.add(self.admin, barangay='Poro', closed=False, points=[ON_PORO_RIVER, SEA_500_M_OFF_PORO])
+        far = self.add(self.admin, barangay='Poro', closed=False, points=[ON_PORO_RIVER, SEA_2_KM_OFF_PORO])
         bauang = self.add(self.admin, barangay='Pagdalagan', closed=False, points=[IN_BAUANG, IN_BAUANG])
 
         self.assertEqual(near.status_code, 201, near.content)
         self.assertIn('Point 2 is more than 1,000 m out from Poro', far.json()['points'][0])
         self.assertIn('is in Bauang, outside San Fernando', bauang.json()['points'][0])
+
+    def test_an_area_or_line_without_mapped_waterway_is_refused(self):
+        on_land = self.add(self.admin, barangay='Poro', points=around(*PORO_DRY_LAND))
+        line_on_land = self.add(self.barangay, barangay='Poro', closed=False, points=around(*PORO_DRY_LAND)[:2])
+
+        for response in (on_land, line_on_land):
+            self.assertEqual(response.status_code, 400)
+            self.assertIn('No mapped waterway', response.json()['points'][0])
+        self.assertFalse(CollectionArea.objects.exists())
+
+    def test_an_area_that_is_mostly_land_is_still_allowed(self):
+        # From the river mouth out over the fishermen's village: a little river, a lot of land.
+        big = [[16.6126, 120.3088], [16.616, 120.302], [16.611, 120.302]]
+        self.assertEqual(water.area_water(big)['status'], 'mostly_land')
+
+        response = self.add(self.admin, barangay='Poro', points=big)
+
+        self.assertEqual(response.status_code, 201, response.content)
+
+    def test_reshaping_onto_dry_land_is_refused(self):
+        area = CollectionArea.objects.create(name='River', barangay='Poro', points=around(*IN_PORO), status='approved')
+
+        response = self.client.patch(f'/api/collection-areas/{area.area_id}/', {'points': around(*PORO_DRY_LAND)},
+                                     format='json', **session_header(self.admin))
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('No mapped waterway', response.json()['points'][0])
+
+    def test_the_website_and_the_api_use_the_same_water_map(self):
+        website_copy = Path(__file__).resolve().parents[2] / 'frontend' / 'src' / 'data' / 'sanFernandoWater.json'
+        if not website_copy.exists():
+            self.skipTest('frontend not checked out')
+        self.assertEqual(website_copy.read_bytes(), water.DATA_FILE.read_bytes())
 
     def test_unknown_barangays_and_bad_shapes_are_refused(self):
         unknown = self.add(self.admin, barangay='Atlantis', points=around(*IN_PORO))
@@ -3196,6 +3232,61 @@ class HotspotHistoryTests(TestCase):
         self.assertEqual(len(many.json()['months']), priority.MAX_HISTORY_MONTHS)
         self.assertEqual(bad.status_code, 400)
         self.assertEqual(city_admin.status_code, 403)
+
+
+@override_settings(API_AUTH_ENFORCED=True)
+class AreaHistoryTests(TestCase):
+    """An area's own history, month by month the way hotspots are decided, for its history page."""
+
+    NOW = datetime(2026, 11, 20, 12, 0, tzinfo=priority.APP_TIMEZONE)
+
+    def setUp(self):
+        self.client = APIClient()
+        self.admin = make_user('admin')
+        self.area = CollectionArea.objects.create(name='Poro River', barangay='Poro', status='approved',
+                                                  points=[[1, 1], [1, 2], [2, 2]])
+        self.other = CollectionArea.objects.create(name='Catbangen River', barangay='Catbangen', status='approved',
+                                                   points=[[0, 0]] * 3)
+
+    def cleanup(self, area, bags, when, **fields):
+        req = Request.objects.create(barangay=area.barangay, collection_area=area, bags=bags, status='completed', **fields)
+        Request.objects.filter(pk=req.pk).update(session_completed_at=when)
+        return req
+
+    def test_each_month_says_whether_it_was_a_hotspot_and_what_was_collected(self):
+        self.cleanup(self.area, 5, datetime(2026, 9, 10, tzinfo=priority.APP_TIMEZONE), weight_kg=10,
+                     trash_categories={'Plastic': 20}, trash_items={'Plastic bags': 20})
+        october = self.cleanup(self.area, 12, datetime(2026, 10, 20, tzinfo=priority.APP_TIMEZONE), weight_kg=30,
+                               trash_categories={'Plastic': 50, 'Metal': 4}, trash_items={'Plastic bags': 50, 'Beverage cans': 4})
+        self.cleanup(self.other, 40, datetime(2026, 10, 21, tzinfo=priority.APP_TIMEZONE))
+        boat = Boat.objects.create(name='Bot')
+        DetectionEvent.objects.create(boat=boat, request=october, latitude=1, longitude=1, trash_count=3, is_verified=True)
+        DetectionEvent.objects.filter(request=october).update(timestamp=datetime(2026, 10, 20, 9, tzinfo=priority.APP_TIMEZONE))
+
+        history = priority.area_history(self.area, months=3, now=self.NOW)
+
+        self.assertEqual([(m['month'], m['status'], m['is_hotspot']) for m in history],
+                         [('2026-09', 'no_baseline', False), ('2026-10', 'priority', True), ('2026-11', 'no_recent', False)])
+        october = history[1]
+        self.assertEqual((october['cleanups'], october['bags'], october['weight_kg']), (1, 12, 30))
+        self.assertEqual(october['previous']['average'], 5)
+        self.assertEqual(october['change_pct'], 140.0)
+        self.assertEqual(october['classes'], {'Plastic': 50, 'Metal': 4})
+        self.assertEqual((october['detections'], october['detected_items']), (1, 3))
+
+    def test_barangay_accounts_only_get_their_own_areas(self):
+        poro = make_user('barangay')
+        User.objects.filter(pk=poro.pk).update(location='Poro')
+
+        own = self.client.get(f'/api/collection-areas/{self.area.area_id}/history/?months=2', **session_header(poro))
+        other = self.client.get(f'/api/collection-areas/{self.other.area_id}/history/', **session_header(poro))
+        bad = self.client.get(f'/api/collection-areas/{self.area.area_id}/history/?months=x', **session_header(self.admin))
+
+        self.assertEqual(own.status_code, 200, own.content)
+        self.assertEqual(len(own.json()['months']), 2)
+        self.assertEqual(own.json()['window_days'], 30)
+        self.assertEqual(other.status_code, 403)
+        self.assertEqual(bad.status_code, 400)
 
 
 class SampleDataRefreshTests(TestCase):

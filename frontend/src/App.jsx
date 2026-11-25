@@ -8,6 +8,7 @@ import { ProtectedRoute } from './components/ProtectedRoute';
 const Login = lazy(() => import('./pages/Login'));
 const Dashboard = lazy(() => import('./pages/Admin/Dashboard'));
 const HeatmapView = lazy(() => import('./pages/Admin/HeatmapView'));
+const AreaHistoryPage = lazy(() => import('./components/AreaHistoryPage'));
 const Reports = lazy(() => import('./pages/Admin/Reports'));
 const SendReport = lazy(() => import('./pages/Admin/SendReport'));
 const Settings = lazy(() => import('./pages/Admin/Settings'));
@@ -156,6 +157,7 @@ function App() {
             <Route path="/admin/request/send-request" element={<SendRequest />} />
             <Route path="/admin/deployment" element={<DeploymentSchedule />} />
             <Route path="/admin/collection-areas" element={<CollectionAreas />} />
+            <Route path="/admin/collection-areas/:areaId/history" element={<AreaHistoryPage side="admin" />} />
             <Route path="/admin/heatmap" element={<HeatmapView />} />
             <Route path="/admin/reports" element={<Reports />} />
             <Route path="/admin/audit" element={<AuditLogs />} />
@@ -184,6 +186,7 @@ function App() {
             <Route path="/barangay/requests" element={<BarangayRequests currentUser={currentUser} />} />
             <Route path="/barangay/requests/:id" element={<BarangayViewRequest />} />
             <Route path="/barangay/areas" element={<BarangayAreas />} />
+            <Route path="/barangay/areas/:areaId/history" element={<AreaHistoryPage side="barangay" />} />
             <Route path="/barangay/settings" element={<Settings />} />
             <Route path="/barangay/utilities" element={<Utilities />} />
           </Route>

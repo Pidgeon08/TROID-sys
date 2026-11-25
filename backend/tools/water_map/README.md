@@ -5,11 +5,12 @@ the water map should be refreshed; the app and the sample data read the built fi
 
 | Built file | Used by |
 |---|---|
-| `frontend/src/data/sanFernandoWater.json` | Heatmap coverage: only the water inside a collection area, and only points on the water, count. |
+| `frontend/src/data/sanFernandoWater.json` | Heatmap coverage (only the waterway inside a collection area, and only points on it, count), and drawing an area (it must take in some waterway). |
+| `backend/troid_api/data/san_fernando_water.json` | The same file, copied: the API refuses an area with no waterway inside (`troid_api/water.py`). |
 | `backend/troid_api/data/sample_areas.json` | `seed_sample_data`: the sample collection areas, drawn over real water, and the path each robot sweeps. |
 
-Water is the sea (split off along OSM's coastline), rivers, creeks, canals and ponds, within
-1.2 km of San Fernando's barangays. Rivers and creeks mapped only as a line are widened to a typical
+Water is the waterways (rivers, creeks, canals and ponds; not the sea, which TROID doesn't work),
+within 1.2 km of San Fernando's barangays. Rivers and creeks mapped only as a line are widened to a typical
 width (see `WIDTHS` in `build_water.py`). Data © OpenStreetMap contributors, ODbL.
 
 ## Rebuilding
@@ -24,6 +25,7 @@ curl -A "troid-map-data/1.0" --data-urlencode "data@water_query.overpassql" \
 # 2. The water map.
 python build_water.py osm_water.json ../../../frontend/src/data/sanFernandoBoundaries.json \
        ../../../frontend/src/data/sanFernandoWater.json
+cp ../../../frontend/src/data/sanFernandoWater.json ../../troid_api/data/san_fernando_water.json
 
 # 3. The sample areas and robot paths (run from the repository root).
 python backend/tools/water_map/build_samples.py osm_water.json frontend/src/data/sanFernandoWater.json \

@@ -41,7 +41,7 @@ def _window(bags):
     }
 
 
-def evaluate_priority_areas(as_of=None, barangay=None):
+def evaluate_priority_areas(as_of=None, barangay=None, area_id=None):
     """Every collection area with a finished cleanup in the last two windows before `as_of`
     (default now), priority areas first (the biggest rise first), then the rest by name.
 
@@ -63,6 +63,8 @@ def evaluate_priority_areas(as_of=None, barangay=None):
     )
     if barangay:
         cleanups = cleanups.filter(collection_area__barangay__iexact=barangay)
+    if area_id is not None:
+        cleanups = cleanups.filter(collection_area_id=area_id)
 
     areas = {}
     for req in cleanups:
@@ -150,4 +152,71 @@ def hotspot_history(months=12, barangay=None, now=None):
                 'points': area.points if area else [],
                 'closed': area.closed if area else True,
             }
+    return result
+
+
+def _sum(values):
+    values = [v for v in values if v is not None]
+    return round(sum(values), 1) if values else 0
+
+
+def area_history(area, months=12, now=None):
+    """One collection area's last `months` calendar months, oldest first, split the way hotspots
+    are decided: each month as it stood at its end (now for the current one), looking at the
+    WINDOW_DAYS before then. For each: whether the area was a hotspot then and why (its priority
+    entry: bags per cleanup against the window before), and what its finished cleanups in the
+    window brought in, for the area's history page and its condition report."""
+    from .models import DetectionEvent, Request
+
+    now = now or timezone.now()
+    today = now.astimezone(APP_TIMEZONE).date()
+    months = max(1, min(int(months), MAX_HISTORY_MONTHS))
+    result = []
+    for back in range(months - 1, -1, -1):
+        index = today.year * 12 + today.month - 1 - back
+        year, month = divmod(index, 12)
+        month += 1
+        current = back == 0
+        as_of = now if current else end_of_day(_month_end(year, month))
+        start = as_of - timedelta(days=WINDOW_DAYS)
+        priority = next(iter(evaluate_priority_areas(as_of=as_of, area_id=area.id)), None)
+
+        cleanups = list(
+            Request.objects.filter(
+                archived=False, bags__isnull=False, collection_area=area,
+                session_completed_at__gt=start, session_completed_at__lte=as_of,
+            ).exclude(status='merged')
+        )
+        classes, items = {}, {}
+        for req in cleanups:
+            for name, count in (req.trash_categories or {}).items():
+                classes[name] = classes.get(name, 0) + (count or 0)
+            for name, count in (req.trash_items or {}).items():
+                items[name] = items.get(name, 0) + (count or 0)
+        detections = DetectionEvent.objects.filter(
+            is_verified=True, request__collection_area=area, timestamp__gt=start, timestamp__lte=as_of,
+        )
+        result.append({
+            'month': f'{year:04d}-{month:02d}',
+            'start': start,
+            'as_of': as_of,
+            'so_far': current,
+            'status': priority['status'] if priority else 'no_cleanups',
+            'is_hotspot': bool(priority and priority['is_priority']),
+            'previous': priority['previous'] if priority else {'cleanups': 0, 'bags': 0, 'average': None},
+            'change_pct': priority['change_pct'] if priority else None,
+            'cleanups': len(cleanups),
+            'troid_cleanups': sum(1 for r in cleanups if r.cleanup_type == 'troid_supported'),
+            'bags': sum(r.bags or 0 for r in cleanups),
+            'average_bags': round(sum(r.bags or 0 for r in cleanups) / len(cleanups), 1) if cleanups else None,
+            'weight_kg': _sum(r.weight_kg for r in cleanups),
+            'recyclable_kg': _sum(r.recyclable_kg for r in cleanups),
+            'non_usable_kg': _sum(r.non_usable_kg for r in cleanups),
+            'people': sum(r.people_count or 0 for r in cleanups),
+            'hours': _sum(r.hours_spent for r in cleanups),
+            'classes': classes,
+            'items': items,
+            'detections': detections.count(),
+            'detected_items': sum(d.trash_count or 0 for d in detections.only('trash_count')),
+        })
     return result

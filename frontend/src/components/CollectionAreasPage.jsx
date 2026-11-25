@@ -1,12 +1,11 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
-import { useOutletContext, useSearchParams } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { useNavigate, useOutletContext, useSearchParams } from "react-router-dom";
 import { createPortal } from "react-dom";
 import { MapContainer, TileLayer, Polyline, Polygon, ZoomControl, useMap } from "react-leaflet";
 import { TILE_URL, TILE_ATTRIBUTION } from "../services/mapTiles";
 import "leaflet/dist/leaflet.css";
 import {
   Map as MapIcon,
-  Clock,
   CheckCircle2,
   XCircle,
   Layers,
@@ -23,21 +22,19 @@ import {
   AlertTriangle,
   Flame,
   Trash2,
+  History,
 } from "lucide-react";
 import api from "../services/api";
 import { logAudit } from "../services/auditLog";
-import { AreaDraftLayers, BarangayOutline } from "./AreaDrawing";
+import { AreaDraftLayers, BarangayOutline, WaterwaysLayer } from "./AreaDrawing";
 import { useAreaDraft } from "../hooks/useAreaDraft";
 import { BARANGAYS, canonicalBarangay } from "../utils/barangayBoundaries";
-import { formatArea, formatDistance, pathLengthM, ringAreaM2 } from "../utils/coverage";
+import { MOSTLY_LAND_RATIO, areaWater, formatArea, formatDistance } from "../utils/coverage";
 import {
   EMPTY_AREA_DETAILS,
   WATER_BODY_TYPES,
-  areaDetailsFromApi,
   areaDetailsToApi,
-  hasAreaDetails,
   pickAreaDetails,
-  waterBodyLabel,
 } from "../constants/collectionAreas";
 import { EmptyState } from "./ui/EmptyState";
 import AreaRequestsModal from "../pages/Admin/AreaRequestsModal";
@@ -49,22 +46,17 @@ import {
 import { LIVE, useLiveVersion } from "../hooks/useLiveUpdates";
 import { isAreaNotification, useMarkAreaRead, useUnreadNotifications } from "../hooks/useUnreadNotifications";
 import { UnreadDot } from "./ui/UnreadDot";
+import AreaDetails from "./AreaDetails";
+import { AREA_COLOR, STATUS_META, mapArea, shapeSize } from "../utils/collectionAreaInfo";
 import { HeatmapLayer } from "./MapLayers";
 import { LEGEND_CLASSES } from "../constants/mapLayers";
 
 const DEFAULT_CENTER = [16.6195, 120.314];
 const DEFAULT_ZOOM = 14;
-const AREA_COLOR = "#1b4de4";
 // The area's old shape, shown for reference while it is redrawn.
 const OLD_SHAPE_COLOR = "#64748b";
 
 const FILTER_OPTIONS = { fromParams: areaFiltersFromParams, toParams: areaFiltersToParams, empty: EMPTY_AREA_FILTERS };
-
-const STATUS_META = {
-  pending: { label: "Pending Approval", short: "Pending", cls: "bg-amber-50 text-amber-700", icon: Clock },
-  approved: { label: "Approved", short: "Approved", cls: "bg-emerald-50 text-emerald-700", icon: CheckCircle2 },
-  declined: { label: "Archived", short: "Archived", cls: "bg-red-50 text-red-700", icon: XCircle },
-};
 
 const PANEL = "bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)]";
 const MAP_BUTTON =
@@ -76,35 +68,6 @@ const FIELD =
   "w-full rounded-lg border border-slate-200 bg-white py-2.5 px-3 text-sm text-slate-700 placeholder:text-slate-400 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30";
 const LABEL = "block text-xs font-semibold text-slate-500 mb-1.5";
 
-function formatWhen(iso) {
-  return iso
-    ? new Date(iso).toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" })
-    : "";
-}
-
-function mapArea(raw) {
-  return {
-    id: raw.area_id,
-    name: raw.name,
-    barangay: raw.barangay || "",
-    submittedBy: raw.submitted_by || "",
-    closed: raw.closed,
-    points: raw.points || [],
-    color: raw.color || AREA_COLOR,
-    status: raw.status || "pending",
-    declineReason: raw.decline_reason || "",
-    reviewedBy: raw.reviewed_by || "",
-    dateReviewed: formatWhen(raw.date_reviewed),
-    dateSubmitted: formatWhen(raw.date_submitted),
-    updatedBy: raw.updated_by || "",
-    dateUpdated: formatWhen(raw.date_updated),
-    submittedAt: raw.date_submitted || "",
-    updatedAt: raw.date_updated || "",
-    requestCount: raw.request_count || 0,
-    ...areaDetailsFromApi(raw),
-  };
-}
-
 const emptyForm = () => ({ barangay: "", name: "", color: AREA_COLOR, ...EMPTY_AREA_DETAILS });
 const formFromArea = (a) => ({ barangay: a.barangay, name: a.name, color: a.color || AREA_COLOR, ...pickAreaDetails(a) });
 
@@ -114,11 +77,33 @@ function centroid(points) {
   return [sum[0] / points.length, sum[1] / points.length];
 }
 
-/** "1.20 ha" for a polygon, "350 m long" for a line. */
-function shapeSize({ closed, points }) {
-  if (closed && points.length >= 3) return formatArea(ringAreaM2(points));
-  if (!closed && points.length >= 2) return `${formatDistance(pathLengthM(points))} long`;
-  return "";
+/** How much of the shape being drawn is waterway: none blocks saving, mostly land is a warning. */
+function WaterNote({ water }) {
+  const size = water.unit === "m" ? formatDistance : formatArea;
+  const pct = water.size ? Math.round((water.water / water.size) * 100) : 0;
+  const what = water.unit === "m" ? "line" : "area";
+  if (water.status === "none") {
+    return (
+      <p className="rounded-md border border-red-100 bg-red-50 px-2.5 py-2 text-red-700" role="alert">
+        No mapped waterway {water.unit === "m" ? "along" : "inside"} this {what}. TROID only cleans the water, so draw it over a river, creek,
+        canal or pond (blue on the map). It can&apos;t be saved until it takes some in.
+      </p>
+    );
+  }
+  if (water.status === "mostlyLand") {
+    return (
+      <p className="rounded-md border border-amber-100 bg-amber-50 px-2.5 py-2 text-amber-800" role="alert">
+        Mostly land: only {pct}% of this {what} is waterway ({size(water.water)} of {size(water.size)}). TROID only cleans the water, so
+        keep the {what} close to it. You can still save it.
+      </p>
+    );
+  }
+  return (
+    <p className="flex items-center justify-between gap-2">
+      <span>Waterway {water.unit === "m" ? "along it" : "inside"}</span>
+      <span className="font-semibold text-sky-700">{size(water.water)} of {size(water.size)} ({pct}%)</span>
+    </p>
+  );
 }
 
 /** The server's reason, without the field name it is filed under. */
@@ -161,54 +146,6 @@ function AreaShape({ area, color, weight = 3, opacity = 0.9, dashed = false, fil
     <Polygon positions={area.points} interactive={!dashed} eventHandlers={eventHandlers} pathOptions={{ ...pathOptions, fillColor: color, fillOpacity: fillOpacity ?? (dashed ? 0.05 : 0.2) }} />
   ) : (
     <Polyline positions={area.points} interactive={!dashed} eventHandlers={eventHandlers} pathOptions={pathOptions} />
-  );
-}
-
-/** "22.1 bags in the last 30 days, up from 18.5 (+19.5%)": the figures behind the priority flag. */
-function priorityText(p) {
-  if (!p) return "";
-  const avg = (n) => `${n} bag${n === 1 ? "" : "s"}`;
-  switch (p.status) {
-    case "priority": return `${avg(p.current.average)} in the last ${p.window_days} days, up from ${avg(p.previous.average)} (+${p.change_pct}%). Priority area.`;
-    case "steady": return `${avg(p.current.average)} in the last ${p.window_days} days, down or level from ${avg(p.previous.average)}.`;
-    case "no_baseline": return `${avg(p.current.average)} in the last ${p.window_days} days; no cleanups the month before to compare with.`;
-    default: return `No cleanups in the last ${p.window_days} days (${avg(p.previous.average)} the month before).`;
-  }
-}
-
-/** What CENRO knows about an area, shown under it in the list. */
-function AreaDetails({ area }) {
-  const rows = [
-    ["Bags per cleanup", priorityText(area.priority)],
-    ["Water body", [waterBodyLabel(area.waterBodyType), area.waterBodyName].filter(Boolean).join(" · ")],
-    ["Hazards", area.hazards],
-    ["Cleanups", area.requestCount === 1 ? "1 request sent here" : `${area.requestCount} requests sent here`],
-    ["Made by", area.submittedBy || "Unknown"],
-    ["Created", area.dateSubmitted],
-    [
-      area.status === "declined" ? "Archived by" : "Approved by",
-      area.status === "pending"
-        ? "Not approved yet"
-        : [area.reviewedBy || "Unknown", area.dateReviewed].filter(Boolean).join(" • "),
-    ],
-    ["Last edited", area.updatedBy ? `${area.updatedBy} • ${area.dateUpdated}` : ""],
-  ].filter(([, value]) => value);
-
-  return (
-    <div className="py-3 text-xs">
-      {area.description && <p className="mb-2 whitespace-pre-line text-slate-600">{area.description}</p>}
-      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5">
-        {rows.map(([label, value]) => (
-          <Fragment key={label}>
-            <dt className="text-slate-400">{label}</dt>
-            <dd className={`break-words whitespace-pre-line font-medium ${label === "Hazards" || (label === "Bags per cleanup" && area.priority?.is_priority) ? "text-amber-700" : "text-slate-700"}`}>{value}</dd>
-          </Fragment>
-        ))}
-      </dl>
-      {!hasAreaDetails(area) && (
-        <p className="mt-2 text-slate-400">No details yet. Click Edit to add a description, the water body and its hazards.</p>
-      )}
-    </div>
   );
 }
 
@@ -269,7 +206,7 @@ function HeatmapToggle({ heat, onToggle, onPeriod }) {
 }
 
 /** The selected area, over the map: what it is, its details, and what can be done with it. */
-function AreaCard({ area, side, busy, heat, onToggleHeat, onHeatPeriod, onClose, onEdit, onRequests, onApprove, onArchive, onDelete }) {
+function AreaCard({ area, side, busy, heat, onToggleHeat, onHeatPeriod, onClose, onViewMore, onEdit, onRequests, onApprove, onArchive, onDelete }) {
   const meta = STATUS_META[area.status] || STATUS_META.pending;
   const StatusIcon = meta.icon;
   return (
@@ -312,6 +249,16 @@ function AreaCard({ area, side, busy, heat, onToggleHeat, onHeatPeriod, onClose,
 
       <div className="space-y-2 border-t border-slate-100 p-3">
         <HeatmapToggle heat={heat} onToggle={onToggleHeat} onPeriod={onHeatPeriod} />
+        {area.status !== "pending" && (
+          <button
+            type="button"
+            onClick={onViewMore}
+            title="Its heatmap and hotspot history, month by month, and a report comparing it with before"
+            className={`${CARD_BUTTON} w-full border border-blue-200 text-blue-700 hover:bg-blue-50`}
+          >
+            <History size={14} /> View more: history and report
+          </button>
+        )}
         <div className="flex gap-2">
           <button type="button" onClick={onEdit} disabled={busy} className={`${CARD_BUTTON} border border-slate-200 text-slate-600 hover:bg-slate-50`}>
             <Pencil size={14} /> Edit
@@ -348,6 +295,7 @@ function AreaCard({ area, side, busy, heat, onToggleHeat, onHeatPeriod, onClose,
  * or delete).
  */
 export default function CollectionAreasPage({ side = "admin" }) {
+  const navigate = useNavigate();
   const { currentUser } = useOutletContext() || {};
   const isBarangay = side === "barangay";
   // The barangay a barangay or NGO account draws in; its areas must stay inside it.
@@ -449,7 +397,12 @@ export default function CollectionAreasPage({ side = "admin" }) {
   // A new area is always drawn; an edited one keeps its shape unless its points are moved, it is
   // redrawn, or it is moved to another barangay.
   const reshaping = mode === "add" || draft.dirty || barangayChanged;
-  const shapeReady = !reshaping || draft.canSave;
+  // How much of the new shape is waterway: an area with none can't be saved (the server refuses it too).
+  const shapeWater = useMemo(
+    () => (reshaping && draft.canSave ? areaWater(draft.points, draft.isPolygon) : null),
+    [reshaping, draft.canSave, draft.points, draft.isPolygon]
+  );
+  const shapeReady = !reshaping || (draft.canSave && shapeWater?.status !== "none");
   const canSave = Boolean(form.barangay && form.name.trim() && shapeReady && !saving);
 
   const setField = (field) => (e) => setForm((prev) => ({ ...prev, [field]: e.target.value }));
@@ -591,6 +544,10 @@ export default function CollectionAreasPage({ side = "admin" }) {
 
   const saveForm = async () => {
     if (!canSave) return;
+    if (shapeWater?.status === "mostlyLand" && !confirm(
+      `Most of this ${draft.isPolygon ? "area" : "line"} is land: it has more than ${MOSTLY_LAND_RATIO} times as much land as waterway. `
+      + "TROID only cleans the water. Save it anyway?"
+    )) return;
     setSaving(true);
     setSaveError("");
     const body = { name: form.name.trim(), color: form.color, ...areaDetailsToApi(form) };
@@ -722,6 +679,7 @@ export default function CollectionAreasPage({ side = "admin" }) {
               : `${editing.closed ? "Polygon" : "Line"} · ${shapeSize(editing) || `${editing.points.length} pts`}`}
           </span>
         </div>
+        {shapeWater && <WaterNote water={shapeWater} />}
         {editing && reshaping && editing.requestCount > 0 && (
           <p className="text-amber-700">
             {editing.requestCount === 1 ? "1 request was" : `${editing.requestCount} requests were`} sent to this area. The Heatmap
@@ -995,6 +953,7 @@ export default function CollectionAreasPage({ side = "admin" }) {
               {!mode && isBarangay && ownBarangay && <BarangayOutline barangay={ownBarangay} fit={areas.length === 0} />}
               {/* The shape it had, for reference once it changes; the shape being edited is the draft. */}
               {editing && reshaping && <AreaShape area={editing} color={OLD_SHAPE_COLOR} weight={2} dashed />}
+              {mode && <WaterwaysLayer />}
               {mode && <AreaDraftLayers draft={draft} barangay={form.barangay} color={form.color} />}
             </MapContainer>
 
@@ -1045,6 +1004,7 @@ export default function CollectionAreasPage({ side = "admin" }) {
                 onToggleHeat={() => setHeatOn((on) => !on)}
                 onHeatPeriod={setHeatPeriod}
                 onClose={() => setActiveId(null)}
+                onViewMore={() => navigate(`${side === "barangay" ? "/barangay/areas" : "/admin/collection-areas"}/${encodeURIComponent(selectedArea.id)}/history`)}
                 onEdit={() => startEditing(selectedArea)}
                 onRequests={() => setRequestsArea(selectedArea)}
                 onApprove={() => setApproveTarget(selectedArea)}

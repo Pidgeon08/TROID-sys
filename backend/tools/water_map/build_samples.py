@@ -22,6 +22,9 @@ osm_path, water_path, backend_dir, out_path = sys.argv[1:5]
 spec = importlib.util.spec_from_file_location('boundaries', f'{backend_dir}/troid_api/boundaries.py')
 boundaries = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(boundaries)
+spec = importlib.util.spec_from_file_location('water', f'{backend_dir}/troid_api/water.py')
+water_rules = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(water_rules)
 
 M_LAT = 111320.0
 M_LNG = M_LAT * math.cos(math.radians(16.61))
@@ -54,11 +57,14 @@ STEP_M = 6        # between path nodes
 # the one furthest from it, 'middle' the middle of what is left. The first seven are the barangays'
 # main areas (keyed by barangay); the rest are the extra pending/approved/declined ones.
 SPECS = [
-    ('Poro', 'Poro', 'middle', 170), ('Tanqui', 'Tanqui', 'middle', 230), ('Catbangen', 'Catbangen', 'mouth', 230),
-    ('Carlatan', 'Carlatan', 'middle', 230), ('Pagdaraoan', 'Pagdaraoan', 'middle', 230), ('San Vicente', 'San Vicente', 'middle', 200),
-    ('Biday', 'Biday', 'middle', 230),
-    ('Biday Tributary', 'Biday', 'upper', 200), ('Carlatan Upper Creek', 'Carlatan', 'upper', 180),
-    ('Catbangen Upper Riverbank', 'Catbangen', 'upper', 200),
+    # key, barangay, where, reach (m), margin (m of bank drawn around the water)
+    ('Poro', 'Poro', 'middle', 170, 24), ('Tanqui', 'Tanqui', 'middle', 230, 30), ('Catbangen', 'Catbangen', 'mouth', 230, 26),
+    ('Carlatan', 'Carlatan', 'middle', 230, 32), ('Pagdaraoan', 'Pagdaraoan', 'middle', 230, 28),
+    # Drawn loosely around a narrow creek: mostly land, so it shows the warning when it is reshaped.
+    ('San Vicente', 'San Vicente', 'middle', 200, 48),
+    ('Biday', 'Biday', 'middle', 230, 30),
+    ('Biday Tributary', 'Biday', 'upper', 200, 22), ('Carlatan Upper Creek', 'Carlatan', 'upper', 180, 26),
+    ('Catbangen Upper Riverbank', 'Catbangen', 'upper', 200, 24),
 ]
 
 
@@ -112,7 +118,19 @@ def along(poly):
 used = []  # areas already laid out, so two barangays sharing a river get different stretches
 
 
-def build(name, where, reach, rng):
+def crude(wet, margin, rng):
+    """The water outlined as a person would with a few clicks on a map: a rough margin of bank
+    around it, few corners, none of them exactly placed."""
+    rough = largest(wet.buffer(margin, join_style='mitre').simplify(margin * 0.7))
+    corners = list(rough.exterior.coords)[:-1]
+    wobble = margin * 0.25
+    moved = [(x + rng.uniform(-wobble, wobble), y + rng.uniform(-wobble, wobble)) for x, y in corners]
+    shape = Polygon(moved).buffer(0)
+    # A wobble that leaves the water partly outside is redrawn wider, as a person would.
+    return largest(shape.union(wet.buffer(4)).simplify(margin * 0.4)) if not shape.contains(wet.buffer(-1)) else largest(shape)
+
+
+def build(name, where, reach, margin, rng):
     ring = rings[name]
     taken = unary_union(used).buffer(40) if used else None
     river = inland.intersection(ring.buffer(10))
@@ -125,22 +143,22 @@ def build(name, where, reach, rng):
         corners.sort(key=lambda c: c.distance(coastline))
         anchor = corners[0] if where == 'mouth' else corners[-1]
     wet = largest(river.intersection(anchor.buffer(reach)))
-    # As a person would draw it: around the water, a little of the banks too, in a dozen or so clicks.
-    outline = wet.buffer(14, join_style='mitre').simplify(7)
-    outline = largest(outline)
+    outline = crude(wet, margin, rng)
     points = [ll(x, y) for x, y in list(outline.exterior.coords)[:-1]]
     problem = boundaries.check_area(points, name)
     if problem:
         outline = largest(outline.intersection(ring.buffer(25)).simplify(5))
         points = [ll(x, y) for x, y in list(outline.exterior.coords)[:-1]]
         problem = boundaries.check_area(points, name)
+    measured = water_rules.area_water(points)
+    problem = problem or ('no waterway inside' if measured['status'] == 'none' else None)
     used.append(outline)
     on_water = largest(outline.intersection(water).difference(ponds.buffer(1)))
     nodes = along(on_water)
     nodes = [p for p in nodes if water.buffer(1).contains(p)] or nodes
     pockets = [[round(rng.uniform(0.05, 0.95), 3), round(rng.uniform(0.6, 1.0), 2)] for _ in range(rng.randint(2, 4))]
     return {
-        'kind': where, 'points': points, 'problem': problem,
+        'kind': where, 'points': points, 'problem': problem, 'status': measured['status'],
         'water_m2': round(on_water.area), 'outline_m2': round(outline.area),
         'path': [ll(p.x, p.y) for p in nodes], 'pockets': pockets,
     }
@@ -148,11 +166,12 @@ def build(name, where, reach, rng):
 
 rng = random.Random(7)
 result = {}
-for key, name, where, reach in SPECS:
-    area = build(name, where, reach, rng)
+for key, name, where, reach, margin in SPECS:
+    area = build(name, where, reach, margin, rng)
     print(f"{key[:24]:24} {area['kind']:8} pts {len(area['points']):3} water {area['water_m2']:7} m2 of {area['outline_m2']:7} "
-          f"| path nodes {len(area['path']):4} | check: {area['problem'] or 'ok'}")
+          f"| path nodes {len(area['path']):4} | {area['status']:11} | check: {area['problem'] or 'ok'}")
     area.pop('problem')
+    area.pop('status')
     area.pop('outline_m2')
     result[key] = area
 json.dump(result, open(out_path, 'w', encoding='utf-8'), separators=(',', ':'))

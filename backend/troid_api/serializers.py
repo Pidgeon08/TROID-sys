@@ -5,7 +5,7 @@ import re
 
 from django.utils import timezone
 from rest_framework import serializers
-from . import boundaries
+from . import boundaries, water
 from .models import Boat, DetectionEvent, User, Operator, Request, StatusHistory, Photo, DeploymentSchedule, LandfillRecord, RecyclingRecord, SegregationRecord, AuditLog, HeatmapData, CollectionArea, Notification
 
 LETTER_MAX_BYTES = 5 * 1024 * 1024
@@ -402,6 +402,10 @@ class CollectionAreaSerializer(serializers.ModelSerializer):
         problem = boundaries.check_area(points, official)
         if problem:
             raise serializers.ValidationError({'points': problem})
+        # A boat can only clean the waterway, so an area needs some inside it. One that is mostly
+        # land is allowed; the browser warns its creator (utils/coverage.js areaWater).
+        if water.area_water(points, closed)['status'] == 'none':
+            raise serializers.ValidationError({'points': water.NO_WATER})
         return attrs
 
     class Meta:

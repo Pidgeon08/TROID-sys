@@ -45,7 +45,7 @@ from .permissions import ADMIN, ANY_ROLE, MAYOR, PUBLIC, REQUESTERS, STAFF, HasR
 from .drives import active_drive, class_totals, scheduled_request_ids, troid_counts
 from .realtime import broadcast_after_commit, notifications_changed
 from . import live
-from .priority import WINDOW_DAYS, end_of_day, evaluate_priority_areas, hotspot_history
+from .priority import WINDOW_DAYS, area_history, end_of_day, evaluate_priority_areas, hotspot_history
 from .throttles import CompanionLoginEmailThrottle, CompanionLoginIPThrottle
 
 logger = logging.getLogger(__name__)
@@ -1867,6 +1867,7 @@ class CollectionAreaViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
     serializer_class = CollectionAreaSerializer
     lookup_field = 'area_id'
     action_roles = {
+        'history': ADMIN + REQUESTERS,
         'create': ADMIN + REQUESTERS,
         'partial_update': ADMIN + REQUESTERS,
         'destroy': ADMIN + REQUESTERS,
@@ -1915,6 +1916,22 @@ class CollectionAreaViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
                 User.objects.filter(role='admin', status='active'),
             )
         return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['get'])
+    def history(self, request, area_id=None):
+        """The area's last ?months= calendar months (default 12, at most 24), oldest first, split
+        the way hotspots are decided (priority.area_history): whether it was a hotspot at each
+        month's end and what its cleanups in the 30 days before brought in. Barangay and NGO
+        accounts only see their own barangay's areas."""
+        area = self.get_object()
+        if getattr(request.user, 'role', None) in REQUESTERS:
+            require(request, bool(own_barangay(request.user)) and area.barangay == own_barangay(request.user),
+                    'area belongs to another barangay')
+        try:
+            months = int(request.query_params.get('months') or 12)
+        except ValueError:
+            return Response({'error': 'months must be a number.'}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'window_days': WINDOW_DAYS, 'months': area_history(area, months=months)})
 
     def _check_own_barangay(self, area):
         # A barangay or NGO account may only change its own barangay's areas; CENRO may change any.

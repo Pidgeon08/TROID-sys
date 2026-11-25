@@ -5,7 +5,7 @@
 // (utils/water: rivers, creeks, canals and ponds, the waterways TROID works), and only points
 // reported on them make up the path. Distances use a flat projection around the area,
 // which is accurate at barangay scale.
-import { onWater, reportedOnWater } from './water';
+import { nearWater, onWater, reportedOnWater } from './water';
 
 const M_PER_DEG_LAT = 111320;
 // Enough grid cells for a sub-percent answer while staying fast on every 5-second refresh.
@@ -51,6 +51,72 @@ export function ringAreaM2(latLngRing) {
   if (!Array.isArray(latLngRing) || latLngRing.length < 3) return 0;
   const project = projector(latLngRing[0][0]);
   return shoelaceM2(latLngRing.map(project));
+}
+
+// --- how much of a collection area is waterway --------------------------------------
+// Mirrors backend/troid_api/water.py (area_water), so the browser and the server agree. Change both together.
+
+// Less waterway than this inside an area is none: the outline only grazes a bank.
+export const MIN_WATER_M2 = 20;
+// A drawn line counts as on the waterway where it comes this close to it.
+const LINE_REACH_M = 8;
+// More than this much land for each square metre of waterway, and the creator is warned.
+export const MOSTLY_LAND_RATIO = 10;
+const WATER_CELLS = 4000;
+const LINE_STEP_M = 2;
+const MAX_LINE_SAMPLES = 2000;
+
+/**
+ * How much of a drawn area (or, for a line, of its length) is mapped waterway.
+ * { size, water, land, unit: 'm2' | 'm', status } — status 'none' (no waterway: it can't be
+ * saved), 'mostlyLand' (land more than MOSTLY_LAND_RATIO times the waterway: a warning) or 'ok'.
+ */
+export function areaWater(points, closed = true) {
+  const lat0 = points[0][0];
+  const mPerDegLng = M_PER_DEG_LAT * Math.cos((lat0 * Math.PI) / 180);
+  const xy = points.map(projector(lat0));
+  const toPoint = (x, y) => [y / M_PER_DEG_LAT, x / mPerDegLng];
+  let size;
+  let water;
+  if (closed) {
+    size = shoelaceM2(xy);
+    const xs = xy.map((p) => p[0]);
+    const ys = xy.map((p) => p[1]);
+    const [minX, maxX, minY, maxY] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+    const cell = Math.max(Math.sqrt(((maxX - minX) * (maxY - minY)) / WATER_CELLS), 0.25);
+    let cells = 0;
+    let wet = 0;
+    for (let x = minX + cell / 2; x < maxX; x += cell) {
+      for (let y = minY + cell / 2; y < maxY; y += cell) {
+        if (!insideRing([x, y], xy)) continue;
+        cells += 1;
+        if (onWater(toPoint(x, y))) wet += 1;
+      }
+    }
+    water = cells ? (size * wet) / cells : 0;
+  } else {
+    size = 0;
+    for (let i = 1; i < xy.length; i++) size += Math.hypot(xy[i][0] - xy[i - 1][0], xy[i][1] - xy[i - 1][1]);
+    const step = Math.max(LINE_STEP_M, size / MAX_LINE_SAMPLES);
+    let samples = 0;
+    let wet = 0;
+    for (let i = 1; i < xy.length; i++) {
+      const [ax, ay] = xy[i - 1];
+      const [bx, by] = xy[i];
+      const n = Math.max(1, Math.ceil(Math.hypot(bx - ax, by - ay) / step));
+      // Each stretch from its start up to (not including) its end; the line's last point after.
+      for (let k = 0; k < n; k++) {
+        samples += 1;
+        if (nearWater(toPoint(ax + (k / n) * (bx - ax), ay + (k / n) * (by - ay)), LINE_REACH_M)) wet += 1;
+      }
+    }
+    samples += 1;
+    if (nearWater(points[points.length - 1], LINE_REACH_M)) wet += 1;
+    water = samples ? (size * wet) / samples : 0;
+  }
+  const land = Math.max(size - water, 0);
+  const status = water < (closed ? MIN_WATER_M2 : LINE_REACH_M) ? "none" : land > MOSTLY_LAND_RATIO * water ? "mostlyLand" : "ok";
+  return { size, water, land, unit: closed ? "m2" : "m", status };
 }
 
 /** Squared distance from (x, y) to the segment a–b, in projected metres. */

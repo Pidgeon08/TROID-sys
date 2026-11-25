@@ -49,10 +49,16 @@ export function onWater([lat, lng]) {
 // GPS on a boat drifts a few metres; a point this close to the water still counts as on it.
 const DRIFT_M = 8;
 
-/** Whether a [lat, lng] point TROID reported is on the water, allowing for GPS drift. */
-export function reportedOnWater([lat, lng]) {
+/** Whether a [lat, lng] point is on the water or within reachM of it (checked four ways). */
+export function nearWater([lat, lng], reachM) {
   if (onWater([lat, lng])) return true;
-  const dLat = DRIFT_M / 111320;
-  const dLng = DRIFT_M / (111320 * Math.cos((lat * Math.PI) / 180));
+  const dLat = reachM / 111320;
+  const dLng = reachM / (111320 * Math.cos((lat * Math.PI) / 180));
   return [[lat + dLat, lng], [lat - dLat, lng], [lat, lng + dLng], [lat, lng - dLng]].some(onWater);
 }
+
+/** Whether a [lat, lng] point TROID reported is on the water, allowing for GPS drift. */
+export const reportedOnWater = (point) => nearWater(point, DRIFT_M);
+
+/** The mapped waterways, as polygons of [lat, lng] rings (an outline, then any holes), to draw. */
+export const WATER_POLYGONS = data.polygons;

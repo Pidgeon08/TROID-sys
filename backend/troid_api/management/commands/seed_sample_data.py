@@ -89,8 +89,14 @@ BARANGAYS = [
 ]
 # Barangays with their own sign-in account; the others' requests come from their offices on paper.
 ACCOUNT_BARANGAYS = ['Poro', 'Catbangen', 'Carlatan', 'Tanqui']
-# The NGO works in Poro, so its requests and the barangay's are for the same area and can be merged.
-NGO = {'name': 'River Care Volunteers', 'barangay': 'Poro'}
+# NGOs, each working in one barangay: their requests and the barangay's are for the same areas, so
+# they can be merged. `key` makes the sign-in email (ngo@ stays Poro's, as it always was).
+NGOS = [
+    {'key': 'ngo', 'name': 'River Care Volunteers', 'barangay': 'Poro'},
+    {'key': 'ngo-carlatan', 'name': 'Carlatan Creek Guardians', 'barangay': 'Carlatan'},
+    {'key': 'ngo-tanqui', 'name': 'Tanqui Watershed Alliance', 'barangay': 'Tanqui'},
+    {'key': 'ngo-biday', 'name': 'Biday River Keepers', 'barangay': 'Biday'},
+]
 OPERATORS = ['Mark Dela Cruz', 'Liza Bautista', 'Ramon Ilagan']
 UNSUPPORTED_SITES = ['Riverbank below the bridge', 'Market drainage canal', 'School grounds creek', 'Chapel riverbank']
 
@@ -269,7 +275,9 @@ class Command(BaseCommand):
         for barangay in ACCOUNT_BARANGAYS:
             key = barangay.lower().replace(' ', '')
             self.users[barangay] = account(key, f'Brgy. {barangay} Office', 'barangay', barangay)
-        self.users['ngo'] = account('ngo', NGO['name'], 'ngo', NGO['barangay'])
+        self.ngos = {}
+        for ngo in NGOS:
+            self.ngos[ngo['barangay']] = self.users[ngo['key']] = account(ngo['key'], ngo['name'], 'ngo', ngo['barangay'])
 
     def make_fleet(self):
         self.boats = []
@@ -321,14 +329,17 @@ class Command(BaseCommand):
     # --- what to create --------------------------------------------------------------
 
     def requester(self, barangay, ngo=True):
-        """Who sends a barangay's request: its account, its office on paper, or now and then the NGO."""
-        if ngo and barangay == NGO['barangay'] and self.rng.random() < 0.3:
-            user = self.users['ngo']
-            return {'name': user.name, 'role': 'ngo', 'email': user.email, 'barangay': barangay}
+        """Who sends a barangay's request: its account, its office on paper, or now and then its NGO."""
+        if ngo and barangay in self.ngos and self.rng.random() < 0.3:
+            return self.ngo_requester(barangay)
         user = self.users.get(barangay)
         if user:
             return {'name': user.name, 'role': 'barangay', 'email': user.email, 'barangay': barangay}
         return {'name': f'Brgy. {barangay} Office', 'role': 'barangay', 'email': '', 'barangay': barangay}
+
+    def ngo_requester(self, barangay):
+        user = self.ngos[barangay]
+        return {'name': user.name, 'role': 'ngo', 'email': user.email, 'barangay': barangay}
 
     def pick_barangay(self, recency):
         """recency is 0 for the oldest day and 1 for today."""
@@ -395,9 +406,13 @@ class Command(BaseCommand):
         add('merge-open-main', 'approved', 'Poro', 6, scheduled=5, by_barangay=True)
         add('merge-open-a', 'pending_admin_approval', 'Poro', 4, force_ngo=True)
         add('merge-open-b', 'pending_mayor_approval', 'Poro', 3, by_barangay=True)
-        # The NGO's request for the Poro river, not merged yet: it and the barangay's open requests
-        # there show under the request list's Mergeable filter.
+        # NGOs' requests not merged yet: with the barangays' open requests for the same areas they
+        # show under the request list's Mergeable filter. Biday's is a non-TROID (manual) cleanup.
         add('mergeable-ngo', 'pending_admin_approval', 'Poro', 1, force_ngo=True)
+        add('mergeable-ngo-carlatan', 'pending_admin_approval', 'Carlatan', 2, force_ngo=True)
+        add('mergeable-ngo-tanqui', 'approved', 'Tanqui', 5, force_ngo=True, scheduled=9)
+        add('mergeable-ngo-biday', 'pending_admin_approval', 'Biday', 1, force_ngo=True, troid=False)
+        add('mergeable-brgy-biday', 'pending_mayor_approval', 'Biday', 2, by_barangay=True)
         return specs
 
     def upcoming_specs(self, weeks):
@@ -426,8 +441,7 @@ class Command(BaseCommand):
         barangay = info['name']
         who = self.requester(barangay, ngo=not spec.get('by_barangay'))
         if spec.get('force_ngo'):
-            ngo = self.users['ngo']
-            who = {'name': ngo.name, 'role': 'ngo', 'email': ngo.email, 'barangay': NGO['barangay']}
+            who = self.ngo_requester(barangay)
         troid = spec['troid']
         drive_day = spec.get('drive_day')
         if spec.get('drive_today'):

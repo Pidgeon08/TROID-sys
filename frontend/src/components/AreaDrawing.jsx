@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { Polygon, Polyline, CircleMarker, Marker, useMap, useMapEvents } from "react-leaflet";
 import L from "leaflet";
 import { barangayBounds, barangayRing } from "../utils/barangayBoundaries";
+import { WATER_POLYGONS } from "../utils/water";
 
 // The shape itself is held by hooks/useAreaDraft.
 const START_NODE_COLOR = "#1b4de4";
@@ -115,6 +116,23 @@ function EditHandles({ draft, barangay, color }) {
 }
 
 /** Map layers for the shape being drawn or edited. Render inside a MapContainer. */
+const WATER_COLOR = "#0284c7";
+
+/**
+ * The mapped waterways (rivers, creeks, canals, ponds), shown while an area is drawn: an area must
+ * take some in, since that is all a boat can clean. They let clicks through to the drawing.
+ */
+export function WaterwaysLayer() {
+  return WATER_POLYGONS.map((rings, i) => (
+    <Polygon
+      key={i}
+      positions={rings}
+      interactive={false}
+      pathOptions={{ color: WATER_COLOR, weight: 1, opacity: 0.7, fillColor: WATER_COLOR, fillOpacity: 0.35 }}
+    />
+  ));
+}
+
 export function AreaDraftLayers({ draft, barangay, color }) {
   const { points, isPolygon, drawing } = draft;
   return (
