@@ -3,7 +3,7 @@ import importlib.util
 import json
 import os
 import time
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -16,7 +16,7 @@ from django.test import SimpleTestCase, TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from . import backup, bot_auth, drives, live, mqtt_client, views
+from . import backup, bot_auth, drives, live, mqtt_client, priority, views
 from .drives import TRASH_ITEMS
 from .models import (
     AuditLog, Boat, CollectionArea, DeploymentSchedule, DetectionEvent, LetterFile, Notification, Operator,
@@ -1040,7 +1040,7 @@ class TrashReportTests(TestCase):
         'weight_kg': 12.5,
         'non_usable_kg': 5.5,
         'recyclable_kg': 7,
-        'trash_categories': {'Beverage bottles (plastic)': 3, 'Beverage cans': 1},
+        'trash_items': {'Beverage bottles (plastic)': 3, 'Beverage cans': 1},
         'notes': ' Near the bridge ',
     }
 
@@ -1070,9 +1070,12 @@ class TrashReportTests(TestCase):
                 self.assertIsNotNone(req.session_completed_at)
                 self.assertEqual((req.bags, req.weight_kg, req.non_usable_kg, req.recyclable_kg), (4, 12.5, 5.5, 7))
                 self.assertEqual((req.site_type, req.people_count, req.hours_spent, req.distance_km), ('river', 6, 2.5, None))
-                # Every item on the data card is kept, those left out as 0.
-                self.assertEqual(req.trash_categories, {
+                # Every item is kept, those left out as 0, and each TROID class counts its items.
+                self.assertEqual(req.trash_items, {
                     item: {'Beverage bottles (plastic)': 3, 'Beverage cans': 1}.get(item, 0) for item in TRASH_ITEMS
+                })
+                self.assertEqual(req.trash_categories, {
+                    'Plastic': 3, 'Metal': 1, 'Glass': 0, 'Paper/Cardboard': 0, 'Organic/Biodegradable': 0, 'Other': 0,
                 })
                 self.assertEqual(
                     list(req.status_history.order_by('id').values_list('label', 'details')),
@@ -1081,7 +1084,7 @@ class TrashReportTests(TestCase):
 
     def test_each_figure_is_mandatory(self):
         for field in ('site_type', 'people_count', 'hours_spent', 'bags', 'weight_kg', 'non_usable_kg',
-                      'recyclable_kg', 'trash_categories'):
+                      'recyclable_kg', 'trash_items'):
             with self.subTest(field=field):
                 data = {k: v for k, v in self.REPORT.items() if k != field}
 
@@ -1096,7 +1099,7 @@ class TrashReportTests(TestCase):
     def test_invalid_figures_are_rejected(self):
         for field, value in (
             ('bags', -1), ('weight_kg', -0.1), ('weight_kg', ''), ('recyclable_kg', None),
-            ('trash_categories', {'Plastic': 3}), ('trash_categories', {'Balloons': 'many'}),
+            ('trash_items', {'Plastic': 3}), ('trash_items', {'Balloons': 'many'}),
             ('site_type', 'underwater'), ('people_count', 0), ('hours_spent', -1), ('distance_km', -2),
             ('entangled_animals', [{'animal': 'Turtle', 'condition': 'sleeping'}]),
             ('entangled_animals', [{'condition': 'alive'}]),
@@ -1110,7 +1113,7 @@ class TrashReportTests(TestCase):
         response = self.submit({
             'site_type': 'shoreline', 'people_count': 1, 'hours_spent': 0,
             'bags': 0, 'weight_kg': 0, 'non_usable_kg': 0, 'recyclable_kg': 0,
-            'trash_categories': {},
+            'trash_items': {},
         })
 
         self.assertEqual(response.status_code, 200)
@@ -2605,7 +2608,7 @@ class CleanupDriveTests(TestCase):
 
         self.assertEqual(DetectionEvent.objects.get().request, self.req)
 
-    def test_trash_report_is_pre_filled_with_the_data_card_items(self, _):
+    def test_the_robots_counts_are_given_per_troid_class(self, _):
         self.start()
         for label in ('Clear plastic bottle', 'Other plastic bottle', 'Drink can', 'Plastic bottle cap',
                       'Plastic film', 'Glass bottle', 'Cigarette'):
@@ -2617,8 +2620,7 @@ class CleanupDriveTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {
             'troid_assisted': True,
-            'categories': {'Beverage bottles (plastic)': 2, 'Beverage cans': 1, 'Caps, lids': 1,
-                           'Food wrappers, containers': 1, 'Beverage bottles (glass)': 1, 'Other items': 1},
+            'categories': {'Plastic': 4, 'Metal': 1, 'Glass': 1, 'Other': 1},
             'total': 7,
         })
 
@@ -2635,7 +2637,7 @@ class CleanupDriveTests(TestCase):
         admin = make_user('admin')
         report = {'site_type': 'shoreline', 'people_count': 2, 'hours_spent': 3,
                   'bags': 1, 'weight_kg': 2, 'non_usable_kg': 1, 'recyclable_kg': 1,
-                  'trash_categories': {'Beverage bottles (plastic)': 9}, 'notes': ''}
+                  'trash_items': {'Beverage bottles (plastic)': 9}, 'notes': ''}
 
         response = self.client.post(f'/api/requests/{self.req.request_id}/submit_trash_report/', report,
                                     format='json', **session_header(admin))
@@ -2643,33 +2645,41 @@ class CleanupDriveTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.req.refresh_from_db()
         self.assertEqual(self.req.status, 'completed')
-        self.assertEqual(self.req.trash_categories['Beverage bottles (plastic)'], 9)  # The edited figure is kept.
+        self.assertEqual(self.req.trash_items['Beverage bottles (plastic)'], 9)  # The edited figure is kept.
+        self.assertEqual(self.req.trash_categories['Plastic'], 9)
         self.assertIsNotNone(self.req.session_completed_at)
 
 
-class TrashItemMappingTests(SimpleTestCase):
-    """The robot's class names are counted as items of the Coastal Cleanup data card."""
+class TroidClassMappingTests(SimpleTestCase):
+    """The robot's labels are counted under the TROID classes, as the report's items are."""
 
-    def test_class_names_map_to_data_card_items(self):
-        for label, item in (
-            ('Clear plastic bottle', 'Beverage bottles (plastic)'),
-            ('Glass jar', 'Beverage bottles (glass)'),
-            ('Drink can', 'Beverage cans'),
-            ('Food Can', 'Food wrappers, containers'),
-            ('Metal bottle cap', 'Caps, lids'),
-            ('Single-use carrier bag', 'Bags (paper or plastic)'),
-            ('Disposable plastic cup', 'Cups, plates, forks, knives, spoons'),
-            ('Pop tab', 'Pull tabs'),
-            ('Six pack rings', '6-pack holders'),
-            ('Plastic straw', 'Straws, stirrers'),
-            ('Shoe', 'Clothing, shoes'),
-            ('Crisp packet', 'Food wrappers, containers'),
-            ('Balloons', 'Balloons'),
-            ('Cigarette', 'Other items'),
-            ('Scrap metal', 'Other items'),
+    def test_labels_map_to_troid_classes(self):
+        for label, cls in (
+            ('Plastic', 'Plastic'),
+            ('Clear plastic bottle', 'Plastic'),
+            ('Crisp packet', 'Plastic'),
+            ('Six pack rings', 'Plastic'),
+            ('Glass jar', 'Glass'),
+            ('Drink can', 'Metal'),
+            ('Food Can', 'Metal'),
+            ('Metal bottle cap', 'Metal'),
+            ('Pop tab', 'Metal'),
+            ('Paper cup', 'Paper/Cardboard'),
+            ('Other carton', 'Paper/Cardboard'),
+            ('Food waste', 'Organic/Biodegradable'),
+            ('Organic', 'Organic/Biodegradable'),
+            ('Shoe', 'Other'),
+            ('Cigarette', 'Other'),
         ):
             with self.subTest(label=label):
-                self.assertEqual(drives.report_category(label), item)
+                self.assertEqual(drives.report_category(label), cls)
+
+    def test_every_item_belongs_to_one_class(self):
+        self.assertEqual(len(drives.TRASH_ITEMS), len(set(drives.TRASH_ITEMS)))
+        self.assertEqual({cls for cls, _ in drives.TRASH_GROUPS}, set(drives.TROID_CLASSES))
+        totals = drives.class_totals({'Paper bags': 2, 'Pull tabs': 3, 'Organic waste': 1})
+        self.assertEqual(totals, {'Plastic': 0, 'Metal': 3, 'Glass': 0, 'Paper/Cardboard': 2,
+                                  'Organic/Biodegradable': 1, 'Other': 0})
 
 
 def requester(name, email, role='barangay'):
@@ -3072,12 +3082,71 @@ class PriorityAreaTests(TestCase):
         response = self.client.post(f'/api/requests/{req.request_id}/submit_trash_report/', {
             'site_type': 'shoreline', 'people_count': 8, 'hours_spent': 4,
             'bags': 90, 'weight_kg': 300, 'non_usable_kg': 100, 'recyclable_kg': 200,
-            'trash_categories': {'Beverage bottles (plastic)': 90},
+            'trash_items': {'Beverage bottles (plastic)': 90},
         }, format='json', **session_header(self.admin))
 
         self.assertEqual(response.status_code, 200)
         self.assertFalse(DeploymentSchedule.objects.exists())
         self.assertTrue(self.areas()['Poro Shore']['is_priority'])
+
+
+class HotspotHistoryTests(TestCase):
+    """A hotspot is a priority area; the history lists each month's, as they stood at its end."""
+
+    NOW = datetime(2026, 11, 20, 12, 0, tzinfo=priority.APP_TIMEZONE)
+
+    def setUp(self):
+        self.client = APIClient()
+        self.admin = make_user('admin')
+        self.poro = CollectionArea.objects.create(name='Poro Shore', barangay='Poro', status='approved',
+                                                  points=[[1, 1], [1, 2], [2, 2]])
+        self.catbangen = CollectionArea.objects.create(name='Catbangen River', barangay='Catbangen', status='approved',
+                                                       points=[[0, 0]] * 3)
+
+    def cleanup(self, area, bags, when):
+        req = Request.objects.create(barangay=area.barangay, collection_area=area, bags=bags, status='completed')
+        Request.objects.filter(pk=req.pk).update(session_completed_at=when)
+
+    def test_each_month_lists_the_areas_that_were_hotspots_at_its_end(self):
+        # September: 5 bags a cleanup. October: 12, a spike, so Poro was a hotspot at the end of October.
+        self.cleanup(self.poro, 5, datetime(2026, 9, 10, tzinfo=priority.APP_TIMEZONE))
+        self.cleanup(self.poro, 12, datetime(2026, 10, 20, tzinfo=priority.APP_TIMEZONE))
+        # November so far: back down to 4.
+        self.cleanup(self.poro, 4, datetime(2026, 11, 15, tzinfo=priority.APP_TIMEZONE))
+
+        history = priority.hotspot_history(months=3, now=self.NOW)
+
+        self.assertEqual([(m['month'], m['count'], m['so_far']) for m in history],
+                         [('2026-09', 0, False), ('2026-10', 1, False), ('2026-11', 0, True)])
+        october = history[1]['hotspots'][0]
+        self.assertEqual(october['collection_area']['name'], 'Poro Shore')
+        self.assertEqual(october['collection_area']['points'], [[1, 1], [1, 2], [2, 2]])
+        self.assertEqual((october['previous']['average'], october['current']['average']), (5.0, 12.0))
+
+    def test_a_barangay_only_gets_its_own_hotspots(self):
+        now = timezone.now()
+        for area in (self.poro, self.catbangen):
+            self.cleanup(area, 3, now - timedelta(days=40))
+            self.cleanup(area, 9, now - timedelta(days=5))
+        barangay = make_user('barangay')
+        User.objects.filter(pk=barangay.pk).update(location='Poro')
+
+        mine = self.client.get('/api/hotspots/', {'months': 1}, **session_header(barangay)).json()
+        everyone = self.client.get('/api/hotspots/', {'months': 1}, **session_header(self.admin)).json()
+
+        self.assertEqual([h['collection_area']['name'] for h in mine['months'][0]['hotspots']], ['Poro Shore'])
+        self.assertEqual(everyone['months'][0]['count'], 2)
+        self.assertEqual(mine['window_days'], 30)
+
+    def test_months_are_limited_and_checked(self):
+        many = self.client.get('/api/hotspots/', {'months': 99}, **session_header(self.admin))
+        bad = self.client.get('/api/hotspots/', {'months': 'lots'}, **session_header(self.admin))
+        with override_settings(API_AUTH_ENFORCED=True):
+            city_admin = self.client.get('/api/hotspots/', **session_header(make_user('mayorsoffice')))
+
+        self.assertEqual(len(many.json()['months']), priority.MAX_HISTORY_MONTHS)
+        self.assertEqual(bad.status_code, 400)
+        self.assertEqual(city_admin.status_code, 403)
 
 
 class SampleDataRefreshTests(TestCase):

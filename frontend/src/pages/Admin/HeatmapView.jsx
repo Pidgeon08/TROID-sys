@@ -3,8 +3,9 @@ import { TILE_URL, TILE_ATTRIBUTION } from '../../services/mapTiles';
 import 'leaflet/dist/leaflet.css';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Calendar, ArrowRightLeft, Map as MapIcon, ListFilter, X, Target, Route, Layers, Bot, MapPin, Info,
+  Calendar, ArrowRightLeft, Map as MapIcon, ListFilter, X, Target, Route, Layers, Bot, MapPin, Info, Flame,
 } from 'lucide-react';
+import HotspotsView from '../../components/HotspotsView';
 import { api } from '../../services/api';
 import { SearchBar } from '../../components/ui/SearchBar';
 import { useRealtime } from '../../hooks/useRealtime';
@@ -348,7 +349,7 @@ function CoverageMap({ heatPoints, heatType, reports, area, coveragePoints, radi
  */
 const HeatmapView = ({ barangay }) => {
   const scoped = barangay !== undefined;
-  const [activeView, setActiveView] = useState('live'); // 'live' | 'comparison'
+  const [activeView, setActiveView] = useState('live'); // 'live' | 'hotspots' | 'comparison'
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [timeFilter, setTimeFilter] = useState('Today');
   const [heatmapType, setHeatmapType] = useState('Waste Density');
@@ -549,11 +550,14 @@ const HeatmapView = ({ barangay }) => {
             onChange={setActiveView}
             options={[
               { value: 'live', label: 'Live Heat Map', icon: MapIcon },
+              { value: 'hotspots', label: 'Hotspots', icon: Flame },
               { value: 'comparison', label: 'Post-Cleanup Comparison', icon: ArrowRightLeft },
             ]}
           />
         </div>
       </header>
+
+      {activeView === 'hotspots' && <HotspotsView barangay={barangay} />}
 
       {activeView === 'live' && (
         <>

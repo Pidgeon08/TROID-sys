@@ -29,31 +29,38 @@ from django.db import connection, transaction
 from django.utils import timezone
 
 from troid_api import boundaries
+from troid_api.drives import class_totals
 from troid_api.models import (
-    Boat, CollectionArea, DeploymentSchedule, DetectionEvent, LetterFile, Operator,
+    Boat, CollectionArea, DeploymentSchedule, DetectionEvent, LetterFile, Notification, Operator,
     Request, StatusHistory, User,
 )
 from troid_api.sample_data import (
     BOAT_PREFIX, EMAIL_DOMAIN, MANILA, MARKER, OPERATOR_PREFIX, PASSWORD, SUBMITTER,
 )
-# Typical share of each data card item (drives.TRASH_ITEMS) in a haul, and a class name the
-# robot's model reports it under (drives.report_category maps it back).
+# Typical share of each report item (drives.TRASH_ITEMS) in a haul, and a label the robot's
+# model reports it under (drives.report_category maps it to the item's TROID class).
 ITEM_MIX = [
-    ('Bags (paper or plastic)', 0.14, 'Single-use carrier bag'),
-    ('Balloons', 0.005, 'Balloon'),
-    ('Beverage bottles (plastic)', 0.18, 'Clear plastic bottle'),
-    ('Beverage bottles (glass)', 0.04, 'Glass bottle'),
-    ('Beverage cans', 0.05, 'Drink can'),
-    ('Caps, lids', 0.08, 'Plastic bottle cap'),
-    ('Clothing, shoes', 0.02, 'Shoe'),
-    ('Cups, plates, forks, knives, spoons', 0.07, 'Disposable plastic cup'),
-    ('Food wrappers, containers', 0.25, 'Crisp packet'),
-    ('Pull tabs', 0.01, 'Pop tab'),
+    ('Plastic bags', 0.12, 'Single-use carrier bag'),
+    ('Beverage bottles (plastic)', 0.16, 'Clear plastic bottle'),
+    ('Caps, lids', 0.07, 'Plastic bottle cap'),
+    ('Cups, plates, forks, knives, spoons', 0.05, 'Disposable plastic cup'),
+    ('Food wrappers, containers', 0.2, 'Crisp packet'),
+    ('Straws, stirrers', 0.04, 'Plastic straw'),
     ('6-pack holders', 0.005, 'Six pack rings'),
-    ('Shotgun shells, wadding', 0.0, 'Shotgun shell'),
-    ('Straws, stirrers', 0.05, 'Plastic straw'),
     ('Toys', 0.01, 'Toy'),
-    ('Other items', 0.07, 'Cigarette'),
+    ('Shotgun shells, wadding', 0.0, 'Shotgun shell'),
+    ('Other plastic', 0.04, 'Plastic film'),
+    ('Beverage cans', 0.05, 'Drink can'),
+    ('Pull tabs', 0.01, 'Pop tab'),
+    ('Other metal', 0.02, 'Scrap metal'),
+    ('Beverage bottles (glass)', 0.04, 'Glass bottle'),
+    ('Other glass', 0.01, 'Glass jar'),
+    ('Paper bags', 0.02, 'Paper bag'),
+    ('Other paper or cardboard', 0.04, 'Other carton'),
+    ('Organic waste', 0.06, 'Food waste'),
+    ('Clothing, shoes', 0.02, 'Shoe'),
+    ('Balloons', 0.005, 'Balloon'),
+    ('Other items', 0.03, 'Cigarette'),
 ]
 ROBOT_LABEL = {item: label for item, _, label in ITEM_MIX}
 SITE_TYPE = {'coast': 'shoreline', 'estuary': 'river', 'river': 'river', 'creek': 'river', 'canal': 'river', 'pond': 'lake'}
@@ -210,6 +217,7 @@ class Command(BaseCommand):
 
         self.merge(created, 'merge-open-main', ['merge-open-a', 'merge-open-b'])
         self.merge(created, 'merge-done-main', ['merge-done-a'])
+        notes = self.make_notifications(created)
 
         finished = sum(1 for s in specs if s['status'] in ('completed', 'segregated', 'verified'))
         upcoming = DeploymentSchedule.objects.filter(
@@ -218,7 +226,8 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(
             f'Created {len(specs)} sample requests ({finished} finished cleanups over the last {days} days, '
             f'{upcoming} cleanups booked over the next {weeks_ahead} weeks), '
-            f'{len(self.areas)} collection areas, {len(self.boats)} robots and {len(self.operators)} operators.'
+            f'{len(self.areas)} collection areas, {len(self.boats)} robots, {len(self.operators)} operators '
+            f'and {notes} notifications.'
         ))
         self.stdout.write('Sign in with any of these (password ' + PASSWORD + '):')
         for user in self.users.values():
@@ -273,14 +282,16 @@ class Command(BaseCommand):
         # One area still under review and one declined, for the Collection Areas page.
         for barangay, name, area_status, reason in (
             ('Poro', 'Poro Fish Port Basin', 'pending', ''),
+            ('Poro', 'Poro Seawall Outfall', 'approved', ''),
             ('Catbangen', 'Catbangen Upper Riverbank', 'declined',
              'Part of this stretch is private property. Redraw it along the public easement.'),
         ):
             CollectionArea.objects.create(
                 name=name, barangay=barangay, submitted_by=SUBMITTER, points=area_polygon(rng, barangay),
                 closed=True, status=area_status, decline_reason=reason,
-                reviewed_by='Sample CENRO Admin' if reason else '',
-                date_reviewed=self.now - timedelta(days=4) if reason else None,
+                reviewed_by='Sample CENRO Admin' if area_status != 'pending' else '',
+                date_reviewed=self.now - timedelta(days=1 if area_status == 'approved' else 4)
+                if area_status != 'pending' else None,
                 description='Submitted for review.', water_body_type='river', water_body_name=f'{barangay} River',
             )
 
@@ -499,6 +510,7 @@ class Command(BaseCommand):
                 req.weight_kg = report['weight_kg']
                 req.non_usable_kg = report['non_usable_kg']
                 req.recyclable_kg = report['recyclable_kg']
+                req.trash_items = report['items']
                 req.trash_categories = report['categories']
                 req.site_type = SITE_TYPE.get(info['water'][0], 'shoreline')
                 req.people_count = rng.randint(2, 4) if troid else rng.randint(8, 30)
@@ -517,7 +529,7 @@ class Command(BaseCommand):
                 step('Trash Report Filed by CENRO', finished + timedelta(minutes=40), cenro, 'Admin',
                      rng.choice(['', 'Mostly plastic bottles and wrappers.', 'Heavy load near the outfall.']))
                 if troid:
-                    self.detections(req, boat, report['categories'], start, finished)
+                    self.detections(req, boat, report['items'], start, finished)
                 if status == 'verified':
                     verified_at = finished + timedelta(days=rng.uniform(1, 4))
                     req.verified_categories = {c: max(0, n + rng.randint(-2, 2)) for c, n in report['categories'].items()}
@@ -533,6 +545,81 @@ class Command(BaseCommand):
         Request.objects.filter(pk=req.pk).update(**fields)
         req.refresh_from_db()
         return req
+
+    def make_notifications(self, created):
+        """What the sample accounts were told, worded as the real actions word it (views.notify_*),
+        so the bell, the red dots and the Collection Areas ping show. The last few days' are unread."""
+        cenro, city = self.users['cenro'], self.users['city']
+        rows = []
+
+        def note(user, when, notif_type, title, message, req=None, area=None, unread=None):
+            when = min(when, self.now - timedelta(minutes=5))
+            if unread is None:
+                unread = self.now - when < timedelta(days=3)
+            rows.append((Notification(
+                recipient=user, request=req, collection_area=area, notif_type=notif_type,
+                title=title, message=message, is_read=not unread,
+            ), when))
+
+        def last_step(req):
+            step = StatusHistory.objects.filter(request=req).order_by('-date').first()
+            return step.date if step else req.date_submitted
+
+        sample_users = {u.email: u for u in self.users.values()}
+        newest = {}  # requester -> their newest request notification
+        for req in created.values():
+            if req.archived or req.status == 'merged':
+                continue
+            when = last_step(req)
+            origin = req.barangay or req.requested_by_name or 'a requester'
+            if req.status == 'pending_mayor_approval':
+                note(city, when, 'awaiting_approval', 'New request awaiting your approval',
+                     f'Request {req.request_id} from {origin} needs your approval.', req)
+            elif req.status == 'pending_admin_approval':
+                # The City Admin approved it, so it now waits on CENRO.
+                note(cenro, when, 'awaiting_approval', 'New request awaiting your approval',
+                     f'Request {req.request_id} from {origin} needs your approval.', req)
+            user = sample_users.get(req.email)
+            if not user or self.now - when > timedelta(days=45):
+                continue
+            if req.status in ('approved', 'ongoing'):
+                note(user, when, 'approved', 'Your cleanup request has been approved',
+                     f'Your request {req.request_id} has been approved by CENRO.', req)
+            elif req.status in ('completed', 'segregated', 'verified'):
+                note(user, when, 'report_filed', 'Your cleanup request has been completed',
+                     f'CENRO has filed the trash collection report for request {req.request_id}.', req)
+            else:
+                continue
+            if user.pk not in newest or rows[-1][1] > newest[user.pk][1]:
+                newest[user.pk] = rows[-1]
+        # Each requester has at least their newest one unread, so the dot shows when signed in.
+        for row, _ in newest.values():
+            row.is_read = False
+
+        for area in CollectionArea.objects.filter(submitted_by=SUBMITTER).exclude(status='approved', date_reviewed__lt=self.now - timedelta(days=2)):
+            if area.status == 'pending':
+                when = self.now - timedelta(hours=20)
+                CollectionArea.objects.filter(pk=area.pk).update(date_submitted=when)
+                note(cenro, when, 'area_submitted', 'New collection area awaiting your approval',
+                     f'{area.name} ({area.area_id}) in {area.barangay} was submitted by {area.submitted_by} '
+                     'and needs your approval.', area=area)
+                continue
+            user = self.users.get(area.barangay)
+            if not user:
+                continue
+            if area.status == 'approved':
+                note(user, area.date_reviewed, 'area_approved', 'Your collection area has been approved',
+                     f'CENRO approved {area.name} ({area.area_id}). It can now be chosen for TROID-supported requests.',
+                     area=area)
+            elif area.status == 'declined':
+                note(user, area.date_reviewed, 'area_archived', 'Your collection area was archived',
+                     f'CENRO archived {area.name} ({area.area_id}). Reason: {area.decline_reason}', area=area,
+                     unread=True)
+
+        for row, when in rows:
+            row.save()
+            Notification.objects.filter(pk=row.pk).update(created_at=when)
+        return len(rows)
 
     def crew(self):
         number = self.rng.randrange(len(self.boats))
@@ -558,21 +645,22 @@ class Command(BaseCommand):
         base = rng.gauss(11, 3) * (1.25 if info['water'][0] in ('estuary', 'coast') else 1)
         bags = max(2, round(base * load))
         items = bags * rng.randint(6, 11)
-        categories = {}
+        counted = {}
         for name, share, _ in ITEM_MIX:
-            categories[name] = max(0, round(items * share * rng.uniform(0.6, 1.4)))
+            counted[name] = max(0, round(items * share * rng.uniform(0.6, 1.4)))
+        categories = class_totals(counted)
         weight = round(bags * rng.uniform(3.4, 5.6), 1)
         recyclable = round(weight * rng.uniform(0.32, 0.55), 1)
         return {'bags': bags, 'weight_kg': weight, 'recyclable_kg': recyclable,
-                'non_usable_kg': round(weight - recyclable, 1), 'categories': categories}
+                'non_usable_kg': round(weight - recyclable, 1), 'categories': categories, 'items': counted}
 
-    def detections(self, req, boat, categories, start, finished):
+    def detections(self, req, boat, items, start, finished):
         """What the robot counted along the drive: close to the filed report, spread over the area."""
         rng = self.rng
         polygon = self.areas[req.barangay].points
         stops = rng.randint(8, 14)
         counts = [dict() for _ in range(stops)]
-        for name, total in categories.items():
+        for name, total in items.items():
             for _ in range(round(total * rng.uniform(0.85, 1.05))):
                 bucket = counts[rng.randrange(stops)]
                 label = ROBOT_LABEL.get(name, name)

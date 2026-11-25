@@ -7,8 +7,12 @@ higher than the average over the 30 days before that. Lower or the same is fine.
 It is worked out from the filed trash reports every time it is asked for, so it is never out
 of date and needs nothing stored. Passing `as_of` gives the answer as it stood at the end of
 that moment (the Reports page compares periods this way).
+
+A hotspot is a priority area: its trash per cleanup spiked above its average the month before.
+hotspot_history() lists the hotspots of each calendar month, as they stood at the end of it
+(the current month as of now), for the Heatmap's Hotspots view.
 """
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from django.utils import timezone
@@ -100,3 +104,50 @@ def evaluate_priority_areas(as_of=None, barangay=None):
     results.sort(key=lambda r: (not r['is_priority'], -(r['change_pct'] or 0) if r['is_priority'] else 0,
                                 r['collection_area']['name'].lower()))
     return results
+
+
+MAX_HISTORY_MONTHS = 24
+
+
+def _month_end(year, month):
+    """The last day of a calendar month."""
+    first_of_next = date(year + (month == 12), month % 12 + 1, 1)
+    return first_of_next - timedelta(days=1)
+
+
+def hotspot_history(months=12, barangay=None, now=None):
+    """The last `months` calendar months, oldest first, each with the collection areas that
+    were hotspots (priority areas) at its end, or now for the current month."""
+    from .models import CollectionArea
+
+    now = now or timezone.now()
+    today = now.astimezone(APP_TIMEZONE).date()
+    months = max(1, min(int(months), MAX_HISTORY_MONTHS))
+    result = []
+    for back in range(months - 1, -1, -1):
+        index = today.year * 12 + today.month - 1 - back
+        year, month = divmod(index, 12)
+        month += 1
+        current = back == 0
+        as_of = now if current else end_of_day(_month_end(year, month))
+        hotspots = [r for r in evaluate_priority_areas(as_of=as_of, barangay=barangay) if r['is_priority']]
+        result.append({
+            'month': f'{year:04d}-{month:02d}',
+            'as_of': as_of,
+            'so_far': current,
+            'count': len(hotspots),
+            'hotspots': hotspots,
+        })
+
+    # Each area's shape once, so the map can draw it.
+    ids = {h['collection_area']['id'] for m in result for h in m['hotspots']}
+    shapes = {a.id: a for a in CollectionArea.objects.filter(id__in=ids)}
+    for entry in result:
+        for h in entry['hotspots']:
+            area = shapes.get(h['collection_area']['id'])
+            h['collection_area'] = {
+                **h['collection_area'],
+                'points': area.points if area else [],
+                'closed': area.closed if area else True,
+            }
+    return result

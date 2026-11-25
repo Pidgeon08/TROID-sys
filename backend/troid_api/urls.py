@@ -35,5 +35,6 @@ urlpatterns = [
     path('log-detection/', views.log_detection, name='log-detection'),
     path('heatmap/', views.get_heatmap_data, name='get-heatmap'),
     path('priority-areas/', views.priority_areas, name='priority-areas'),
+    path('hotspots/', views.hotspots, name='hotspots'),
     path('task-status-updates/', views.task_status_updates, name='task-status-updates'),
 ]

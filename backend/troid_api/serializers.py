@@ -19,7 +19,8 @@ LETTER_TYPES = {
 from .drives import TRASH_ITEMS
 
 # Filed with the trash report (submit_trash_report), beside the bags, weights and item counts.
-TRASH_REPORT_FIELDS = ['site_type', 'people_count', 'hours_spent', 'distance_km', 'entangled_animals', 'peculiar_item']
+TRASH_REPORT_FIELDS = ['trash_items', 'site_type', 'people_count', 'hours_spent', 'distance_km', 'entangled_animals',
+                       'peculiar_item']
 
 class LetterUploadSerializer(serializers.Serializer):
     """A request's letter: a PDF or Word file sent as base64 (a data URL is fine)."""
@@ -61,8 +62,9 @@ class EntangledAnimalSerializer(serializers.Serializer):
 
 
 class TrashReportSerializer(serializers.Serializer):
-    """The trash report required to finish a cleanup, after the International Coastal Cleanup
-    data card. 0 is a valid answer; items left out count as 0."""
+    """The trash report required to finish a cleanup: the items counted, after the International
+    Coastal Cleanup data card and grouped under the TROID classes (the class counts are their
+    sums), and the site details. 0 is a valid answer; items left out count as 0."""
     site_type = serializers.ChoiceField(choices=[c for c, _ in Request.SITE_TYPE_CHOICES])
     people_count = serializers.IntegerField(min_value=1)
     hours_spent = serializers.FloatField(min_value=0, max_value=24 * 7)
@@ -71,15 +73,15 @@ class TrashReportSerializer(serializers.Serializer):
     weight_kg = serializers.FloatField(min_value=0)
     non_usable_kg = serializers.FloatField(min_value=0)
     recyclable_kg = serializers.FloatField(min_value=0)
-    trash_categories = serializers.DictField(child=serializers.IntegerField(min_value=0))
+    trash_items = serializers.DictField(child=serializers.IntegerField(min_value=0))
     entangled_animals = EntangledAnimalSerializer(many=True, required=False, default=list)
     peculiar_item = serializers.CharField(max_length=200, allow_blank=True, default='')
     notes = serializers.CharField(allow_blank=True, default='')
 
-    def validate_trash_categories(self, value):
+    def validate_trash_items(self, value):
         unknown = sorted(set(value) - set(TRASH_ITEMS))
         if unknown:
-            raise serializers.ValidationError(f'Not an item on the data card: {", ".join(unknown)}.')
+            raise serializers.ValidationError(f'Not an item on the report: {", ".join(unknown)}.')
         return {item: value.get(item, 0) for item in TRASH_ITEMS}
 
 class DetectionEventSerializer(serializers.ModelSerializer):

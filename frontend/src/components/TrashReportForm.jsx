@@ -1,11 +1,12 @@
-// The trash report filed to finish a cleanup, after the International Coastal Cleanup data card.
-// CENRO (Mark Session Completed) and barangays (Mark as Finished) use the same form. For a
-// TROID-supported cleanup the items are filled in with what the robot counted, to check and correct.
+// The trash report filed to finish a cleanup. CENRO (Mark Session Completed) and barangays (Mark as
+// Finished) use the same form. Its items follow the International Coastal Cleanup data card, grouped
+// under the TROID classes; each class's count (the sum of its items) is shown beside what the robot
+// counted for it on a TROID-supported cleanup, so it shows how accurate the robot's read was.
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { Bot, Plus, X } from "lucide-react";
+import { Bot, Check, Plus, X } from "lucide-react";
 import api from "../services/api";
-import { ANIMAL_CONDITIONS, SITE_TYPES, TRASH_ITEMS, siteTypeForWater } from "../constants/trashReport";
+import { ANIMAL_CONDITIONS, SITE_TYPES, TRASH_GROUPS, TRASH_ITEMS, readAccuracy, siteTypeForWater } from "../constants/trashReport";
 
 const INPUT = "w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/20";
 const LABEL = "mb-1.5 block text-xs font-semibold text-slate-500";
@@ -65,22 +66,18 @@ export default function TrashReportForm({ request, onClose, onFiled }) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
-  // What the robot counted, for a TROID-supported cleanup; items not yet typed in take its count.
+  // What the robot counted per TROID class, for a TROID-supported cleanup.
   useEffect(() => {
     let cancelled = false;
     api.troidCount(request.id)
-      .then((res) => {
-        if (cancelled || !res.troid_assisted) return;
-        setTroidCount(res.categories || {});
-        setItems((prev) => Object.fromEntries(
-          Object.entries(prev).map(([item, value]) => [item, value === "" ? String(res.categories?.[item] || 0) : value])
-        ));
-      })
+      .then((res) => { if (!cancelled && res.troid_assisted) setTroidCount(res.categories || {}); })
       .catch((err) => console.error("Failed to load TROID counts:", err));
     return () => { cancelled = true; };
   }, [request.id]);
 
+  const classCount = (group) => group.items.reduce((sum, item) => sum + (Number(items[item]) || 0), 0);
   const totalItems = Object.values(items).reduce((sum, v) => sum + (Number(v) || 0), 0);
+  const troidTotal = troidCount ? Object.values(troidCount).reduce((sum, n) => sum + n, 0) : null;
   const updateAnimal = (index, field, value) =>
     setAnimals((prev) => prev.map((a, i) => (i === index ? { ...a, [field]: value } : a)));
 
@@ -91,7 +88,7 @@ export default function TrashReportForm({ request, onClose, onFiled }) {
       people_count: Number(people),
       hours_spent: Number(hours),
       distance_km: distance === "" ? null : Number(distance),
-      trash_categories: Object.fromEntries(TRASH_ITEMS.map((item) => [item, Number(items[item]) || 0])),
+      trash_items: Object.fromEntries(TRASH_ITEMS.map((item) => [item, Number(items[item]) || 0])),
       bags: Number(bags),
       weight_kg: Number(weight),
       recyclable_kg: Number(recyclable),
@@ -150,35 +147,62 @@ export default function TrashReportForm({ request, onClose, onFiled }) {
 
           <Section
             title="Items collected"
-            hint="Count every piece found. Leave an item blank, or 0, if none were found."
+            hint="Count every piece found, under the TROID class it belongs to. Leave an item blank, or 0, if none were found."
           >
             {troidCount && (
               <p className="flex items-start gap-2 rounded-lg border border-sky-100 bg-sky-50 px-3 py-2 text-xs text-sky-800">
                 <Bot size={14} className="mt-0.5 shrink-0" />
-                Filled in with what TROID counted. Check each item and correct it before filing.
+                Each class shows what TROID counted beside your count, so you can see how accurate its read was.
               </p>
             )}
-            <div className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
-              {TRASH_ITEMS.map((item) => (
-                <div key={item}>
-                  <label className="mb-1 flex flex-wrap items-baseline justify-between gap-x-2 text-[11px] text-slate-500">
-                    <span className="font-medium text-slate-600">{item}</span>
-                    {troidCount && <span className="font-semibold text-sky-700">TROID counted: {troidCount[item] || 0}</span>}
-                  </label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={items[item]}
-                    placeholder="0"
-                    onChange={(e) => setItems((prev) => ({ ...prev, [item]: stripLeadingZero(e.target.value) }))}
-                    className={INPUT}
-                    aria-label={item}
-                  />
-                </div>
-              ))}
+            <div className="space-y-3">
+              {TRASH_GROUPS.map((group) => {
+                const yours = classCount(group);
+                const counted = troidCount ? troidCount[group.cls] || 0 : null;
+                const accuracy = readAccuracy(yours, counted);
+                return (
+                  <fieldset key={group.cls} className="rounded-xl border border-slate-200">
+                    <legend className="sr-only">{group.cls}</legend>
+                    <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b border-slate-100 bg-slate-50/70 px-3 py-2">
+                      <p className="text-sm font-semibold text-slate-800">{group.cls}</p>
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+                        <span className="text-slate-500">Your count <span className="font-semibold tabular-nums text-slate-800">{yours.toLocaleString()}</span></span>
+                        {counted !== null && (
+                          <span className="text-slate-500">TROID counted <span className="font-semibold tabular-nums text-sky-700">{counted.toLocaleString()}</span></span>
+                        )}
+                        {accuracy && (
+                          <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                            accuracy.tone === "match" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"
+                          }`}>
+                            {accuracy.tone === "match" && <Check size={12} />}
+                            {accuracy.text}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-1 gap-x-4 gap-y-2.5 p-3 sm:grid-cols-2">
+                      {group.items.map((item) => (
+                        <div key={item}>
+                          <label className="mb-1 block text-[11px] font-medium text-slate-600">{item}</label>
+                          <input
+                            type="number"
+                            min="0"
+                            value={items[item]}
+                            placeholder="0"
+                            onChange={(e) => setItems((prev) => ({ ...prev, [item]: stripLeadingZero(e.target.value) }))}
+                            className={INPUT}
+                            aria-label={item}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </fieldset>
+                );
+              })}
             </div>
             <p className="text-right text-xs text-slate-500">
               Total: <span className="font-semibold text-slate-700">{totalItems.toLocaleString()} pieces</span>
+              {troidTotal !== null && <> · TROID counted <span className="font-semibold text-sky-700">{troidTotal.toLocaleString()}</span></>}
             </p>
           </Section>
 

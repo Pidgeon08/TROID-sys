@@ -250,15 +250,14 @@ export function compareGroups(current, previous, groupOf) {
 
 // --- waste types ------------------------------------------------------------------
 
-// The donut chart colours the six items usually found most (validated categorical slots 1-6, in
-// this fixed order so neighbouring slices stay distinct) and folds the rest into one grey slice.
+// The donut chart's colour for each TROID class (validated categorical slots, in this fixed order so
+// neighbouring slices stay distinct); Other, and any older category, is grey.
 export const ITEM_COLORS = {
-  "Food wrappers, containers": "#2a78d6",
-  "Beverage bottles (plastic)": "#eb6834",
-  "Bags (paper or plastic)": "#1baf7a",
-  "Caps, lids": "#eda100",
-  "Cups, plates, forks, knives, spoons": "#e87ba4",
-  "Beverage cans": "#008300",
+  Plastic: "#2a78d6",
+  Metal: "#eb6834",
+  Glass: "#1baf7a",
+  "Paper/Cardboard": "#eda100",
+  "Organic/Biodegradable": "#008300",
 };
 export const OTHER_ITEMS_COLOR = "#94A3B8";
 
@@ -290,8 +289,8 @@ export function wasteBreakdown(current, previous) {
 }
 
 /**
- * The donut chart's slices: the coloured items in their fixed order, then everything else as one
- * grey slice (`items` names what it holds). wasteBreakdown keeps every item for the tables.
+ * The donut chart's slices: the coloured classes in their fixed order, then everything else as one
+ * grey slice (`items` names what it holds). wasteBreakdown keeps every category for the tables.
  */
 export function wasteChartSlices(types) {
   const colored = Object.keys(ITEM_COLORS).map((name) => types.find((t) => t.name === name)).filter(Boolean);

@@ -250,9 +250,11 @@ class Request(models.Model):
     # When the operator pressed Start Cleanup Drive in the Companion app.
     drive_started_at = models.DateTimeField(null=True, blank=True)
     session_completed_at = models.DateTimeField(null=True, blank=True)
-    # The trash report, after the International Coastal Cleanup data card: pieces per item
-    # (drives.TRASH_ITEMS), and about the cleanup site and the people who worked it.
+    # The trash report: pieces per TROID class (drives.TROID_CLASSES), the sum of the items counted
+    # after the International Coastal Cleanup data card (trash_items, drives.TRASH_ITEMS), and
+    # about the cleanup site and the people who worked it.
     trash_categories = models.JSONField(default=dict, blank=True)
+    trash_items = models.JSONField(default=dict, blank=True)
     SITE_TYPE_CHOICES = [
         ('shoreline', 'Shoreline or beach'),
         ('river', 'River, stream or tributary'),

@@ -128,6 +128,12 @@ export const api = {
     return api.get(`/priority-areas/${qs.toString() ? `?${qs}` : ''}`);
   },
 
+  // The hotspots (priority areas) of each of the last `months` months, oldest first. params: { months, barangay }.
+  hotspots: (params = {}) => {
+    const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v));
+    return api.get(`/hotspots/${qs.toString() ? `?${qs}` : ''}`);
+  },
+
   landfillRecords: () => api.get('/landfill-records/'),
 
   recyclingRecords: () => api.get('/recycling-records/'),

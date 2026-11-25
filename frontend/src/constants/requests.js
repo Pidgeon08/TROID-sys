@@ -21,8 +21,8 @@ export function formatDate(value) {
   return value ? new Date(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '';
 }
 
-// The items a trash report counts (the International Coastal Cleanup data card); see trashReport.js.
-export { TRASH_ITEMS as TRASH_CATEGORIES } from "./trashReport";
+// The TROID classes: a trash report's categories, each the sum of its items (see trashReport.js).
+export { TROID_CLASSES as TRASH_CATEGORIES } from "./trashReport";
 
 // Shared search predicate for request tables: matches on ID, type, requester name,
 // and the request's site/location name (its "request name").
@@ -144,6 +144,7 @@ function mapStatusHistory(history) {
 // The data card details filed with the trash report, beside the bags, weights and item counts.
 function mapTrashReportDetails(raw) {
   return {
+    trashItems: raw.trash_items || {},
     siteType: raw.site_type || '',
     peopleCount: raw.people_count ?? null,
     hoursSpent: raw.hours_spent ?? null,

@@ -3,59 +3,59 @@ import re
 
 from .models import DeploymentSchedule, Request
 
-# What the trash report counts: the Shoreline and Recreational items of the International
-# Coastal Cleanup data card, plus anything else (TRASH_ITEMS in frontend/src/constants/trashReport.js).
-TRASH_ITEMS = [
-    'Bags (paper or plastic)',
-    'Balloons',
-    'Beverage bottles (plastic)',
-    'Beverage bottles (glass)',
-    'Beverage cans',
-    'Caps, lids',
-    'Clothing, shoes',
-    'Cups, plates, forks, knives, spoons',
-    'Food wrappers, containers',
-    'Pull tabs',
-    '6-pack holders',
-    'Shotgun shells, wadding',
-    'Straws, stirrers',
-    'Toys',
-    'Other items',
-]
-OTHER = 'Other items'
+# The TROID classes: what the robot sorts trash into, and the trash report's categories
+# (TROID_CLASSES in frontend/src/constants/trashReport.js). Reports, the Post-Cleanup Comparison
+# and the robot's counts all use these, so the robot's read can be checked against the report.
+TROID_CLASSES = ['Plastic', 'Metal', 'Glass', 'Paper/Cardboard', 'Organic/Biodegradable', 'Other']
+OTHER = 'Other'
 
-# The robot's model has its own class names (e.g. "Clear plastic bottle", "Drink can",
-# "Plastic film"); each is counted as the first item whose pattern it matches.
-_PATTERNS = [
-    (r'six[\s-]?pack|6[\s-]?pack', '6-pack holders'),
-    (r'pop[\s-]?tab|pull[\s-]?tab', 'Pull tabs'),
-    (r'straw|stirrer', 'Straws, stirrers'),
-    (r'balloon', 'Balloons'),
-    (r'shotgun|wadding', 'Shotgun shells, wadding'),
-    (r'\btoys?\b', 'Toys'),
-    (r'shoe|sandal|slipper|cloth|shirt|fabric', 'Clothing, shoes'),
-    (r'\bcaps?\b|\blids?\b', 'Caps, lids'),
-    (r'\bcups?\b|plate|fork|knife|knives|spoon|utensil|cutlery', 'Cups, plates, forks, knives, spoons'),
-    (r'\bbags?\b|sack', 'Bags (paper or plastic)'),
-    (r'glass', 'Beverage bottles (glass)'),
-    (r'bottle', 'Beverage bottles (plastic)'),
-    (r'food\s*can', 'Food wrappers, containers'),
-    (r'\bcans?\b', 'Beverage cans'),
-    (r'wrapper|packet|film|container|carton|styrofoam|foam|foil|food|tray', 'Food wrappers, containers'),
+# The items the report counts, after the International Coastal Cleanup data card (Shoreline and
+# Recreational), grouped under the class each belongs to. A class's count is the sum of its items.
+TRASH_GROUPS = [
+    ('Plastic', ['Plastic bags', 'Beverage bottles (plastic)', 'Caps, lids', 'Cups, plates, forks, knives, spoons',
+                 'Food wrappers, containers', 'Straws, stirrers', '6-pack holders', 'Toys', 'Shotgun shells, wadding',
+                 'Other plastic']),
+    ('Metal', ['Beverage cans', 'Pull tabs', 'Other metal']),
+    ('Glass', ['Beverage bottles (glass)', 'Other glass']),
+    ('Paper/Cardboard', ['Paper bags', 'Other paper or cardboard']),
+    ('Organic/Biodegradable', ['Organic waste']),
+    ('Other', ['Clothing, shoes', 'Balloons', 'Other items']),
 ]
-_COMPILED = [(re.compile(pattern, re.IGNORECASE), item) for pattern, item in _PATTERNS]
+TRASH_ITEMS = [item for _, items in TRASH_GROUPS for item in items]
+CLASS_OF_ITEM = {item: cls for cls, items in TRASH_GROUPS for item in items}
+
+
+def class_totals(items):
+    """A class's count for each TROID class: the sum of its items' counts."""
+    totals = {cls: 0 for cls in TROID_CLASSES}
+    for item, count in items.items():
+        totals[CLASS_OF_ITEM[item]] += count
+    return totals
+
+
+# The robot's model reports its own label names (e.g. "Clear plastic bottle", "Drink can",
+# "Plastic film"); each is counted under the first class whose pattern it matches.
+_PATTERNS = [
+    (r'glass', 'Glass'),
+    (r'metal|\bcans?\b|\btins?\b|alumin|foil|pop[\s-]?tab|pull[\s-]?tab|scrap', 'Metal'),
+    (r'paper|cardboard|carton|newspaper|magazine', 'Paper/Cardboard'),
+    (r'organic|biodegradable|food\s*(waste|scrap)|leaf|leaves|wood|branch|plant|fruit|vegetable', 'Organic/Biodegradable'),
+    (r'plastic|bottle|\bbags?\b|film|wrapper|packet|straw|stirrer|\bcups?\b|\blids?\b|\bcaps?\b|container|styrofoam'
+     r'|foam|six[\s-]?pack|6[\s-]?pack|utensil|cutlery|\btoys?\b|shotgun|wadding|tray|sachet', 'Plastic'),
+]
+_COMPILED = [(re.compile(pattern, re.IGNORECASE), cls) for pattern, cls in _PATTERNS]
 
 
 def report_category(label):
-    """The trash report item for one of the robot's class names."""
+    """The TROID class for one of the robot's label names."""
     label = str(label)
-    if label in TRASH_ITEMS:
+    if label in TROID_CLASSES:
         return label
-    return next((item for pattern, item in _COMPILED if pattern.search(label)), OTHER)
+    return next((cls for pattern, cls in _COMPILED if pattern.search(label)), OTHER)
 
 
 def troid_counts(detections):
-    """Pieces counted per trash report category, from a request's detection events."""
+    """Pieces counted per TROID class, from a request's detection events."""
     counts = {}
     for detection in detections:
         for label, count in (detection.categories or {}).items():

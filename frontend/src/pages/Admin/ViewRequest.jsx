@@ -24,6 +24,7 @@ import LetterAttachment from "../../components/LetterAttachment";
 import { AreaPreviewButton } from "../../components/AreaPreviewModal";
 import TrashReportForm from "../../components/TrashReportForm";
 import TrashReportSummary from "../../components/TrashReportSummary";
+import { classTotals } from "../../constants/trashReport";
 import { logAudit } from "../../services/auditLog";
 import { Card } from "../../components/ui/Card";
 import { useMarkRequestRead } from "../../hooks/useUnreadNotifications";
@@ -285,7 +286,8 @@ export default function ViewRequest({ id: propId, onClose }) {
       weightKg: report.weight_kg,
       nonUsableKg: report.non_usable_kg,
       recyclableKg: report.recyclable_kg,
-      trashCategories: report.trash_categories,
+      trashCategories: classTotals(report.trash_items),
+      trashItems: report.trash_items,
       siteType: report.site_type,
       peopleCount: report.people_count,
       hoursSpent: report.hours_spent,

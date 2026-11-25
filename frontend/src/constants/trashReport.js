@@ -1,24 +1,31 @@
-// The trash report filed when a cleanup is finished, after the International Coastal Cleanup
-// data card (Shoreline and Recreational items). The item names match drives.TRASH_ITEMS in the
-// backend, which also maps the robot's class names onto them for TROID-supported cleanups.
+// The trash report filed when a cleanup is finished. It counts the items of the International
+// Coastal Cleanup data card (Shoreline and Recreational), grouped under the TROID classes: what the
+// robot sorts trash into. A class's count is the sum of its items, and is what the robot's own
+// count is compared with. Matches drives.TROID_CLASSES and drives.TRASH_GROUPS in the backend.
 
-export const TRASH_ITEMS = [
-  "Bags (paper or plastic)",
-  "Balloons",
-  "Beverage bottles (plastic)",
-  "Beverage bottles (glass)",
-  "Beverage cans",
-  "Caps, lids",
-  "Clothing, shoes",
-  "Cups, plates, forks, knives, spoons",
-  "Food wrappers, containers",
-  "Pull tabs",
-  "6-pack holders",
-  "Shotgun shells, wadding",
-  "Straws, stirrers",
-  "Toys",
-  "Other items",
+export const TROID_CLASSES = ["Plastic", "Metal", "Glass", "Paper/Cardboard", "Organic/Biodegradable", "Other"];
+
+export const TRASH_GROUPS = [
+  {
+    cls: "Plastic",
+    items: [
+      "Plastic bags", "Beverage bottles (plastic)", "Caps, lids", "Cups, plates, forks, knives, spoons",
+      "Food wrappers, containers", "Straws, stirrers", "6-pack holders", "Toys", "Shotgun shells, wadding", "Other plastic",
+    ],
+  },
+  { cls: "Metal", items: ["Beverage cans", "Pull tabs", "Other metal"] },
+  { cls: "Glass", items: ["Beverage bottles (glass)", "Other glass"] },
+  { cls: "Paper/Cardboard", items: ["Paper bags", "Other paper or cardboard"] },
+  { cls: "Organic/Biodegradable", items: ["Organic waste"] },
+  { cls: "Other", items: ["Clothing, shoes", "Balloons", "Other items"] },
 ];
+
+export const TRASH_ITEMS = TRASH_GROUPS.flatMap((g) => g.items);
+
+/** Each TROID class's count: the sum of its items' counts (drives.class_totals). */
+export function classTotals(items = {}) {
+  return Object.fromEntries(TRASH_GROUPS.map((g) => [g.cls, g.items.reduce((sum, item) => sum + (Number(items[item]) || 0), 0)]));
+}
 
 // Request.SITE_TYPE_CHOICES in the backend.
 export const SITE_TYPES = [
@@ -46,13 +53,26 @@ export const ANIMAL_CONDITIONS = [
   { value: "dead", label: "Dead" },
 ];
 
+/** How the reported count of a class compares with what TROID counted. */
+export function readAccuracy(reported, counted) {
+  if (counted === null || counted === undefined) return null;
+  const diff = reported - counted;
+  if (diff === 0) return { tone: "match", text: "Matches TROID" };
+  return { tone: "off", text: `${Math.abs(diff).toLocaleString()} ${diff > 0 ? "more" : "fewer"} than TROID` };
+}
+
 /**
- * The items of a filed report worth listing: those with any pieces, data card items first.
- * Reports filed before the data card was used have their own categories, listed after.
+ * A filed report by TROID class: each class's count, with the items behind it that have any
+ * pieces. Reports filed before items were counted only have their class counts.
  */
-export function reportedItems(counts = {}) {
-  const others = Object.keys(counts).filter((name) => !TRASH_ITEMS.includes(name)).sort();
-  return [...TRASH_ITEMS, ...others]
-    .filter((name) => Number(counts[name]) > 0)
-    .map((name) => ({ name, count: Number(counts[name]) }));
+export function reportByClass(classCounts = {}, items = {}) {
+  const others = Object.keys(classCounts).filter((name) => !TROID_CLASSES.includes(name)).sort();
+  return [
+    ...TRASH_GROUPS.map((g) => ({
+      cls: g.cls,
+      count: Number(classCounts[g.cls]) || 0,
+      items: g.items.filter((item) => Number(items[item]) > 0).map((item) => ({ name: item, count: Number(items[item]) })),
+    })),
+    ...others.map((name) => ({ cls: name, count: Number(classCounts[name]) || 0, items: [] })),
+  ];
 }

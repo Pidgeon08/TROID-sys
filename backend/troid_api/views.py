@@ -42,10 +42,10 @@ from .serializers import (
 from . import backup, boundaries, maintenance
 from .authentication import INACTIVE_STATUSES, CompanionTokenAuthentication, is_app_operator
 from .permissions import ADMIN, ANY_ROLE, MAYOR, PUBLIC, REQUESTERS, STAFF, HasRole, RoleViewSetMixin, require
-from .drives import active_drive, scheduled_request_ids, troid_counts
+from .drives import active_drive, class_totals, scheduled_request_ids, troid_counts
 from .realtime import broadcast_after_commit, notifications_changed
 from . import live
-from .priority import end_of_day, evaluate_priority_areas
+from .priority import WINDOW_DAYS, end_of_day, evaluate_priority_areas, hotspot_history
 from .throttles import CompanionLoginEmailThrottle, CompanionLoginIPThrottle
 
 logger = logging.getLogger(__name__)
@@ -1483,7 +1483,8 @@ class RequestViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
         req.weight_kg = report['weight_kg']
         req.non_usable_kg = report['non_usable_kg']
         req.recyclable_kg = report['recyclable_kg']
-        req.trash_categories = report['trash_categories']
+        # The class counts, which the robot's counts are compared with, are the items' sums.
+        req.trash_categories = class_totals(report['trash_items'])
         for field in TRASH_REPORT_FIELDS:
             setattr(req, field, report[field])
 
@@ -1995,6 +1996,24 @@ def priority_areas(request):
         if not barangay:
             return Response([])
     return Response(evaluate_priority_areas(as_of=as_of, barangay=barangay))
+
+
+@api_view(['GET'])
+@permission_classes([HasRole(*ADMIN, *REQUESTERS)])
+def hotspots(request):
+    """The collection areas that were hotspots (priority areas: more bags per cleanup than the
+    month before) in each of the last ?months= calendar months (default 12, at most 24), oldest
+    first. ?barangay= limits it to one barangay; barangay and NGO accounts only get their own."""
+    try:
+        months = int(request.query_params.get('months') or 12)
+    except ValueError:
+        return Response({'error': 'months must be a number.'}, status=status.HTTP_400_BAD_REQUEST)
+    barangay = request.query_params.get('barangay') or None
+    if getattr(request.user, 'role', None) in REQUESTERS:
+        barangay = own_barangay(request.user)
+        if not barangay:
+            return Response({'window_days': WINDOW_DAYS, 'months': []})
+    return Response({'window_days': WINDOW_DAYS, 'months': hotspot_history(months=months, barangay=barangay)})
 
 
 class LandfillRecordViewSet(RoleViewSetMixin, viewsets.ReadOnlyModelViewSet):

@@ -115,11 +115,9 @@ async function openScheduleModal(page) {
   await settle(page, 300);
 }
 
-// What the robot counted on a drive, per data card item, for the trash report picture.
+// What the robot counted on a drive, per TROID class, for the trash report picture.
 const SAMPLE_TROID_COUNT = {
-  'Bags (paper or plastic)': 14, 'Beverage bottles (plastic)': 26, 'Beverage bottles (glass)': 3, 'Beverage cans': 7,
-  'Caps, lids': 11, 'Cups, plates, forks, knives, spoons': 9, 'Food wrappers, containers': 38, 'Straws, stirrers': 6,
-  'Other items': 6,
+  Plastic: 52, Metal: 7, Glass: 3, 'Paper/Cardboard': 4, 'Organic/Biodegradable': 5, Other: 4,
 };
 
 // Opens the map preview of the request's collection area, and waits for the map.
@@ -306,14 +304,17 @@ export const RECIPES = {
       'troid-counted': {
         run: async (p) => {
           // A drive that has just started has no counts yet, so the picture shows sample ones.
-          await fake(p, 'GET', /\/troid_count\/?$/, { troid_assisted: true, categories: SAMPLE_TROID_COUNT, total: 120 });
+          await fake(p, 'GET', /\/troid_count\/?$/, { troid_assisted: true, categories: SAMPLE_TROID_COUNT, total: 75 });
           await openFirstRequest('/admin/requests', 'status=Ongoing&type=troid_supported')(p);
           await button(p, /Mark Session Completed/).click();
           await settle(p);
+          await p.getByLabel('Plastic bags').fill('12');
+          await p.getByLabel('Beverage bottles (plastic)').fill('40');
+          await p.getByLabel('Beverage cans').fill('7');
           await p.locator('form .overflow-y-auto').first().evaluate((el) => el.scrollBy(0, 330));
           await settle(p, 300);
         },
-        outline: (p) => text(p, 'TROID counted', false),
+        outline: (p) => p.locator('fieldset').first().locator('div').first(),
       },
       'priority-feed': { path: '/admin/dashboard', outline: (p) => card(p, 'Priority Areas') },
     },
@@ -420,6 +421,10 @@ export const RECIPES = {
       'bot-trail': {
         run: async (p) => { await button(p, '30 days', true).click(); await settle(p, 1200); },
         outline: (p) => card(p, 'Bot trail'),
+      },
+      hotspots: {
+        run: async (p) => { await button(p, 'Hotspots', true).click(); await settle(p, 2000); },
+        outline: (p) => [p.getByLabel('Collection area'), p.getByText('Hotspots per month').first()],
       },
       'post-cleanup': {
         run: async (p) => {
@@ -642,6 +647,10 @@ export const RECIPES = {
       'bot-trail': {
         run: async (p) => { await button(p, '30 days', true).click(); await settle(p, 1200); },
         outline: (p) => card(p, 'Bot trail'),
+      },
+      hotspots: {
+        run: async (p) => { await button(p, 'Hotspots', true).click(); await settle(p, 2000); },
+        outline: (p) => [p.getByLabel('Collection area'), p.getByText('Hotspots per month').first()],
       },
       'post-cleanup': {
         run: async (p) => {
