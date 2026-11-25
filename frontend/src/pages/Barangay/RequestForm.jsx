@@ -16,11 +16,13 @@ import {
   Layers,
   Bot,
   Users,
+  Map as MapIcon,
 } from "lucide-react";
 import api from "../../services/api";
 import { BARANGAYS } from "../../utils/barangayBoundaries";
 import { formatFileSize, formatTime12h } from "../../constants/requests";
 import LetterDropzone from "../../components/LetterDropzone";
+import AreaPickerModal from "../../components/AreaPickerModal";
 import DocumentPreview from "../../components/DocumentPreview";
 import { base64ToBlob, letterKind } from "../../utils/letters";
 import { LIVE, useLiveRefresh } from "../../hooks/useLiveUpdates";
@@ -229,6 +231,8 @@ function RequestForm({ currentUser, forCenro = false }) {
   });
   const [collectionAreas, setCollectionAreas] = useState([]);
   const [collectionAreasLoading, setCollectionAreasLoading] = useState(true);
+  // The map of the areas that can be chosen, opened from beside the Collection Area field.
+  const [areaMapOpen, setAreaMapOpen] = useState(false);
   const [photoBase64List, setPhotoBase64List] = useState([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showOverview, setShowOverview] = useState(false);
@@ -515,35 +519,56 @@ function RequestForm({ currentUser, forCenro = false }) {
               <label className="block text-xs font-semibold text-slate-500 mb-1.5">
                 {isTroid ? "Collection Area" : "Collection Area (Optional)"}
               </label>
-              <div className="relative">
-                <Layers size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-                <select
-                  name="collectionAreaId"
-                  value={formData.collectionAreaId}
-                  onChange={handleChange}
-                  disabled={forCenro && !formData.barangay}
-                  className="w-full appearance-none rounded-lg border border-slate-200 bg-white py-2.5 pl-9 pr-9 text-sm text-slate-700 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30 disabled:bg-slate-50 disabled:text-slate-400"
-                  required={isTroid}
+              <div className="flex gap-2">
+                <div className="relative min-w-0 flex-1">
+                  <Layers size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                  <select
+                    name="collectionAreaId"
+                    value={formData.collectionAreaId}
+                    onChange={handleChange}
+                    disabled={forCenro && !formData.barangay}
+                    className="w-full appearance-none rounded-lg border border-slate-200 bg-white py-2.5 pl-9 pr-9 text-sm text-slate-700 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30 disabled:bg-slate-50 disabled:text-slate-400"
+                    required={isTroid}
+                  >
+                    <option value="">
+                      {collectionAreasLoading
+                        ? "Loading areas..."
+                        : collectionAreas.length === 0
+                          ? "No approved areas yet"
+                          : forCenro && !formData.barangay
+                            ? "Select a barangay first"
+                            : isTroid
+                              ? "Select a collection area"
+                              : areaOptions.length === 0
+                                ? "No approved areas in this barangay"
+                                : "Not in a collection area"}
+                    </option>
+                    {areaOptions.map((a) => (
+                      <option key={a.id} value={a.id}>{a.name}</option>
+                    ))}
+                  </select>
+                  <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setAreaMapOpen(true)}
+                  disabled={collectionAreasLoading || areaOptions.length === 0 || (forCenro && !formData.barangay)}
+                  title="See the collection areas on a map"
+                  className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  <option value="">
-                    {collectionAreasLoading
-                      ? "Loading areas..."
-                      : collectionAreas.length === 0
-                        ? "No approved areas yet"
-                        : forCenro && !formData.barangay
-                          ? "Select a barangay first"
-                          : isTroid
-                            ? "Select a collection area"
-                            : areaOptions.length === 0
-                              ? "No approved areas in this barangay"
-                              : "Not in a collection area"}
-                  </option>
-                  {areaOptions.map((a) => (
-                    <option key={a.id} value={a.id}>{a.name}</option>
-                  ))}
-                </select>
-                <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                  <MapIcon size={16} />
+                  <span className="hidden sm:inline">View on map</span>
+                </button>
               </div>
+              {areaMapOpen && (
+                <AreaPickerModal
+                  areas={areaOptions}
+                  value={formData.collectionAreaId}
+                  barangay={requestBarangay}
+                  onChoose={(id) => setFormData((prev) => ({ ...prev, collectionAreaId: String(id) }))}
+                  onClose={() => setAreaMapOpen(false)}
+                />
+              )}
               {!isTroid && (
                 <p className="text-[11px] text-slate-400 mt-1.5">
                   If the cleanup is in a collection area, choose it so its trash counts toward that area&apos;s priority and hotspots.

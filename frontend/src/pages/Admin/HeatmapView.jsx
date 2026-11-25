@@ -1,4 +1,4 @@
-import { MapContainer, TileLayer, useMap, Polygon, Circle, CircleMarker, ZoomControl } from 'react-leaflet';
+import { MapContainer, TileLayer, useMap, useMapEvents, Polygon, Polyline, Circle, CircleMarker, ZoomControl } from 'react-leaflet';
 import { TILE_URL, TILE_ATTRIBUTION } from '../../services/mapTiles';
 import 'leaflet/dist/leaflet.css';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -10,7 +10,8 @@ import { api } from '../../services/api';
 import { SearchBar } from '../../components/ui/SearchBar';
 import { useRealtime } from '../../hooks/useRealtime';
 import {
-  areaCoverage, splitByArea, trailStats, isMeasurableArea, formatArea, formatDistance, formatDuration, TRAIL_GAP_MS,
+  areaCoverage, splitByArea, travelLines, trailStats, isMeasurableArea, formatArea, formatDistance, formatDuration,
+  TRAIL_GAP_MS, TRAVEL_REACH_M,
 } from '../../utils/coverage';
 import { HeatmapLayer, PathLayer } from '../../components/MapLayers';
 import { BarangayOutline } from '../../components/AreaDrawing';
@@ -21,9 +22,8 @@ import { LIVE, useLiveVersion } from '../../hooks/useLiveUpdates';
 
 // Default map view when there is nothing to show yet: San Fernando, La Union.
 const SAN_FERNANDO_CENTER = [16.6195, 120.314];
-const COVERAGE_RADII_M = [5, 10, 20, 30];
-// Drawing a circle per point gets heavy past this; coverage is still measured on every point.
-const MAX_COVERAGE_CIRCLES = 1500;
+// Drawing a marker per point outside the area gets heavy past this; coverage still counts them all.
+const MAX_OUTSIDE_MARKERS = 1500;
 const BLUE = '#1b4de4';
 const COVERED = '#10b981';
 const OUTSIDE = '#f59e0b';
@@ -40,38 +40,38 @@ function FitBounds({ fitKey, bounds }) {
   return null;
 }
 
-/** The collection area being compared, plus what TROID covered of it. */
-function CoverageOverlay({ area, points, radiusM, showCoverage }) {
+/** The robot's travel path drawn as the strip it cleared: TRAVEL_REACH_M either side, at any zoom. */
+function TravelStrip({ lines }) {
+  const map = useMap();
+  const [zoom, setZoom] = useState(() => map.getZoom());
+  useMapEvents({ zoomend: () => setZoom(map.getZoom()) });
+  const lat = map.getCenter().lat;
+  const pxPerM = (256 * 2 ** zoom) / (40075016.686 * Math.cos((lat * Math.PI) / 180));
+  const weight = Math.max(2, 2 * TRAVEL_REACH_M * pxPerM);
+  return lines.map((line, i) => (line.length === 1 ? (
+    <Circle key={i} center={line[0]} radius={TRAVEL_REACH_M} interactive={false}
+      pathOptions={{ stroke: false, fillColor: COVERED, fillOpacity: 0.35 }} />
+  ) : (
+    <Polyline key={i} positions={line} interactive={false}
+      pathOptions={{ color: COVERED, weight, opacity: 0.35, lineCap: 'round', lineJoin: 'round' }} />
+  )));
+}
+
+/** The collection area being compared, plus what TROID covered of it: its travel path, cleared either side. */
+function CoverageOverlay({ area, reports, showCoverage }) {
+  const points = useMemo(() => (reports || []).map((r) => [r.latitude, r.longitude]), [reports]);
   const split = useMemo(() => splitByArea(area?.points, points), [area, points]);
+  const lines = useMemo(() => (showCoverage ? travelLines(reports) : []), [reports, showCoverage]);
   if (!area) return null;
-  const circles = showCoverage ? split.inside.slice(0, MAX_COVERAGE_CIRCLES) : [];
-  // A point just past the edge can still reach into the area, so its reach is drawn too.
-  const outsideCircles = showCoverage ? split.outside.slice(0, MAX_COVERAGE_CIRCLES) : [];
+  const outside = showCoverage ? split.outside.slice(0, MAX_OUTSIDE_MARKERS) : [];
   return (
     <>
       <Polygon
         positions={area.points}
         pathOptions={{ color: area.color || BLUE, weight: 2.5, dashArray: '6 5', fillColor: area.color || BLUE, fillOpacity: 0.06 }}
       />
-      {circles.map((p, i) => (
-        <Circle
-          key={`c${i}`}
-          center={[p[0], p[1]]}
-          radius={radiusM}
-          pathOptions={{ stroke: false, fillColor: COVERED, fillOpacity: 0.28 }}
-          interactive={false}
-        />
-      ))}
-      {outsideCircles.map((p, i) => (
-        <Circle
-          key={`oc${i}`}
-          center={[p[0], p[1]]}
-          radius={radiusM}
-          pathOptions={{ stroke: false, fillColor: OUTSIDE, fillOpacity: 0.15 }}
-          interactive={false}
-        />
-      ))}
-      {outsideCircles.map((p, i) => (
+      {showCoverage && <TravelStrip lines={lines} />}
+      {outside.map((p, i) => (
         <CircleMarker
           key={`o${i}`}
           center={[p[0], p[1]]}
@@ -154,15 +154,7 @@ function Segmented({ options, value, onChange }) {
 const selectClass =
   'rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 outline-none hover:border-slate-300 focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30';
 
-function CoveragePanel({ area, coverage, radiusM, onRadiusChange, showCoverage, onToggleCoverage, emptyText }) {
-  const radiusPicker = (
-    <select value={radiusM} onChange={(e) => onRadiusChange(Number(e.target.value))} className={selectClass} aria-label="Coverage radius">
-      {COVERAGE_RADII_M.map((r) => (
-        <option key={r} value={r}>{r} m reach</option>
-      ))}
-    </select>
-  );
-
+function CoveragePanel({ area, coverage, showCoverage, onToggleCoverage, emptyText }) {
   if (!area) {
     return (
       <Panel icon={Target} title="Area covered">
@@ -181,7 +173,7 @@ function CoveragePanel({ area, coverage, radiusM, onRadiusChange, showCoverage, 
   }
 
   return (
-    <Panel icon={Target} title="Area covered" aside={radiusPicker}>
+    <Panel icon={Target} title="Area covered">
       <div className="flex items-baseline justify-between gap-3">
         <span className="text-3xl font-bold text-slate-900 tracking-tight tabular-nums">{formatPct(coverage.coveredPct)}</span>
         <span className="text-xs text-slate-500 text-right truncate" title={area.name}>
@@ -218,8 +210,8 @@ function CoveragePanel({ area, coverage, radiusM, onRadiusChange, showCoverage, 
         Show covered ground on the map
       </label>
       <p className="mt-3 text-[11px] text-slate-400 leading-relaxed">
-        Each point TROID reported on the water counts as covering {radiusM} m around it. Covered is the share of the area&apos;s
-        water within that reach of a point. Water is from OpenStreetMap.
+        Covered is what TROID&apos;s travel path cleared: the points it reported on the water, joined in the order it
+        reported them, and {TRAVEL_REACH_M} m either side of that line. Water is from OpenStreetMap.
       </p>
     </Panel>
   );
@@ -269,7 +261,7 @@ function CategoryPanel({ categories, total }) {
   );
 }
 
-function MapLegend({ type, area, showCoverage, radiusM }) {
+function MapLegend({ type, area, showCoverage }) {
   return (
     <div className="absolute left-3 bottom-3 z-[400] w-56 rounded-xl bg-white/95 border border-slate-200 shadow-sm px-3 py-2.5 text-[11px] text-slate-600">
       <div className="font-semibold text-slate-700">{type}</div>
@@ -304,8 +296,8 @@ function MapLegend({ type, area, showCoverage, radiusM }) {
           {showCoverage && (
             <>
               <li className="flex items-center gap-2">
-                <span className="w-3 h-3 rounded-full" style={{ background: COVERED, opacity: 0.5 }} />
-                Covered ({radiusM} m reach)
+                <span className="w-4 h-2 rounded-full" style={{ background: COVERED, opacity: 0.5 }} />
+                Covered (path, {TRAVEL_REACH_M} m either side)
               </li>
               <li className="flex items-center gap-2">
                 <span className="w-2.5 h-2.5 rounded-full" style={{ background: OUTSIDE }} />
@@ -319,7 +311,7 @@ function MapLegend({ type, area, showCoverage, radiusM }) {
   );
 }
 
-function CoverageMap({ heatPoints, heatType, reports, area, coveragePoints, radiusM, showCoverage, fitKey, emptyText, barangay }) {
+function CoverageMap({ heatPoints, heatType, reports, area, showCoverage, fitKey, emptyText, barangay }) {
   // A barangay's own page starts on the whole barangay; CENRO's on wherever TROID found trash.
   const bounds = area?.points?.length ? area.points : (barangay && barangayBounds(barangay)) || boundsOf(heatPoints);
   return (
@@ -334,11 +326,11 @@ function CoverageMap({ heatPoints, heatType, reports, area, coveragePoints, radi
         <FitBounds fitKey={fitKey} bounds={bounds} />
         {barangay && <BarangayOutline barangay={barangay} fit={false} />}
         {heatType !== PATHING && <HeatmapLayer points={heatPoints} type={heatType} />}
-        <CoverageOverlay area={area} points={coveragePoints} radiusM={radiusM} showCoverage={showCoverage} />
+        <CoverageOverlay area={area} reports={reports} showCoverage={showCoverage} />
         {heatType === PATHING && <PathLayer reports={reports} />}
         <ZoomControl position="bottomright" />
       </MapContainer>
-      <MapLegend type={heatType} area={area} showCoverage={showCoverage} radiusM={radiusM} />
+      <MapLegend type={heatType} area={area} showCoverage={showCoverage} />
       {heatPoints.length === 0 && (
         <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[400] rounded-full bg-white/95 border border-slate-200 shadow-sm px-3 py-1.5 text-xs font-medium text-slate-600 flex items-center gap-1.5">
           <Info className="w-3.5 h-3.5 text-slate-400" />
@@ -368,7 +360,6 @@ const HeatmapView = ({ barangay }) => {
 
   const [areas, setAreas] = useState([]);
   const [compareAreaId, setCompareAreaId] = useState('');
-  const [radiusM, setRadiusM] = useState(10);
   const [showCoverage, setShowCoverage] = useState(true);
   const [boats, setBoats] = useState([]);
 
@@ -461,8 +452,8 @@ const HeatmapView = ({ barangay }) => {
   const liveTotal = useMemo(() => detections.reduce((sum, p) => sum + (p.trash_count || 0), 0), [detections]);
   const compareArea = areas.find((a) => String(a.id) === String(compareAreaId)) || null;
   const liveCoverage = useMemo(
-    () => (isMeasurableArea(compareArea) ? areaCoverage(compareArea.points, heatPoints, radiusM) : null),
-    [compareArea, heatPoints, radiusM]
+    () => (isMeasurableArea(compareArea) ? areaCoverage(compareArea.points, detections) : null),
+    [compareArea, detections]
   );
   const liveTrail = useMemo(() => trailStats(detections), [detections]);
   const areasByBarangay = useMemo(() => {
@@ -487,8 +478,8 @@ const HeatmapView = ({ barangay }) => {
     [selectedDrive]
   );
   const driveCoverage = useMemo(
-    () => (isMeasurableArea(driveArea) ? areaCoverage(driveArea.points, driveHeatPoints, radiusM) : null),
-    [driveArea, driveHeatPoints, radiusM]
+    () => (isMeasurableArea(driveArea) ? areaCoverage(driveArea.points, driveDetections) : null),
+    [driveArea, driveDetections]
   );
   const driveTrail = useMemo(() => trailStats(driveDetections), [driveDetections]);
 
@@ -629,8 +620,6 @@ const HeatmapView = ({ barangay }) => {
               heatType={heatmapType}
               reports={detections}
               area={compareArea}
-              coveragePoints={heatPoints}
-              radiusM={radiusM}
               showCoverage={showCoverage}
               fitKey={compareArea ? `area-${compareArea.id}` : scoped ? `barangay-${barangay}` : `points-${timeFilter}-${selectedCategory}-${heatPoints.length > 0}`}
               emptyText="No detections in this period"
@@ -640,8 +629,6 @@ const HeatmapView = ({ barangay }) => {
               <CoveragePanel
                 area={compareArea}
                 coverage={liveCoverage}
-                radiusM={radiusM}
-                onRadiusChange={setRadiusM}
                 showCoverage={showCoverage}
                 onToggleCoverage={setShowCoverage}
                 emptyText={scoped
@@ -711,8 +698,6 @@ const HeatmapView = ({ barangay }) => {
                 heatType={heatmapType}
                 reports={driveDetections}
                 area={isMeasurableArea(driveArea) ? driveArea : null}
-                coveragePoints={driveHeatPoints}
-                radiusM={radiusM}
                 showCoverage={showCoverage}
                 fitKey={selectedDrive ? `drive-${selectedDrive.request_id}` : 'drives-all'}
                 emptyText={selectedDrive ? 'TROID reported no points for this drive' : 'TROID reported no points for these drives'}
@@ -722,8 +707,6 @@ const HeatmapView = ({ barangay }) => {
                 <CoveragePanel
                   area={driveArea}
                   coverage={driveCoverage}
-                  radiusM={radiusM}
-                  onRadiusChange={setRadiusM}
                   showCoverage={showCoverage}
                   onToggleCoverage={setShowCoverage}
                   emptyText={

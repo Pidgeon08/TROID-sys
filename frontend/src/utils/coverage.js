@@ -1,9 +1,10 @@
-// How much of a collection area TROID covered, worked out from the points the robot reported
-// (its detections). Each point counts as covering a circle of `radiusM` metres around it; the
-// area is sampled on a grid and the share of grid cells within reach of a point is the coverage.
-// Only the water inside the area counts (utils/water: the sea, rivers, creeks and ponds), since
-// that is all a boat can cover, and only points reported on the water. Distances use a flat
-// projection around the area, which is accurate at barangay scale.
+// How much of a collection area TROID covered, worked out from its travel path: the points the
+// robot reported, joined in the order it reported them (one line per robot per run). The path
+// counts as covering TRAVEL_REACH_M either side of it; the area is sampled on a grid and the share
+// of grid cells that close to the path is the coverage. Only the water inside the area counts
+// (utils/water: the sea, rivers, creeks and ponds), since that is all a boat can cover, and only
+// points reported on the water make up the path. Distances use a flat projection around the area,
+// which is accurate at barangay scale.
 import { onWater, reportedOnWater } from './water';
 
 const M_PER_DEG_LAT = 111320;
@@ -11,6 +12,8 @@ const M_PER_DEG_LAT = 111320;
 const MAX_CELLS = 40000;
 // Two reports further apart than this are treated as separate runs when measuring the trail.
 export const TRAIL_GAP_MS = 15 * 60 * 1000;
+// How far either side of its travel path the robot clears.
+export const TRAVEL_REACH_M = 5;
 
 function projector(lat0) {
   const mPerDegLng = M_PER_DEG_LAT * Math.cos((lat0 * Math.PI) / 180);
@@ -50,13 +53,32 @@ export function ringAreaM2(latLngRing) {
   return shoelaceM2(latLngRing.map(project));
 }
 
+/** Squared distance from (x, y) to the segment a–b, in projected metres. */
+function segmentDistance2(x, y, [ax, ay], [bx, by]) {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const length2 = dx * dx + dy * dy;
+  const t = length2 === 0 ? 0 : Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / length2));
+  return (x - ax - t * dx) ** 2 + (y - ay - t * dy) ** 2;
+}
+
 /**
- * Compares the robot's points with an area.
- * @param latLngRing  the area's [[lat, lng], ...] outline
- * @param points      [[lat, lng, ...], ...] the robot reported
- * @param radiusM     how far around each point counts as covered
+ * The robot's travel path, as [[lat, lng], ...] lines: its points on the water joined in the
+ * order they were reported, one line per robot per run (trailRuns).
+ * @param reports  [{ latitude, longitude, timestamp, boat? }, ...]
  */
-export function areaCoverage(latLngRing, points, radiusM) {
+export function travelLines(reports) {
+  return trailRuns(reports)
+    .map((run) => run.nodes.map((node) => node.at).filter((at) => reportedOnWater(at)))
+    .filter((line) => line.length > 0);
+}
+
+/**
+ * Compares the robot's travel path with an area.
+ * @param latLngRing  the area's [[lat, lng], ...] outline
+ * @param reports     [{ latitude, longitude, timestamp, boat? }, ...] the robot reported
+ */
+export function areaCoverage(latLngRing, reports) {
   const empty = {
     areaM2: 0, outlineM2: 0, waterMapped: false, coveredM2: 0, coveredPct: 0, inside: 0, outside: 0, onLand: 0, total: 0,
   };
@@ -68,35 +90,41 @@ export function areaCoverage(latLngRing, points, radiusM) {
   const unproject = (x, y) => [y / M_PER_DEG_LAT, x / mPerDegLng];
   const ring = latLngRing.map(project);
   const outlineM2 = shoelaceM2(ring);
-  const valid = (points || []).filter((p) => Number.isFinite(p?.[0]) && Number.isFinite(p?.[1]));
-  // Points on land (GPS gone astray, or a report from the shore) cover nothing a boat can clean.
-  const wet = valid.filter((p) => reportedOnWater(p));
-  const pts = wet.map(project);
-
+  const valid = (reports || [])
+    .filter((r) => Number.isFinite(r?.latitude) && Number.isFinite(r?.longitude))
+    .map((r) => [r.latitude, r.longitude]);
   const inside = valid.filter((p) => insideRing(project(p), ring)).length;
-  const onLand = valid.length - wet.length;
+  // Points on land (GPS gone astray, or a report from the shore) aren't part of the path.
+  const onLand = valid.filter((p) => !reportedOnWater(p)).length;
   const result = { ...empty, areaM2: outlineM2, outlineM2, inside, outside: valid.length - inside, onLand, total: valid.length };
-  if (outlineM2 === 0 || !(radiusM > 0)) return result;
+  if (outlineM2 === 0) return result;
 
-  // Bucket the points by radius so each cell only checks its neighbours.
+  // Each stretch of the path, filed under the grid squares it passes within reach of, so a cell
+  // only checks the stretches near it. A lone point is a stretch of no length.
+  const reach = TRAVEL_REACH_M;
+  const square = Math.max(reach * 4, 20);
   const buckets = new Map();
-  for (const [x, y] of pts) {
-    const key = bucketKey(Math.floor(x / radiusM), Math.floor(y / radiusM));
-    if (!buckets.has(key)) buckets.set(key, []);
-    buckets.get(key).push([x, y]);
-  }
-  const r2 = radiusM * radiusM;
-  const reached = (x, y) => {
-    if (buckets.size === 0) return false;
-    const bx = Math.floor(x / radiusM);
-    const by = Math.floor(y / radiusM);
-    for (let dx = -1; dx <= 1; dx++) {
-      for (let dy = -1; dy <= 1; dy++) {
-        const near = buckets.get(bucketKey(bx + dx, by + dy));
-        if (near && near.some(([px, py]) => (px - x) ** 2 + (py - y) ** 2 <= r2)) return true;
+  for (const line of travelLines(reports)) {
+    const pts = line.map(project);
+    for (let i = 0; i < pts.length; i++) {
+      const a = pts[i];
+      const b = pts[Math.min(i + 1, pts.length - 1)];
+      if (i > 0 && i === pts.length - 1) break;
+      const [x0, x1] = [Math.min(a[0], b[0]) - reach, Math.max(a[0], b[0]) + reach];
+      const [y0, y1] = [Math.min(a[1], b[1]) - reach, Math.max(a[1], b[1]) + reach];
+      for (let bx = Math.floor(x0 / square); bx <= Math.floor(x1 / square); bx++) {
+        for (let by = Math.floor(y0 / square); by <= Math.floor(y1 / square); by++) {
+          const key = bucketKey(bx, by);
+          if (!buckets.has(key)) buckets.set(key, []);
+          buckets.get(key).push([a, b]);
+        }
       }
     }
-    return false;
+  }
+  const r2 = reach * reach;
+  const reached = (x, y) => {
+    const near = buckets.get(bucketKey(Math.floor(x / square), Math.floor(y / square)));
+    return Boolean(near && near.some(([a, b]) => segmentDistance2(x, y, a, b) <= r2));
   };
 
   const xs = ring.map((p) => p[0]);
@@ -104,7 +132,7 @@ export function areaCoverage(latLngRing, points, radiusM) {
   const [minX, maxX, minY, maxY] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
   const cell = Math.max(Math.sqrt(((maxX - minX) * (maxY - minY)) / MAX_CELLS), 0.25);
 
-  // Each cell of the outline, and whether it is water and within reach of a point.
+  // Each cell of the outline, and whether it is water and close enough to the path.
   let cellsInArea = 0;
   let wetCells = 0;
   let wetCovered = 0;
@@ -113,7 +141,7 @@ export function areaCoverage(latLngRing, points, radiusM) {
     for (let y = minY + cell / 2; y < maxY; y += cell) {
       if (!insideRing([x, y], ring)) continue;
       cellsInArea += 1;
-      const hit = reached(x, y);
+      const hit = buckets.size > 0 && reached(x, y);
       if (hit) allCovered += 1;
       if (onWater(unproject(x, y))) {
         wetCells += 1;

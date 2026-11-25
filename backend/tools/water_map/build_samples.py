@@ -43,7 +43,7 @@ lines = [LineString([xy(g['lat'], g['lon']) for g in e['geometry']])
          if e['type'] == 'way' and e.get('geometry') and len(e['geometry']) > 1
          and e.get('tags', {}).get('waterway') in ('river', 'stream', 'canal', 'drain')]
 
-SWEEP_M = 18      # between sweep lines, so a 10 m coverage radius just about meets the next line
+SWEEP_M = 9       # between sweep lines: the robot clears 5 m either side of its path, so the lanes just meet
 STEP_M = 6        # between path nodes
 # Each sample area: (name the seed knows it by, its barangay, how it is laid out). The first seven
 # are the barangays' main areas (keyed by barangay); the rest are the extra pending/declined/new ones.
