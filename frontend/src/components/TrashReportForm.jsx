@@ -133,9 +133,9 @@ export default function TrashReportForm({ request, onClose, onFiled }) {
           <Section title="Cleanup site">
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div className="sm:col-span-2">
-                <label className={LABEL}>Type of cleanup site</label>
+                <label className={LABEL}>Type of waterway</label>
                 <select required value={siteType} onChange={(e) => setSiteType(e.target.value)} className={`${INPUT} bg-white`}>
-                  <option value="" disabled>Choose the type of site</option>
+                  <option value="" disabled>Choose the type of waterway</option>
                   {SITE_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
                 </select>
               </div>
@@ -223,7 +223,7 @@ export default function TrashReportForm({ request, onClose, onFiled }) {
               <div key={index} className="grid grid-cols-[1fr_auto] items-end gap-2 rounded-lg border border-slate-100 bg-slate-50/60 p-3 sm:grid-cols-[1.2fr_0.8fr_1.2fr_auto]">
                 <div className="col-span-2 sm:col-span-1">
                   <label className={LABEL}>Animal</label>
-                  <input required value={a.animal} maxLength={100} placeholder="e.g. Sea turtle" onChange={(e) => updateAnimal(index, "animal", e.target.value)} className={`${INPUT} bg-white`} />
+                  <input required value={a.animal} maxLength={100} placeholder="e.g. Fish, bird, frog" onChange={(e) => updateAnimal(index, "animal", e.target.value)} className={`${INPUT} bg-white`} />
                 </div>
                 <div>
                   <label className={LABEL}>Found</label>

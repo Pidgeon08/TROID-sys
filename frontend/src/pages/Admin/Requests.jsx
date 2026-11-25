@@ -1,11 +1,11 @@
 import { useMemo, useState, useEffect } from "react";
 import { useNavigate, useOutletContext } from "react-router-dom";
-import { Eye, Trash2, Plus, FileText, Clock, CheckCircle2, Signature, Archive } from "lucide-react";
+import { Eye, Trash2, Plus, FileText, Clock, CheckCircle2, Signature, Archive, GitMerge } from "lucide-react";
 import { formatDate, formatTime12h, mapRequest } from "../../constants/requests";
 import { useRequests } from "../../hooks/useRequests";
 import { useRequestFilters } from "../../hooks/useRequestFilters";
 import RequestFilters from "../../components/RequestFilters";
-import { filterRequests, sortRequests } from "../../utils/requestFilters";
+import { filterRequests, groupForMerging, mergeableIds, sortRequests } from "../../utils/requestFilters";
 import { Badge } from "../../components/ui/Badge";
 import { Card } from "../../components/ui/Card";
 import { Pagination } from "../../components/ui/Pagination";
@@ -81,10 +81,13 @@ export default function Requests({ userRole = "admin" }) {
   // Archived requests aren't scheduled any more, so they have no schedule filter.
   const base = showArchived ? archivedRequests : requests;
   const scheduledIds = showArchived ? undefined : scheduledRequestIds;
-  const source = useMemo(
-    () => sortRequests(filterRequests(base, filters, { scheduledIds }), filters.sort),
-    [base, filters, scheduledIds]
-  );
+  const source = useMemo(() => {
+    const sorted = sortRequests(filterRequests(base, filters, { scheduledIds }), filters.sort);
+    // Mergeable requests are shown next to the ones they can be merged with.
+    return filters.merge ? groupForMerging(sorted) : sorted;
+  }, [base, filters, scheduledIds]);
+  // Open requests that another for the same barangay and collection area could be merged with.
+  const mergeable = useMemo(() => (showArchived ? new Set() : mergeableIds(requests)), [showArchived, requests]);
   const paginated = useMemo(
     () => source.slice((currentPage - 1) * pageSize, currentPage * pageSize),
     [source, currentPage, pageSize]
@@ -143,6 +146,7 @@ export default function Requests({ userRole = "admin" }) {
           requests={base}
           shown={source.length}
           scheduledIds={scheduledIds}
+          mergeable={!showArchived}
         />
 
         <div className="overflow-x-auto">
@@ -184,6 +188,15 @@ export default function Requests({ userRole = "admin" }) {
                        {req.status === 'Approved' && scheduledRequestIds.has(req.id) && (
                          <span className="inline-flex items-center rounded-md bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 border border-emerald-100">
                            Scheduled
+                         </span>
+                       )}
+                       {mergeable.has(req.id) && (
+                         <span
+                           title={`Can be merged with another request for ${req.collectionArea?.name || "the same area"} in ${req.location?.barangay || "this barangay"}`}
+                           className="inline-flex items-center gap-1 rounded-md bg-indigo-50 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-700 border border-indigo-100"
+                         >
+                           <GitMerge size={10} />
+                           Mergeable
                          </span>
                        )}
                      </div>

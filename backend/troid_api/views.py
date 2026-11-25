@@ -1712,10 +1712,12 @@ class RequestViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def merge(self, request, request_id=None):
-        """Merges other requests for the same collection area into this one, so a single
-        cleanup covers them all. The merged requests keep their requesters, who are told
-        about every update to this one and can follow its progress and results from their
-        own request. Unsupported cleanups have no collection area, so they can't be merged."""
+        """Merges other requests for the same barangay and collection area into this one, so a
+        single cleanup covers them all: a barangay's own request and an NGO's for the same stretch,
+        say. The merged requests keep their requesters, who are told about every update to this
+        one and get its progress, schedule and trash report on their own request. TROID and
+        non-TROID cleanups can be merged with each other; a non-TROID one needs its collection area
+        named (it's optional for them), since that is what tells the requests are for the same place."""
         primary = self.get_object()
         ids = request.data.get('request_ids')
         if not isinstance(ids, list) or not ids or not all(isinstance(i, str) for i in ids):
@@ -1725,8 +1727,8 @@ class RequestViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
             return Response({'error': "A request can't be merged into itself."}, status=status.HTTP_400_BAD_REQUEST)
         if primary.archived or primary.merged_into_id or primary.status not in self.OPEN_STATUSES:
             return Response({'error': 'Requests can only be merged into one whose cleanup has not started.'}, status=status.HTTP_400_BAD_REQUEST)
-        if primary.cleanup_type != 'troid_supported' or primary.collection_area_id is None:
-            return Response({'error': 'Only TROID-supported requests for the same collection area can be merged.'}, status=status.HTTP_400_BAD_REQUEST)
+        if primary.collection_area_id is None:
+            return Response({'error': 'Only requests for the same barangay and collection area can be merged. Choose a collection area for this one first.'}, status=status.HTTP_400_BAD_REQUEST)
 
         others = list(Request.objects.filter(request_id__in=ids, archived=False).prefetch_related('merged_requests'))
         missing = sorted(set(ids) - {other.request_id for other in others})
@@ -1738,8 +1740,10 @@ class RequestViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
                 problem = 'is already merged into another request'
             elif other.status not in self.OPEN_STATUSES:
                 problem = 'has already started or finished its cleanup'
-            elif other.cleanup_type != primary.cleanup_type or other.collection_area_id != primary.collection_area_id:
+            elif other.collection_area_id != primary.collection_area_id:
                 problem = f'is not for the same collection area as {primary.request_id}'
+            elif (other.barangay or '').strip().lower() != (primary.barangay or '').strip().lower():
+                problem = f'is not for the same barangay as {primary.request_id}'
             elif any(not child.archived for child in other.merged_requests.all()):
                 problem = 'has requests merged into it. Unmerge them first'
             if problem:

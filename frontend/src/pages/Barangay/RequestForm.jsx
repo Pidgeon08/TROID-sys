@@ -586,7 +586,7 @@ function RequestForm({ currentUser, forCenro = false }) {
 
             <div>
               <label htmlFor="request-location" className="block text-xs font-semibold text-slate-500 mb-1.5">
-                {isTroid ? "Landmark (Optional)" : "Location"}
+                {isTroid ? "Landmark (Optional)" : "Location on the Waterway"}
               </label>
               <div className="relative">
                 <MapPin size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -598,14 +598,14 @@ function RequestForm({ currentUser, forCenro = false }) {
                   onChange={handleChange}
                   required={!isTroid}
                   maxLength={100}
-                  placeholder={isTroid ? "e.g., Beside the barangay hall, near the bridge" : "e.g., Poro Point shoreline, behind the public market"}
+                  placeholder={isTroid ? "e.g., Beside the barangay hall, near the bridge" : "e.g., San Vicente Creek, behind the public market"}
                   className="w-full rounded-lg border border-slate-200 bg-white py-2.5 pl-9 pr-3 text-sm text-slate-700 placeholder:text-slate-400 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
                 />
               </div>
               <p className="text-[11px] text-slate-400 mt-1.5">
                 {isTroid
                   ? "A guide only, for the operator and the workers accompanying them."
-                  : "Where the cleanup will take place, so CENRO and the workers can find it."}
+                  : "The river, creek or canal stretch the cleanup will be on, so CENRO and the workers can find it."}
               </p>
             </div>
 

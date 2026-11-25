@@ -187,6 +187,7 @@ export function mapRequest(raw) {
   
   return {
     id: raw.request_id,
+    archived: Boolean(raw.archived),
     type: raw.request_type || 'TROID Bot Deployment',
     status: status,
     dateSubmitted: raw.date_submitted

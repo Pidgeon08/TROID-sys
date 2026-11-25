@@ -608,22 +608,23 @@ class CollectionAreaEditTests(TestCase):
     def test_cenro_edits_the_details_and_who_edited_is_kept(self):
         response = self.patch(
             self.admin, name='  Poro Shore  ', description='Rocky stretch by the pier',
-            water_body_type='coast', water_body_name='West Philippine Sea', hazards='Strong waves in the afternoon',
+            water_body_type='estuary', water_body_name='Poro River', hazards='Strong current in the afternoon',
         )
 
         self.assertEqual(response.status_code, 200, response.content)
         self.area.refresh_from_db()
         self.assertEqual(
             (self.area.name, self.area.water_body_type, self.area.hazards),
-            ('Poro Shore', 'coast', 'Strong waves in the afternoon'),
+            ('Poro Shore', 'estuary', 'Strong current in the afternoon'),
         )
         self.assertEqual(self.area.updated_by, self.admin.name)
         self.assertIsNotNone(self.area.date_updated)
         self.assertEqual(response.json()['request_count'], 0)
 
     def test_bad_details_are_refused(self):
-        for field, value in (('name', '   '), ('water_body_type', 'ocean'), ('color', 'blue')):
-            with self.subTest(field=field):
+        # The coast is no water body TROID works.
+        for field, value in (('name', '   '), ('water_body_type', 'ocean'), ('water_body_type', 'coast'), ('color', 'blue')):
+            with self.subTest(field=field, value=value):
                 response = self.patch(self.admin, **{field: value})
                 self.assertEqual(response.status_code, 400)
                 self.assertIn(field, response.json())
@@ -1115,7 +1116,7 @@ class TrashReportTests(TestCase):
         for field, value in (
             ('bags', -1), ('weight_kg', -0.1), ('weight_kg', ''), ('recyclable_kg', None),
             ('trash_items', {'Plastic': 3}), ('trash_items', {'Balloons': 'many'}),
-            ('site_type', 'underwater'), ('people_count', 0), ('hours_spent', -1), ('distance_km', -2),
+            ('site_type', 'underwater'), ('site_type', 'shoreline'), ('people_count', 0), ('hours_spent', -1), ('distance_km', -2),
             ('entangled_animals', [{'animal': 'Turtle', 'condition': 'sleeping'}]),
             ('entangled_animals', [{'condition': 'alive'}]),
         ):
@@ -1126,7 +1127,7 @@ class TrashReportTests(TestCase):
 
     def test_zero_is_a_valid_answer(self):
         response = self.submit({
-            'site_type': 'shoreline', 'people_count': 1, 'hours_spent': 0,
+            'site_type': 'river', 'people_count': 1, 'hours_spent': 0,
             'bags': 0, 'weight_kg': 0, 'non_usable_kg': 0, 'recyclable_kg': 0,
             'trash_items': {},
         })
@@ -2650,7 +2651,7 @@ class CleanupDriveTests(TestCase):
     def test_filing_the_report_closes_the_drive_without_a_verification_step(self, _):
         self.start()
         admin = make_user('admin')
-        report = {'site_type': 'shoreline', 'people_count': 2, 'hours_spent': 3,
+        report = {'site_type': 'river', 'people_count': 2, 'hours_spent': 3,
                   'bags': 1, 'weight_kg': 2, 'non_usable_kg': 1, 'recyclable_kg': 1,
                   'trash_items': {'Beverage bottles (plastic)': 9}, 'notes': ''}
 
@@ -2848,7 +2849,8 @@ class MergeRequestTests(TestCase):
 
     def make(self, status, user, **fields):
         fields.setdefault('collection_area', self.area)
-        return Request.objects.create(status=status, email=user.email, barangay='Poro', requested_by_name=user.name, **fields)
+        fields.setdefault('barangay', 'Poro')
+        return Request.objects.create(status=status, email=user.email, requested_by_name=user.name, **fields)
 
     def merge(self, *others, into=None, user=None):
         into = into or self.main
@@ -2928,6 +2930,28 @@ class MergeRequestTests(TestCase):
         self.assertEqual(self.merge(manual).status_code, 400)
         self.assertEqual(self.merge(other_manual, into=manual).status_code, 400)
         self.assertEqual(Request.objects.filter(status='merged').count(), 0)
+
+    def test_troid_and_non_troid_requests_for_the_same_area_merge(self):
+        manual = self.make('pending_admin_approval', self.ngo, cleanup_type='unsupported', location_name='Bridge')
+        other_manual = self.make('approved', self.lingsat, cleanup_type='unsupported', location_name='Market')
+
+        self.assertEqual(self.merge(manual).status_code, 200)
+        self.assertEqual(self.merge(self.ngo_req, into=other_manual).status_code, 200)
+
+        manual.refresh_from_db()
+        self.ngo_req.refresh_from_db()
+        self.assertEqual((manual.status, manual.merged_into), ('merged', self.main))
+        self.assertEqual((self.ngo_req.status, self.ngo_req.merged_into), ('merged', other_manual))
+
+    def test_only_requests_for_the_same_barangay(self):
+        # The NGO's request names the area, but for another barangay (its area was since moved).
+        other_barangay = self.make('pending_admin_approval', self.ngo, barangay='Lingsat')
+
+        response = self.merge(other_barangay)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('same barangay', response.json()['error'])
+        self.assertEqual(self.merge(self.ngo_req).status_code, 200)
 
     def test_changing_the_main_requests_area_moves_the_merged_ones_too(self):
         self.merge(self.ngo_req)
@@ -3105,7 +3129,7 @@ class PriorityAreaTests(TestCase):
         req = Request.objects.create(barangay='Poro', collection_area=self.poro, status='approved', bot_id=boat)
 
         response = self.client.post(f'/api/requests/{req.request_id}/submit_trash_report/', {
-            'site_type': 'shoreline', 'people_count': 8, 'hours_spent': 4,
+            'site_type': 'lake', 'people_count': 8, 'hours_spent': 4,
             'bags': 90, 'weight_kg': 300, 'non_usable_kg': 100, 'recyclable_kg': 200,
             'trash_items': {'Beverage bottles (plastic)': 90},
         }, format='json', **session_header(self.admin))

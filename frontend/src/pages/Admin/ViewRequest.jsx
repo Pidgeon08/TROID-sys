@@ -345,7 +345,7 @@ export default function ViewRequest({ id: propId, onClose }) {
               Change Area
             </button>
           )}
-          {request.cleanupType === "troid_supported" && request.collectionArea && OPEN_STATUSES.includes(request.status) && (
+          {request.collectionArea && !request.mergedInto && OPEN_STATUSES.includes(request.status) && (
             <button
               onClick={() => setShowMerge(true)}
               className="flex items-center gap-2 rounded-lg border border-indigo-200 bg-white px-3.5 py-2 text-sm font-medium text-indigo-600 hover:bg-indigo-50"

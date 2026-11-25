@@ -257,8 +257,9 @@ class Request(models.Model):
     # about the cleanup site and the people who worked it.
     trash_categories = models.JSONField(default=dict, blank=True)
     trash_items = models.JSONField(default=dict, blank=True)
+    # TROID cleans waterways (rivers, creeks, canals, ponds), not the coast, so there is no
+    # shoreline site (migration 0055 cleared the old ones).
     SITE_TYPE_CHOICES = [
-        ('shoreline', 'Shoreline or beach'),
         ('river', 'River, stream or tributary'),
         ('lake', 'Lake or pond'),
     ]
@@ -455,10 +456,11 @@ class CollectionArea(models.Model):
         ('approved', 'Approved'),
         ('declined', 'Declined'),
     ]
+    # Waterways only: TROID works rivers, creeks and canals, not the coast or shoreline
+    # (migration 0055 made the old coast areas 'other').
     WATER_BODY_CHOICES = [
         ('river', 'River'),
         ('creek', 'Creek'),
-        ('coast', 'Coast or shoreline'),
         ('estuary', 'Estuary or river mouth'),
         ('canal', 'Drainage canal'),
         ('pond', 'Pond or lagoon'),

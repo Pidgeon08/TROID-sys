@@ -1,4 +1,5 @@
-"""Builds San Fernando's water map (sea, rivers, creeks, ponds) from an OpenStreetMap extract.
+"""Builds San Fernando's water map (rivers, creeks, canals, ponds) from an OpenStreetMap extract.
+TROID works waterways, not the coast, so the sea is left out.
 
 Run with the scratch venv's Python (it has shapely):
     build_water.py <osm water.json> <boundaries.json> <out.json>
@@ -7,8 +8,8 @@ import json
 import math
 import sys
 
-from shapely.geometry import LineString, MultiPolygon, Polygon, box, mapping
-from shapely.ops import linemerge, split, unary_union
+from shapely.geometry import LineString, MultiPolygon, Polygon
+from shapely.ops import unary_union
 
 osm_path, bounds_path, out_path = sys.argv[1:4]
 LAT0 = 16.61
@@ -30,22 +31,17 @@ def latlng(x, y):
 osm = json.load(open(osm_path, encoding='utf-8'))['elements']
 bounds = json.load(open(bounds_path, encoding='utf-8'))
 land_city = unary_union([Polygon([xy(*p) for p in b['ring']]).buffer(0) for b in bounds['barangays']])
-land_all = unary_union([land_city] + [Polygon([xy(*p) for p in n['ring']]).buffer(0) for n in bounds['neighbors']])
 
 region = land_city.buffer(REACH_M)
-minx, miny, maxx, maxy = region.bounds
-frame = box(minx - 5000, miny - 5000, maxx + 5000, maxy + 5000)
 
-polys, coast = [], []
+polys = []
 for e in osm:
     tags = e.get('tags', {})
     geom = e.get('geometry')
     if e['type'] != 'way' or not geom:
         continue
     pts = [xy(g['lat'], g['lon']) for g in geom]
-    if tags.get('natural') == 'coastline':
-        coast.append(LineString(pts))
-    elif tags.get('natural') in ('water', 'wetland') and len(pts) >= 4 and pts[0] == pts[-1]:
+    if tags.get('natural') in ('water', 'wetland') and len(pts) >= 4 and pts[0] == pts[-1]:
         polys.append(Polygon(pts).buffer(0))
     elif tags.get('waterway') in WIDTHS and len(pts) >= 2:
         try:
@@ -54,21 +50,14 @@ for e in osm:
             width = WIDTHS[tags['waterway']]
         polys.append(LineString(pts).buffer(max(width, 2) / 2, cap_style='flat'))
 
-# The sea: the frame split along the coastline; the pieces that are mostly not land.
-merged = linemerge(coast)
-pieces = split(frame, merged) if not merged.is_empty else [frame]
-pieces = list(getattr(pieces, 'geoms', pieces))
-sea = unary_union([p for p in pieces if p.intersection(land_all).area < 0.5 * p.area])
-print('coastline pieces', len(coast), 'frame pieces', len(pieces), 'sea km2', round(sea.area / 1e6, 1))
-
-water = unary_union(polys + [sea]).intersection(region).simplify(1.5, preserve_topology=True)
+water = unary_union(polys).intersection(region).simplify(1.5, preserve_topology=True)
 parts = list(water.geoms) if isinstance(water, MultiPolygon) else [water]
 parts = [p for p in parts if p.area > 20]  # specks
 out = []
 for p in parts:
     out.append([[latlng(x, y) for x, y in p.exterior.coords]] + [[latlng(x, y) for x, y in r.coords] for r in p.interiors])
 data = {
-    'source': 'Water (sea, rivers, creeks, ponds) from OpenStreetMap, (c) OpenStreetMap contributors, ODbL. '
+    'source': 'Waterways (rivers, creeks, canals, ponds; not the sea) from OpenStreetMap, (c) OpenStreetMap contributors, ODbL. '
               'Rivers and creeks drawn only as lines are widened to a typical width. Coordinates are [latitude, longitude]; '
               'each polygon is its outline followed by any holes (islands).',
     'polygons': out,

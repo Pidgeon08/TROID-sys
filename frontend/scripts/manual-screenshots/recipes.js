@@ -51,7 +51,7 @@ const SAMPLE_AUDIT_LOGS = [
   ['Sample CENRO Admin', 'Admin', 'System paused', 'Paused for a backup', 'Backup & Restore'],
   ['Sample CENRO Admin', 'Admin', 'Schedule edited', 'Non-TROID cleanup REQ-0512 scheduled for Poro on 2026-11-28 at 08:00', 'Collection Schedule'],
   ['Sample City Admin', 'City Admin', 'Request approved', 'REQ-0529 sent on to CENRO', 'Requests'],
-  ['Brgy. Poro Office', 'Barangay', 'Request submitted', 'REQ-0530 for Poro Point Shoreline', 'Requests'],
+  ['Brgy. Poro Office', 'Barangay', 'Request submitted', 'REQ-0530 for Poro River', 'Requests'],
   ['Sample CENRO Admin', 'Admin', 'Area approved', 'Poro Cleanup Zone approved', 'Collection Areas'],
   ['Brgy. Poro Office', 'Barangay', 'Login successful', 'Signed in as poro@sample.troid.local', 'Authentication'],
   ['Sample CENRO Admin', 'Admin', 'Login successful', 'Signed in as cenro@sample.troid.local', 'Authentication'],
@@ -170,11 +170,11 @@ const unreadRow = (page) => page.locator('tbody tr', { has: page.getByRole('img'
 // Task status updates come from the operators' mobile app (Supabase), so their pictures show these
 // sample ones, from the sample operators.
 const SAMPLE_TASK_UPDATES = [
-  ['completed', 'Cleanup finished at Poro Point Shoreline. 14 bags collected, robot returned to dock.', 'operator1@sample.troid.local', 12],
-  ['in_progress', 'Robot launched along the shoreline; heavy plastic near the breakwater.', 'operator1@sample.troid.local', 95],
+  ['completed', 'Cleanup finished at Poro River. 14 bags collected, robot returned to dock.', 'operator1@sample.troid.local', 12],
+  ['in_progress', 'Robot launched up the river; heavy plastic under the bridge.', 'operator1@sample.troid.local', 95],
   ['to_be_continued', 'Stopped because of rain. Will continue tomorrow morning at the river mouth.', 'operator2@sample.troid.local', 26 * 60],
   ['in_progress', 'Started cleanup at Catbangen River Mouth with two workers.', 'operator2@sample.troid.local', 27 * 60],
-  ['completed', 'Lingsat drainage outlet cleared. 6 bags, mostly sachets and bottles.', 'operator3@sample.troid.local', 3 * 24 * 60],
+  ['completed', 'Tanqui river bend cleared. 6 bags, mostly sachets and bottles.', 'operator3@sample.troid.local', 3 * 24 * 60],
 ].map(([status, notes, email, mins], i) => {
   const sent = new Date(now.getTime() - mins * 60000);
   return { id: i + 1, status, notes, operator_email: email, created_at: sent.toISOString(), received_at: new Date(sent.getTime() + 40000).toISOString() };
@@ -287,6 +287,10 @@ export const RECIPES = {
         run: openFirstRequest('/admin/requests', 'status=Approved&type=troid_supported'),
         outline: (p) => button(p, 'Change Area'),
       },
+      mergeable: {
+        goto: '/admin/requests?merge=mergeable',
+        outline: (p) => button(p, /^Mergeable/),
+      },
       merge: {
         run: openFirstRequest('/admin/requests', 'status=Approved&type=troid_supported'),
         outline: (p) => button(p, /^Merge/),
@@ -346,15 +350,15 @@ export const RECIPES = {
         outline: (p) => button(p, /Zoom to/),
       },
       'select-area': {
-        run: (p) => selectArea(p, 'Poro Point Shoreline'),
+        run: (p) => selectArea(p, 'Poro River'),
         outline: (p) => p.getByRole('button', { name: 'Close details' }).locator('xpath=ancestor::div[contains(@class,"shadow-xl")][1]'),
       },
       'area-requests': {
-        run: async (p) => { await selectArea(p, 'Poro Point Shoreline'); await button(p, /^Requests\s*[1-9]/).click(); await settle(p); },
+        run: async (p) => { await selectArea(p, 'Poro River'); await button(p, /^Requests\s*[1-9]/).click(); await settle(p); },
       },
       heatmap: {
         run: async (p) => {
-          await selectArea(p, 'Poro Point Shoreline');
+          await selectArea(p, 'Poro River');
           await p.getByRole('switch', { name: /Trash heatmap/ }).click();
           await p.getByRole('button', { name: 'All time' }).click();
           await p.getByText(/\d+ detections?/).first().waitFor();
@@ -362,7 +366,7 @@ export const RECIPES = {
         },
         outline: (p) => p.getByRole('switch', { name: /Trash heatmap/ }).locator('xpath=..'),
       },
-      edit: { run: async (p) => { await selectArea(p, 'Poro Point Shoreline'); await button(p, /^Edit$/).click(); await settle(p); } },
+      edit: { run: async (p) => { await selectArea(p, 'Poro River'); await button(p, /^Edit$/).click(); await settle(p); } },
       'approve-archive': {
         run: async (p) => {
           await p.getByRole('tab', { name: /^Pending/ }).click();
@@ -415,7 +419,7 @@ export const RECIPES = {
       'compare-with': {
         run: async (p) => {
           await button(p, '30 days', true).click();
-          await p.locator('select', { has: p.locator('option', { hasText: 'No collection area' }) }).first().selectOption({ label: 'Lingsat Coastline' });
+          await p.locator('select', { has: p.locator('option', { hasText: 'No collection area' }) }).first().selectOption({ label: 'Tanqui River Bend' });
           await settle(p, 1200);
         },
         outline: (p) => card(p, 'Area covered'),
@@ -561,12 +565,12 @@ export const RECIPES = {
         outline: (p) => [p.getByPlaceholder(/Search name, ID/), button(p, /^Filters/)],
       },
       'select-area': {
-        run: (p) => selectArea(p, 'Poro Point Shoreline'),
+        run: (p) => selectArea(p, 'Poro River'),
         outline: (p) => p.getByRole('button', { name: 'Close details' }).locator('xpath=ancestor::div[contains(@class,"shadow-xl")][1]'),
       },
       heatmap: {
         run: async (p) => {
-          await selectArea(p, 'Poro Point Shoreline');
+          await selectArea(p, 'Poro River');
           await p.getByRole('switch', { name: /Trash heatmap/ }).click();
           await p.getByRole('button', { name: 'All time' }).click();
           await p.getByText(/\d+ detections?/).first().waitFor();
@@ -574,7 +578,7 @@ export const RECIPES = {
         },
         outline: (p) => [p.getByRole('switch', { name: /Trash heatmap/ }).locator('xpath=..'), button(p, /^Requests\s*\d/)],
       },
-      edit: { run: async (p) => { await selectArea(p, 'Poro Point Shoreline'); await button(p, /^Edit$/).click(); await settle(p); } },
+      edit: { run: async (p) => { await selectArea(p, 'Poro River'); await button(p, /^Edit$/).click(); await settle(p); } },
       delete: {
         run: async (p) => {
           await p.getByRole('tab', { name: /^Pending/ }).click();
@@ -641,7 +645,7 @@ export const RECIPES = {
       'compare-with': {
         run: async (p) => {
           await button(p, '30 days', true).click();
-          await compareSelect(p).selectOption({ label: 'Poro Point Shoreline' });
+          await compareSelect(p).selectOption({ label: 'Poro River' });
           await settle(p, 1200);
         },
         outline: (p) => card(p, 'Area covered'),

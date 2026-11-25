@@ -64,7 +64,7 @@ ITEM_MIX = [
     ('Other items', 0.03, 'Cigarette'),
 ]
 ROBOT_LABEL = {item: label for item, _, label in ITEM_MIX}
-SITE_TYPE = {'coast': 'shoreline', 'estuary': 'river', 'river': 'river', 'creek': 'river', 'canal': 'river', 'pond': 'lake'}
+SITE_TYPE = {'estuary': 'river', 'river': 'river', 'creek': 'river', 'canal': 'river', 'pond': 'lake'}
 PECULIAR_ITEMS = ['A bowling ball', 'A rubber duck', 'A car tyre', 'A wedding photo album', 'A plastic Christmas tree']
 
 # The barangays with a collection area. `weight` is how often they request a cleanup and
@@ -72,14 +72,14 @@ PECULIAR_ITEMS = ['A bowling ball', 'A rubber duck', 'A car tyre', 'A wedding ph
 # `load` is how many bags a cleanup brings in over the last month against earlier: above 1
 # makes the area a priority (more per cleanup than the month before), below 1 makes it fine.
 BARANGAYS = [
-    {'name': 'Poro', 'weight': 5, 'trend': 1.3, 'load': 1.35, 'area': 'Poro Point Shoreline', 'water': ('coast', 'Poro Point Bay'),
-     'landmarks': ['Near the fish port', 'Beside the old lighthouse road', 'Behind the barangay hall']},
+    {'name': 'Poro', 'weight': 5, 'trend': 1.3, 'load': 1.35, 'area': 'Poro River', 'water': ('river', 'Poro River'),
+     'landmarks': ['Under the Old PNR Road bridge', 'Beside the fishermen village', 'Behind the barangay hall']},
     {'name': 'Catbangen', 'weight': 4, 'trend': 1.2, 'load': 1.4, 'area': 'Catbangen River Mouth', 'water': ('estuary', 'Catbangen River'),
      'landmarks': ['Under the Catbangen bridge', 'Beside the public market', 'Near the boat landing']},
     {'name': 'Carlatan', 'weight': 3, 'trend': 1.0, 'load': 0.85, 'area': 'Carlatan Creek', 'water': ('creek', 'Carlatan Creek'),
      'landmarks': ['Near the elementary school', 'Behind the chapel', 'At the creek outfall']},
-    {'name': 'Lingsat', 'weight': 3, 'trend': 0.55, 'load': 0.75, 'area': 'Lingsat Coastline', 'water': ('coast', 'Lingsat Beach'),
-     'landmarks': ['In front of the resort row', 'Near the seawall', 'At the end of the beach road']},
+    {'name': 'Tanqui', 'weight': 3, 'trend': 0.55, 'load': 0.75, 'area': 'Tanqui River Bend', 'water': ('river', 'Tanqui River'),
+     'landmarks': ['Under the Diversion Road bridge', 'Behind the City Engineering Office', 'Near the P. Burgos Street culvert']},
     {'name': 'Pagdaraoan', 'weight': 2, 'trend': 1.1, 'load': 0.95, 'area': 'Pagdaraoan Drainage Canal', 'water': ('canal', 'Pagdaraoan Main Canal'),
      'landmarks': ['Beside the highway culvert', 'Behind the covered court']},
     {'name': 'San Vicente', 'weight': 2, 'trend': 1.4, 'load': 1.3, 'area': 'San Vicente Creek', 'water': ('creek', 'San Vicente Creek'),
@@ -88,10 +88,11 @@ BARANGAYS = [
      'landmarks': ['Below the irrigation dam', 'Near the sitio road']},
 ]
 # Barangays with their own sign-in account; the others' requests come from their offices on paper.
-ACCOUNT_BARANGAYS = ['Poro', 'Catbangen', 'Carlatan', 'Lingsat']
-NGO = {'name': 'Coastal Care Volunteers', 'barangay': 'Pagdaraoan'}
+ACCOUNT_BARANGAYS = ['Poro', 'Catbangen', 'Carlatan', 'Tanqui']
+# The NGO works in Poro, so its requests and the barangay's are for the same area and can be merged.
+NGO = {'name': 'River Care Volunteers', 'barangay': 'Poro'}
 OPERATORS = ['Mark Dela Cruz', 'Liza Bautista', 'Ramon Ilagan']
-UNSUPPORTED_SITES = ['Seawall steps', 'Market drainage', 'School grounds creek', 'Chapel riverbank']
+UNSUPPORTED_SITES = ['Riverbank below the bridge', 'Market drainage canal', 'School grounds creek', 'Chapel riverbank']
 
 
 def letter_pdf(lines):
@@ -126,8 +127,8 @@ SAMPLE_SHAPES = json.loads((boundaries.DATA_FILE.parent / 'sample_areas.json').r
 REPORT_EVERY = 2
 # The extra areas' water.
 EXTRA_WATER = {
-    'Poro Fish Port Basin': ('coast', 'Poro Point Bay'),
-    'Poro Seawall Outfall': ('coast', 'Poro Point Bay'),
+    'Biday Tributary': ('creek', 'Biday Creek'),
+    'Carlatan Upper Creek': ('creek', 'Carlatan Creek'),
     'Catbangen Upper Riverbank': ('river', 'Catbangen River'),
 }
 
@@ -302,8 +303,8 @@ class Command(BaseCommand):
             self.areas[name] = area
         # One area still under review and one declined, for the Collection Areas page.
         for barangay, name, area_status, reason in (
-            ('Poro', 'Poro Fish Port Basin', 'pending', ''),
-            ('Poro', 'Poro Seawall Outfall', 'approved', ''),
+            ('Biday', 'Biday Tributary', 'pending', ''),
+            ('Carlatan', 'Carlatan Upper Creek', 'approved', ''),
             ('Catbangen', 'Catbangen Upper Riverbank', 'declined',
              'Part of this stretch is private property. Redraw it along the public easement.'),
         ):
@@ -319,9 +320,9 @@ class Command(BaseCommand):
 
     # --- what to create --------------------------------------------------------------
 
-    def requester(self, barangay):
+    def requester(self, barangay, ngo=True):
         """Who sends a barangay's request: its account, its office on paper, or now and then the NGO."""
-        if barangay == NGO['barangay'] and self.rng.random() < 0.6:
+        if ngo and barangay == NGO['barangay'] and self.rng.random() < 0.3:
             user = self.users['ngo']
             return {'name': user.name, 'role': 'ngo', 'email': user.email, 'barangay': barangay}
         user = self.users.get(barangay)
@@ -350,11 +351,12 @@ class Command(BaseCommand):
                     'drive_day': day, 'submitted': manila(day, 9) - timedelta(days=rng.randint(6, 18), hours=rng.randint(0, 8)),
                 })
         # A finished cleanup another request was merged into, to show a merged request's results.
-        catbangen = next(b for b in BARANGAYS if b['name'] == 'Catbangen')
+        # The barangay's and the NGO's, both for the Poro river.
+        poro = next(b for b in BARANGAYS if b['name'] == 'Poro')
         day = self.today - timedelta(days=9)
-        specs.append({'key': 'merge-done-main', 'status': 'completed', 'barangay': catbangen, 'troid': True,
+        specs.append({'key': 'merge-done-main', 'status': 'completed', 'barangay': poro, 'troid': True, 'by_barangay': True,
                       'drive_day': day, 'submitted': manila(day, 10) - timedelta(days=12)})
-        specs.append({'key': 'merge-done-a', 'status': 'pending_admin_approval', 'barangay': catbangen, 'troid': True,
+        specs.append({'key': 'merge-done-a', 'status': 'pending_admin_approval', 'barangay': poro, 'troid': True,
                       'submitted': manila(day, 14) - timedelta(days=11), 'force_ngo': True})
         return specs
 
@@ -372,13 +374,13 @@ class Command(BaseCommand):
         add('pend-city-old', 'pending_mayor_approval', 'Carlatan', 26)  # can be resent
         add('pend-city-1', 'pending_mayor_approval', 'Poro', 2)
         add('pend-city-2', 'pending_mayor_approval', 'San Vicente', 4, troid=False)
-        add('pend-city-3', 'pending_mayor_approval', 'Lingsat', 0.3)
+        add('pend-city-3', 'pending_mayor_approval', 'Tanqui', 0.3)
         add('pend-cenro-old', 'pending_admin_approval', 'Pagdaraoan', 23)  # can be resent
         add('pend-cenro-1', 'pending_admin_approval', 'Catbangen', 5)
         add('pend-cenro-2', 'pending_admin_approval', 'Biday', 3)
         add('sched-1', 'approved', 'Poro', 8, scheduled=3)
         add('sched-2', 'approved', 'Carlatan', 6, scheduled=6)
-        add('unsched-1', 'approved', 'Lingsat', 7)
+        add('unsched-1', 'approved', 'Tanqui', 7)
         add('unsched-2', 'approved', 'San Vicente', 4, troid=False)
         add('sched-manual', 'approved', 'Carlatan', 5, troid=False, scheduled=2)
         add('ongoing', 'ongoing', 'Catbangen', 9, drive_today=True)
@@ -386,13 +388,16 @@ class Command(BaseCommand):
             reason='The river is too high after the typhoon. We will schedule it once the water goes down.')
         add('declined-1', 'declined', 'Pagdaraoan', 18, by='city',
             reason='The canal is under DPWH desilting works this month. Please send it again after.')
-        add('declined-2', 'declined', 'Lingsat', 33, by='cenro', troid=False,
-            reason='This stretch is private resort frontage; the resort handles its own cleanup.')
+        add('declined-2', 'declined', 'Tanqui', 33, by='cenro', troid=False,
+            reason='This stretch is inside private property; the owner handles its own cleanup.')
         add('archived', 'declined', 'Carlatan', 70, by='city', archived=True, reason='Sent twice by mistake.')
-        # Three requests for the same Poro area; CENRO merges two into the first.
-        add('merge-open-main', 'approved', 'Poro', 6, scheduled=5)
+        # Three requests for the same Poro area; CENRO merges two into the first, one of them the NGO's.
+        add('merge-open-main', 'approved', 'Poro', 6, scheduled=5, by_barangay=True)
         add('merge-open-a', 'pending_admin_approval', 'Poro', 4, force_ngo=True)
-        add('merge-open-b', 'pending_mayor_approval', 'Poro', 3)
+        add('merge-open-b', 'pending_mayor_approval', 'Poro', 3, by_barangay=True)
+        # The NGO's request for the Poro river, not merged yet: it and the barangay's open requests
+        # there show under the request list's Mergeable filter.
+        add('mergeable-ngo', 'pending_admin_approval', 'Poro', 1, force_ngo=True)
         return specs
 
     def upcoming_specs(self, weeks):
@@ -419,7 +424,7 @@ class Command(BaseCommand):
         rng = self.rng
         info = spec['barangay']
         barangay = info['name']
-        who = self.requester(barangay)
+        who = self.requester(barangay, ngo=not spec.get('by_barangay'))
         if spec.get('force_ngo'):
             ngo = self.users['ngo']
             who = {'name': ngo.name, 'role': 'ngo', 'email': ngo.email, 'barangay': NGO['barangay']}
@@ -531,13 +536,13 @@ class Command(BaseCommand):
                 req.recyclable_kg = report['recyclable_kg']
                 req.trash_items = report['items']
                 req.trash_categories = report['categories']
-                req.site_type = SITE_TYPE.get(info['water'][0], 'shoreline')
+                req.site_type = SITE_TYPE.get(info['water'][0], 'river')
                 req.people_count = rng.randint(2, 4) if troid else rng.randint(8, 30)
                 req.hours_spent = round((finished - start).total_seconds() / 3600, 1)
                 req.distance_km = round(rng.uniform(0.4, 2.5), 1) if rng.random() < 0.8 else None
                 if rng.random() < 0.08:
                     req.entangled_animals = [{
-                        'animal': rng.choice(['Sea turtle', 'Crab', 'Heron', 'Fish']),
+                        'animal': rng.choice(['Frog', 'Crab', 'Heron', 'Fish']),
                         'condition': rng.choice(['alive', 'alive', 'dead']),
                         'entangled_in': rng.choice(['Fishing line', 'Net', 'Rope', 'Plastic bag']),
                     }]
@@ -656,7 +661,7 @@ class Command(BaseCommand):
         rng = self.rng
         # The area's load applies in full over the last month, partly the month before.
         load = info['load'] if days_ago <= 30 else 1 + (info['load'] - 1) * 0.2 if days_ago <= 60 else 1
-        base = rng.gauss(11, 3) * (1.25 if info['water'][0] in ('estuary', 'coast') else 1)
+        base = rng.gauss(11, 3) * (1.25 if info['water'][0] == 'estuary' else 1)
         bags = max(2, round(base * load))
         items = bags * rng.randint(6, 11)
         counted = {}

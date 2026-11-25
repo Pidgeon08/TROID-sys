@@ -1,4 +1,5 @@
-"""Sample collection areas drawn over real water, with the path a robot would sweep in each.
+"""Sample collection areas drawn over real waterways (rivers, creeks, canals: TROID doesn't work
+the coast), with the path a robot would take in each.
 
     build_samples.py <osm water.json> <water map json> <backend dir> <out json>
 
@@ -31,7 +32,10 @@ rings = {b['name']: Polygon([xy(*p) for p in b['ring']]).buffer(0) for b in boun
 land = unary_union(list(rings.values()))
 water = unary_union([Polygon([xy(*p) for p in poly[0]], [[xy(*p) for p in r] for r in poly[1:]]).buffer(0)
                      for poly in json.load(open(water_path, encoding='utf-8'))['polygons']])
-sea = water.difference(land)
+# The coastline, to find which end of a river is its mouth.
+coastline = unary_union([LineString([xy(g['lat'], g['lon']) for g in e['geometry']])
+                         for e in json.load(open(osm_path, encoding='utf-8'))['elements']
+                         if e['type'] == 'way' and e.get('geometry') and e.get('tags', {}).get('natural') == 'coastline'])
 # Ponds (fishponds and the like) are water, but a robot in the river can't get into them.
 ponds = unary_union([Polygon([xy(g['lat'], g['lon']) for g in e['geometry']]).buffer(0)
                      for e in json.load(open(osm_path, encoding='utf-8'))['elements']
@@ -45,14 +49,16 @@ lines = [LineString([xy(g['lat'], g['lon']) for g in e['geometry']])
 
 SWEEP_M = 9       # between sweep lines: the robot clears 5 m either side of its path, so the lanes just meet
 STEP_M = 6        # between path nodes
-# Each sample area: (name the seed knows it by, its barangay, how it is laid out). The first seven
-# are the barangays' main areas (keyed by barangay); the rest are the extra pending/declined/new ones.
+# Each sample area: (name the seed knows it by, its barangay, where on the barangay's waterway it
+# is, and how far it reaches from there in metres). 'mouth' is the stretch nearest the sea, 'upper'
+# the one furthest from it, 'middle' the middle of what is left. The first seven are the barangays'
+# main areas (keyed by barangay); the rest are the extra pending/approved/declined ones.
 SPECS = [
-    ('Poro', 'Poro', 'coast'), ('Lingsat', 'Lingsat', 'coast'), ('Catbangen', 'Catbangen', 'estuary'),
-    ('Carlatan', 'Carlatan', 'river'), ('Pagdaraoan', 'Pagdaraoan', 'river'), ('San Vicente', 'San Vicente', 'river'),
-    ('Biday', 'Biday', 'river'),
-    ('Poro Fish Port Basin', 'Poro', 'coast'), ('Poro Seawall Outfall', 'Poro', 'coast'),
-    ('Catbangen Upper Riverbank', 'Catbangen', 'river'),
+    ('Poro', 'Poro', 'middle', 170), ('Tanqui', 'Tanqui', 'middle', 230), ('Catbangen', 'Catbangen', 'mouth', 230),
+    ('Carlatan', 'Carlatan', 'middle', 230), ('Pagdaraoan', 'Pagdaraoan', 'middle', 230), ('San Vicente', 'San Vicente', 'middle', 200),
+    ('Biday', 'Biday', 'middle', 230),
+    ('Biday Tributary', 'Biday', 'upper', 200), ('Carlatan Upper Creek', 'Carlatan', 'upper', 180),
+    ('Catbangen Upper Riverbank', 'Catbangen', 'upper', 200),
 ]
 
 
@@ -103,33 +109,22 @@ def along(poly):
     return out + list(reversed(back)) if back and len(back) > 2 else out + list(reversed(out))
 
 
-def coast_window(name, reach, taken=None):
-    ring = rings[name]
-    shore = ring.boundary.intersection(sea.buffer(5))
-    if taken is not None:
-        shore = shore.difference(taken.buffer(120))
-    anchor = nearest_points(shore, ring.centroid)[0] if not shore.is_empty else ring.centroid
-    return sea.intersection(land.buffer(reach)).intersection(anchor.buffer(190)), anchor
-
-
 used = []  # areas already laid out, so two barangays sharing a river get different stretches
 
 
-def build(name, kind, rng):
+def build(name, where, reach, rng):
     ring = rings[name]
-    taken = unary_union(used).buffer(120) if used else None
-    if kind == 'coast':
-        wet, _ = coast_window(name, 110, taken)
-        wet = largest(wet)
-    elif kind == 'estuary':
-        river = largest(inland.intersection(ring.buffer(20)))
-        mouth = nearest_points(river, sea)[0]
-        wet = largest(unary_union([river.intersection(mouth.buffer(220)), sea.intersection(land.buffer(70)).intersection(mouth.buffer(140))]))
+    taken = unary_union(used).buffer(40) if used else None
+    river = inland.intersection(ring.buffer(10))
+    river = largest(river.difference(taken) if taken is not None else river)
+    if where == 'middle':
+        anchor = river.representative_point()
     else:
-        river = inland.intersection(ring.buffer(10))
-        river = largest(river.difference(taken) if taken is not None else river)
-        middle = river.representative_point()
-        wet = largest(river.intersection(middle.buffer(230)))
+        # The ends of the waterway in the barangay: its points nearest and furthest from the sea.
+        corners = [Point(c) for g in getattr(river, 'geoms', [river]) for c in g.exterior.coords]
+        corners.sort(key=lambda c: c.distance(coastline))
+        anchor = corners[0] if where == 'mouth' else corners[-1]
+    wet = largest(river.intersection(anchor.buffer(reach)))
     # As a person would draw it: around the water, a little of the banks too, in a dozen or so clicks.
     outline = wet.buffer(14, join_style='mitre').simplify(7)
     outline = largest(outline)
@@ -141,11 +136,11 @@ def build(name, kind, rng):
         problem = boundaries.check_area(points, name)
     used.append(outline)
     on_water = largest(outline.intersection(water).difference(ponds.buffer(1)))
-    nodes = sweep(on_water) if kind == 'coast' else along(on_water)
+    nodes = along(on_water)
     nodes = [p for p in nodes if water.buffer(1).contains(p)] or nodes
     pockets = [[round(rng.uniform(0.05, 0.95), 3), round(rng.uniform(0.6, 1.0), 2)] for _ in range(rng.randint(2, 4))]
     return {
-        'kind': kind, 'points': points, 'problem': problem,
+        'kind': where, 'points': points, 'problem': problem,
         'water_m2': round(on_water.area), 'outline_m2': round(outline.area),
         'path': [ll(p.x, p.y) for p in nodes], 'pockets': pockets,
     }
@@ -153,8 +148,8 @@ def build(name, kind, rng):
 
 rng = random.Random(7)
 result = {}
-for key, name, kind in SPECS:
-    area = build(name, kind, rng)
+for key, name, where, reach in SPECS:
+    area = build(name, where, reach, rng)
     print(f"{key[:24]:24} {area['kind']:8} pts {len(area['points']):3} water {area['water_m2']:7} m2 of {area['outline_m2']:7} "
           f"| path nodes {len(area['path']):4} | check: {area['problem'] or 'ok'}")
     area.pop('problem')

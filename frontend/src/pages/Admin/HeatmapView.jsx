@@ -198,9 +198,9 @@ function CoveragePanel({ area, coverage, showCoverage, onToggleCoverage, emptyTe
       </dl>
       <p className="mt-3 text-[11px] text-slate-500 leading-relaxed">
         {coverage.waterMapped
-          ? `${formatArea(coverage.areaM2)} of its ${formatArea(coverage.outlineM2)} outline is water. Only the water counts, as that is all TROID can cover.`
-          : 'No mapped water lies inside this area, so its whole outline is measured.'}
-        {coverage.onLand > 0 && ` ${coverage.onLand.toLocaleString()} point${coverage.onLand === 1 ? ' was' : 's were'} reported on land and cover nothing.`}
+          ? `${formatArea(coverage.areaM2)} of its ${formatArea(coverage.outlineM2)} outline is waterway. Only the waterway counts, as that is all TROID can cover.`
+          : 'No mapped waterway lies inside this area, so its whole outline is measured.'}
+        {coverage.onLand > 0 && ` ${coverage.onLand.toLocaleString()} point${coverage.onLand === 1 ? ' was' : 's were'} reported off the waterways and cover nothing.`}
       </p>
       {coverage.total === 0 && (
         <p className="mt-4 text-xs text-slate-500">TROID hasn't reported any points for this view yet.</p>
@@ -210,8 +210,8 @@ function CoveragePanel({ area, coverage, showCoverage, onToggleCoverage, emptyTe
         Show covered ground on the map
       </label>
       <p className="mt-3 text-[11px] text-slate-400 leading-relaxed">
-        Covered is what TROID&apos;s travel path cleared: the points it reported on the water, joined in the order it
-        reported them, and {TRAVEL_REACH_M} m either side of that line. Water is from OpenStreetMap.
+        Covered is what TROID&apos;s travel path cleared: the points it reported on the waterway, joined in the order it
+        reported them, and {TRAVEL_REACH_M} m either side of that line. Waterways (rivers, creeks, canals, ponds) are from OpenStreetMap.
       </p>
     </Panel>
   );

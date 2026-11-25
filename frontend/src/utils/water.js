@@ -1,10 +1,10 @@
-// Where the water is around San Fernando: the sea, rivers, creeks, canals and ponds, from
-// OpenStreetMap (data/sanFernandoWater.json, built by backend/tools/water_map). Coverage on the
+// Where the waterways are around San Fernando: rivers, creeks, canals and ponds (not the sea, as
+// TROID doesn't work the coast), from OpenStreetMap (data/sanFernandoWater.json, built by backend/tools/water_map). Coverage on the
 // Heatmap only counts the water inside a collection area, and only points TROID reported on it.
 import data from "../data/sanFernandoWater.json";
 
 // Latitude bands each polygon's edges are filed under, so a point is only tested against the few
-// edges that cross its band instead of all of a polygon's (the sea has thousands).
+// edges that cross its band instead of all of a polygon's (a long river has thousands).
 const BAND_DEG = 0.0004; // about 45 m
 
 function indexPolygon(rings) {

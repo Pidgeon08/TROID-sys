@@ -2,13 +2,15 @@ import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { GitMerge, X } from "lucide-react";
 import api from "../../services/api";
-import { OPEN_STATUSES, REQUEST_STATUS_STYLES, mapRequest, matchesRequestQuery } from "../../constants/requests";
+import { REQUEST_STATUS_STYLES, mapRequest, matchesRequestQuery } from "../../constants/requests";
+import { mergeCandidates } from "../../utils/requestFilters";
 import { SearchBar } from "../../components/ui/SearchBar";
 
 /**
  * CENRO merges other requests into this one, so a single cleanup covers them all. Only
- * TROID-supported requests for the same collection area that haven't started their
- * cleanup can be merged (the server checks this too).
+ * TROID-supported requests for the same barangay and collection area that haven't started their
+ * cleanup can be merged: the barangay's own and an NGO's for the same stretch, say. Every
+ * requester then gets the cleanup's progress and results (the server checks this too).
  */
 export default function MergeRequestsModal({ request, onClose, onMerged }) {
   const [candidates, setCandidates] = useState(null);
@@ -30,19 +32,10 @@ export default function MergeRequestsModal({ request, onClose, onMerged }) {
     return () => { cancelled = true; };
   }, []);
 
-  const options = useMemo(() => {
-    const areaId = request.collectionArea?.id;
-    return (candidates || [])
-      .filter((r) =>
-        r.id !== request.id
-        && OPEN_STATUSES.includes(r.status)
-        && !r.mergedInto
-        && r.mergedRequests.length === 0
-        && r.cleanupType === "troid_supported"
-        && Boolean(areaId) && r.collectionArea?.id === areaId
-      )
-      .sort((a, b) => a.id.localeCompare(b.id));
-  }, [candidates, request]);
+  const options = useMemo(
+    () => mergeCandidates(request, candidates || []).sort((a, b) => a.id.localeCompare(b.id)),
+    [candidates, request]
+  );
 
   const shown = options.filter((r) => matchesRequestQuery(r, query) || (r.location?.barangay || "").toLowerCase().includes(query.toLowerCase()));
 
@@ -72,11 +65,14 @@ export default function MergeRequestsModal({ request, onClose, onMerged }) {
           <div>
             <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2"><GitMerge size={18} className="text-indigo-600" /> Merge Requests into {request.id}</h3>
             <p className="text-xs text-slate-500 mt-1">
-              Collection area: <span className="font-semibold text-slate-700">{request.collectionArea?.areaId} · {request.collectionArea?.name}</span>
+              Barangay <span className="font-semibold text-slate-700">{request.location?.barangay || "—"}</span>
+              {" · "}Collection area: <span className="font-semibold text-slate-700">{request.collectionArea?.areaId} · {request.collectionArea?.name}</span>
+              {" · "}Cleanup: <span className="whitespace-nowrap font-semibold text-slate-700">{request.cleanupType === "unsupported" ? "Non-TROID" : "TROID-supported"}</span>
             </p>
             <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-              Only requests for this collection area can be merged. One cleanup, under {request.id}, will cover the requests you choose. Each keeps its own page, follows {request.id}'s progress
-              and results, and its requester is told about every update. Their own deployment schedules are removed.
+              Only requests for this barangay and collection area can be merged, TROID-supported or not, and whether the barangay or an NGO sent them. One cleanup, under {request.id}, will cover
+              the requests you choose. Each keeps its own page and gets {request.id}'s progress, schedule and trash report, and its requester is told about every
+              update. Their own deployment schedules are removed.
             </p>
           </div>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600" aria-label="Close"><X size={18} /></button>
@@ -94,7 +90,7 @@ export default function MergeRequestsModal({ request, onClose, onMerged }) {
           ) : shown.length === 0 ? (
             <p className="text-sm text-slate-500">
               {options.length === 0
-                ? "No other requests for this collection area are waiting for a cleanup."
+                ? "No other requests for this barangay and collection area are waiting for a cleanup."
                 : "No requests match your search."}
             </p>
           ) : (
@@ -113,6 +109,14 @@ export default function MergeRequestsModal({ request, onClose, onMerged }) {
                       <span className="flex flex-wrap items-center gap-1.5">
                         <span className="text-sm font-semibold text-slate-800">{r.id}</span>
                         <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${REQUEST_STATUS_STYLES[r.status] || "bg-slate-100 text-slate-600"}`}>{r.status}</span>
+                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${r.cleanupType === "unsupported" ? "bg-amber-50 text-amber-700" : "bg-sky-50 text-sky-700"}`}>
+                          {r.cleanupType === "unsupported" ? "Non-TROID" : "TROID"}
+                        </span>
+                        {r.requestedBy?.role && (
+                          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600">
+                            {r.requestedBy.role.toLowerCase() === "ngo" ? "NGO" : r.requestedBy.role.charAt(0).toUpperCase() + r.requestedBy.role.slice(1)}
+                          </span>
+                        )}
                       </span>
                       <span className="block text-xs text-slate-500 truncate">
                         {[r.requestedBy?.name, r.location?.barangay, r.location?.name].filter(Boolean).join(" · ")}

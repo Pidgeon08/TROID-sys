@@ -50,7 +50,7 @@ export default function TrashReportSummary({ report }) {
         <div>
           <Heading>Cleanup site</Heading>
           <Rows rows={[
-            ["Type of site", siteTypeLabel(report.siteType) || "—"],
+            ["Type of waterway", siteTypeLabel(report.siteType) || "—"],
             ["People who worked on it", formatNumber(report.peopleCount)],
             ["Time spent", formatNumber(report.hoursSpent, "h")],
             ["Distance cleaned", formatNumber(report.distanceKm, "km")],

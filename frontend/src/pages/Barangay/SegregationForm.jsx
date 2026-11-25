@@ -20,7 +20,7 @@ const BARANGAY_ZONES = [
   "Biday Creek",
   "Catbangen River",
   "San Fernando Creek",
-  "Poro Coastal Line",
+  "Poro River",
 ];
 
 function SummaryCard({ icon: Icon, label, value, sub }) {

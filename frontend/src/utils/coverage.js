@@ -2,8 +2,8 @@
 // robot reported, joined in the order it reported them (one line per robot per run). The path
 // counts as covering TRAVEL_REACH_M either side of it; the area is sampled on a grid and the share
 // of grid cells that close to the path is the coverage. Only the water inside the area counts
-// (utils/water: the sea, rivers, creeks and ponds), since that is all a boat can cover, and only
-// points reported on the water make up the path. Distances use a flat projection around the area,
+// (utils/water: rivers, creeks, canals and ponds, the waterways TROID works), and only points
+// reported on them make up the path. Distances use a flat projection around the area,
 // which is accurate at barangay scale.
 import { onWater, reportedOnWater } from './water';
 
@@ -94,7 +94,7 @@ export function areaCoverage(latLngRing, reports) {
     .filter((r) => Number.isFinite(r?.latitude) && Number.isFinite(r?.longitude))
     .map((r) => [r.latitude, r.longitude]);
   const inside = valid.filter((p) => insideRing(project(p), ring)).length;
-  // Points on land (GPS gone astray, or a report from the shore) aren't part of the path.
+  // Points off the waterways (GPS gone astray, a report from the bank or out at sea) aren't part of the path.
   const onLand = valid.filter((p) => !reportedOnWater(p)).length;
   const result = { ...empty, areaM2: outlineM2, outlineM2, inside, outside: valid.length - inside, onLand, total: valid.length };
   if (outlineM2 === 0) return result;

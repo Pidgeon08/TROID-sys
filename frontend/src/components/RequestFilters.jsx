@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { ArrowUpDown, CalendarDays, Check, ListFilter, X } from "lucide-react";
+import { ArrowUpDown, CalendarDays, Check, GitMerge, ListFilter, X } from "lucide-react";
 import { SearchBar } from "./ui/SearchBar";
 import { Popover } from "./ui/Popover";
 import { FILTER_ACTIVE, FILTER_CONTROL, FILTER_IDLE } from "./ui/filterStyles";
@@ -129,11 +129,12 @@ function SelectFilter({ value, onChange, allLabel, options, label }) {
 /**
  * The filter bar above a request list. `requests` is the whole list (before filtering),
  * used for the options and counts; `shown` is how many pass the filters. Pass
- * `scheduledIds` to offer the schedule filter, and `fields` to choose which other
- * filters appear (a barangay account only sees its own barangay, so it has no use for that one).
+ * `scheduledIds` to offer the schedule filter, `mergeable` to offer the Mergeable one (CENRO's list,
+ * since CENRO merges), and `fields` to choose which other filters appear (a barangay account only
+ * sees its own barangay, so it has no use for that one).
  */
 export default function RequestFilters({
-  filters, onChange, onClear, requests, shown, scheduledIds,
+  filters, onChange, onClear, requests, shown, scheduledIds, mergeable = false,
   fields = { barangay: true, area: true, role: true, type: true },
   searchPlaceholder = "Search ID, requester, barangay, area...",
 }) {
@@ -146,6 +147,10 @@ export default function RequestFilters({
     return counts;
   }, [requests, filters, scheduledIds]);
   const chips = activeFilterChips(filters, options);
+  const mergeableCount = useMemo(
+    () => (mergeable ? filterRequests(requests, { ...filters, merge: "mergeable" }, { scheduledIds }).length : 0),
+    [mergeable, requests, filters, scheduledIds]
+  );
 
   return (
     <div className="border-b border-slate-100 px-5 py-4">
@@ -172,6 +177,19 @@ export default function RequestFilters({
         )}
         {scheduledIds && (
           <SelectFilter label="Schedule" value={filters.schedule} onChange={(schedule) => onChange({ schedule })} allLabel="Any schedule" options={Object.entries(SCHEDULE_OPTIONS)} />
+        )}
+        {mergeable && (
+          <button
+            type="button"
+            onClick={() => onChange({ merge: filters.merge ? "" : "mergeable" })}
+            aria-pressed={Boolean(filters.merge)}
+            title="Open requests, TROID or non-TROID, for the same barangay and collection area (a barangay's and an NGO's, say), which can be merged into one cleanup"
+            className={`${CONTROL} ${filters.merge ? ACTIVE : IDLE} inline-flex cursor-pointer items-center gap-1.5`}
+          >
+            <GitMerge size={14} />
+            Mergeable
+            <span className={`rounded-full px-1.5 text-[11px] tabular-nums ${filters.merge ? "bg-blue-100" : "bg-slate-100 text-slate-500"}`}>{mergeableCount}</span>
+          </button>
         )}
         <div className="flex items-center gap-1.5 sm:ml-auto">
           <ArrowUpDown size={14} className="text-slate-400" />

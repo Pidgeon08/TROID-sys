@@ -1,6 +1,6 @@
 // Filtering and sorting for the request lists (CENRO, City Admin, Barangay/NGO). The filters
 // live in the page URL, so they survive a refresh and coming Back from a request.
-import { manilaDate, matchesRequestQuery } from "../constants/requests";
+import { OPEN_STATUSES, manilaDate, matchesRequestQuery } from "../constants/requests";
 
 // The order statuses are offered in: the way a request moves through review and cleanup.
 export const STATUS_ORDER = [
@@ -28,6 +28,7 @@ export const DATE_PRESETS = {
 
 export const CLEANUP_TYPES = { troid_supported: "TROID Supported", unsupported: "Unsupported" };
 export const SCHEDULE_OPTIONS = { scheduled: "Scheduled", unscheduled: "Not scheduled yet" };
+export const MERGE_OPTIONS = { mergeable: "Mergeable" };
 export const SORT_OPTIONS = {
   newest: "Newest submitted",
   oldest: "Oldest submitted",
@@ -47,6 +48,7 @@ export const EMPTY_FILTERS = {
   area: "",
   role: "",
   schedule: "",
+  merge: "",
   sort: "newest",
 };
 
@@ -111,6 +113,54 @@ function requestDay(req, field) {
   return req.submittedAt ? manilaDate(new Date(req.submittedAt)) : "";
 }
 
+// --- merging ----------------------------------------------------------------------
+
+// A request CENRO can still merge, or merge others into: TROID-supported or not, for a collection
+// area (optional for a non-TROID one), its cleanup not started, and not merged into another. The
+// server checks the same (RequestViewSet.merge).
+const canMerge = (req) => !req.archived && !req.mergedInto
+  && Boolean(req.collectionArea) && OPEN_STATUSES.includes(req.status);
+
+// Requests are merged with others for the same barangay and the same collection area: a
+// barangay's own request and an NGO's working the same stretch, say.
+const mergeKey = (req) => `${(req.location?.barangay || "").trim().toLowerCase()}|${req.collectionArea.id}`;
+
+// One of the two must have nothing merged into it: that's the one merged into the other.
+const mergeablePair = (a, b) => a.id !== b.id && (a.mergedRequests.length === 0 || b.mergedRequests.length === 0);
+
+/** The requests that can be merged into `request` (it must be mergeable itself). */
+export function mergeCandidates(request, requests) {
+  if (!canMerge(request)) return [];
+  const key = mergeKey(request);
+  return requests.filter((r) => canMerge(r) && mergeKey(r) === key && r.id !== request.id && r.mergedRequests.length === 0);
+}
+
+/** The ids of the requests that could be merged with at least one other in `requests`. */
+export function mergeableIds(requests) {
+  const groups = new Map();
+  requests.filter(canMerge).forEach((req) => {
+    const key = mergeKey(req);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(req);
+  });
+  const ids = new Set();
+  groups.forEach((group) => group.forEach((req) => {
+    if (group.some((other) => mergeablePair(req, other))) ids.add(req.id);
+  }));
+  return ids;
+}
+
+/** The list with the requests that can be merged together next to each other (stable otherwise). */
+export function groupForMerging(requests) {
+  const order = new Map();
+  requests.forEach((req) => {
+    const key = canMerge(req) ? mergeKey(req) : `~${req.id}`;
+    if (!order.has(key)) order.set(key, order.size);
+  });
+  const rank = (req) => order.get(canMerge(req) ? mergeKey(req) : `~${req.id}`);
+  return requests.map((req, i) => [req, i]).sort((a, b) => rank(a[0]) - rank(b[0]) || a[1] - b[1]).map(([req]) => req);
+}
+
 // --- filtering --------------------------------------------------------------------
 
 function matchesSearch(req, q) {
@@ -129,6 +179,8 @@ function matchesSearch(req, q) {
  */
 export function filterRequests(requests, filters, { scheduledIds, except } = {}) {
   const range = except === "date" ? null : dateRange(filters);
+  // Whether a request can be merged depends on the others, so it is worked out on the whole list.
+  const mergeable = filters.merge && except !== "merge" ? mergeableIds(requests) : null;
   return requests.filter((req) => {
     if (!matchesSearch(req, filters.q)) return false;
     if (except !== "status" && filters.status.length && !filters.status.includes(req.status)) return false;
@@ -147,6 +199,7 @@ export function filterRequests(requests, filters, { scheduledIds, except } = {})
       if (req.status !== "Approved") return false;
       if ((filters.schedule === "scheduled") !== scheduledIds.has(req.id)) return false;
     }
+    if (mergeable && !mergeable.has(req.id)) return false;
     return true;
   });
 }
@@ -218,5 +271,6 @@ export function activeFilterChips(filters, options) {
   }
   if (filters.role) chips.push({ key: "role", label: `Requester: ${filters.role}`, clear: { role: "" } });
   if (filters.schedule) chips.push({ key: "schedule", label: SCHEDULE_OPTIONS[filters.schedule], clear: { schedule: "" } });
+  if (filters.merge) chips.push({ key: "merge", label: MERGE_OPTIONS[filters.merge] || "Mergeable", clear: { merge: "" } });
   return chips;
 }

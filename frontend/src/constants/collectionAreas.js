@@ -1,9 +1,9 @@
 // Details kept about each collection area, for the operator and the workers who go there.
-// Water body types match CollectionArea.WATER_BODY_CHOICES in the backend.
+// Water body types match CollectionArea.WATER_BODY_CHOICES in the backend: waterways only, since
+// TROID works rivers, creeks and canals, not the coast or shoreline.
 export const WATER_BODY_TYPES = [
   { value: "river", label: "River" },
   { value: "creek", label: "Creek" },
-  { value: "coast", label: "Coast or shoreline" },
   { value: "estuary", label: "Estuary or river mouth" },
   { value: "canal", label: "Drainage canal" },
   { value: "pond", label: "Pond or lagoon" },

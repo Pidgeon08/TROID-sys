@@ -1,5 +1,5 @@
 // The trash report filed when a cleanup is finished. It counts the items of the International
-// Coastal Cleanup data card (Shoreline and Recreational), grouped under the TROID classes: what the
+// Coastal Cleanup data card, used here for waterways, grouped under the TROID classes: what the
 // robot sorts trash into. A class's count is the sum of its items, and is what the robot's own
 // count is compared with. Matches drives.TROID_CLASSES and drives.TRASH_GROUPS in the backend.
 
@@ -27,9 +27,8 @@ export function classTotals(items = {}) {
   return Object.fromEntries(TRASH_GROUPS.map((g) => [g.cls, g.items.reduce((sum, item) => sum + (Number(items[item]) || 0), 0)]));
 }
 
-// Request.SITE_TYPE_CHOICES in the backend.
+// Request.SITE_TYPE_CHOICES in the backend: waterways only (TROID doesn't work the shoreline).
 export const SITE_TYPES = [
-  { value: "shoreline", label: "Shoreline or beach" },
   { value: "river", label: "River, stream or tributary" },
   { value: "lake", label: "Lake or pond" },
 ];
@@ -38,7 +37,6 @@ export const siteTypeLabel = (value) => SITE_TYPES.find((t) => t.value === value
 
 // A collection area's water body type (constants/collectionAreas.js) as a data card site type.
 const SITE_TYPE_OF_WATER = {
-  coast: "shoreline",
   estuary: "river",
   river: "river",
   creek: "river",
