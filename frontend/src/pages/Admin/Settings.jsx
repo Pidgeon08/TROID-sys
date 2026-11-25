@@ -162,9 +162,9 @@ const Settings = () => {
       )}
 
       {/* Main settings card with sidebar and content area */}
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-8 grid grid-cols-[180px_1fr] gap-10 min-h-[400px]">
-        {/* Sidebar tab navigation */}
-        <nav className="flex flex-col gap-1">
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-6 sm:p-8 grid grid-cols-1 lg:grid-cols-[180px_minmax(0,1fr)] gap-6 lg:gap-10 min-h-[400px]">
+        {/* Sidebar tab navigation: a row above the content when the page is narrow */}
+        <nav className="flex flex-row flex-wrap gap-1 lg:flex-col">
           <button
             onClick={() => setActiveTab("profile")}
             className={`flex items-center gap-2.5 rounded-xl px-3.5 py-2.5 text-sm font-semibold text-left transition-all duration-200 cursor-pointer ${
@@ -186,7 +186,7 @@ const Settings = () => {
         </nav>
 
         {/* Main content area */}
-        <div>
+        <div className="min-w-0">
           {/* Profile settings tab */}
           {activeTab === "profile" && (
           <section>
@@ -194,7 +194,7 @@ const Settings = () => {
 
             {/* Profile picture and basic info display */}
             <div className="flex items-center gap-4 mb-7">
-              <div className="relative w-16 h-16 rounded-full bg-slate-100 flex items-center justify-center text-slate-500">
+              <div className="relative w-16 h-16 shrink-0 rounded-full bg-slate-100 flex items-center justify-center text-slate-500">
                 <User size={26} className="text-slate-600" strokeWidth={1.75} />
                 <button
                   className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-white border border-slate-200 flex items-center justify-center shadow-sm hover:border-slate-300 transition-colors"
@@ -203,9 +203,9 @@ const Settings = () => {
                   <Camera size={12} className="text-slate-500" />
                 </button>
               </div>
-              <div>
-                <p className="text-base font-bold text-slate-900">{profile.fullName}</p>
-                <p className="text-sm text-slate-500">{profile.email}</p>
+              <div className="min-w-0">
+                <p className="text-base font-bold text-slate-900 break-words">{profile.fullName}</p>
+                <p className="text-sm text-slate-500 truncate" title={profile.email}>{profile.email}</p>
                 <button className="mt-2 text-xs font-semibold text-slate-600 border border-slate-200 rounded-full px-3.5 py-1.5 hover:bg-slate-50 transition-colors">
                   Change Photo
                 </button>
@@ -213,7 +213,8 @@ const Settings = () => {
             </div>
 
             {/* Editable profile fields in a 2-column grid */}
-            <div className="grid grid-cols-2 gap-x-8 gap-y-5 max-w-2xl">
+            {/* Side by side when there is room for both, one above the other when not. */}
+            <div className="grid grid-cols-[repeat(auto-fit,minmax(14rem,1fr))] gap-x-8 gap-y-5 max-w-2xl">
               <div>
                 <label className="block text-xs font-semibold text-slate-500 mb-1.5">Full name</label>
                 <input

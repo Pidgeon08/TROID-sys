@@ -8,6 +8,8 @@ import { Plus, Ship, Zap, WifiOff, Ban, Battery, BatteryCharging, X, Copy, Check
 import { Card } from '../../components/ui/Card';
 import { SearchBar } from '../../components/ui/SearchBar';
 import { EmptyState } from '../../components/ui/EmptyState';
+import { Pagination } from "../../components/ui/Pagination";
+import { pageKeepingPlace, usePageSize } from "../../hooks/usePageSize";
 
 const STATUS_STYLES = {
     Paired: 'bg-green-50 text-green-800',
@@ -15,7 +17,7 @@ const STATUS_STYLES = {
     'Under maintenance': 'bg-amber-50 text-amber-800',
 };
 
-const PAGE_SIZE = 5;
+const DEFAULT_PAGE_SIZE = 5;
 
 const todayInManila = () => manilaDate(new Date());
 
@@ -148,6 +150,12 @@ export default function ManageBots() {
     const [search, setSearch] = useState('');
     const [statusFilter, setStatusFilter] = useState('All statuses');
     const [page, setPage] = useState(1);
+    // How many rows a page shows; each browser remembers its choice.
+    const [pageSize, setPageSize] = usePageSize("bots", DEFAULT_PAGE_SIZE);
+    const changePageSize = (size) => {
+      setPage((p) => pageKeepingPlace(p, pageSize, size));
+      setPageSize(size);
+    };
     const [showArchived, setShowArchived] = useState(false);
 
     const [newBot, setNewBot] = useState({ id: '', assignedOperator: 'Not Assigned' });
@@ -179,8 +187,8 @@ export default function ManageBots() {
         });
     }, [shownBots, search, statusFilter]);
 
-    const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-    const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+    const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+    const paged = filtered.slice((page - 1) * pageSize, page * pageSize);
 
     const goTo = (p) => setPage(Math.max(1, Math.min(totalPages, p)));
 
@@ -579,41 +587,8 @@ export default function ManageBots() {
                             </table>
                         </div>
 
-                        {filtered.length > 0 && (
-                            <div className="mt-5 flex items-center justify-between text-xs text-slate-500">
-                                <span>
-                                    Showing {paged.length === 0 ? 0 : (page - 1) * PAGE_SIZE + 1}–
-                                    {Math.min(page * PAGE_SIZE, filtered.length)} of {filtered.length} bots
-                                </span>
-                                <div className="flex gap-1">
-                                    <button
-                                        onClick={() => goTo(page - 1)}
-                                        disabled={page === 1}
-                                        className="flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 transition-colors hover:bg-slate-50 disabled:opacity-40"
-                                    >
-                                        ‹
-                                    </button>
-                                    {Array.from({ length: totalPages }, (_, i) => i + 1).map((n) => (
-                                        <button
-                                            key={n}
-                                            onClick={() => goTo(n)}
-                                            className={`flex h-7 w-7 items-center justify-center rounded-md text-xs font-medium transition-colors ${
-                                                page === n ? 'bg-[#1b4de4] text-white' : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
-                                            }`}
-                                        >
-                                            {n}
-                                        </button>
-                                    ))}
-                                    <button
-                                        onClick={() => goTo(page + 1)}
-                                        disabled={page === totalPages}
-                                        className="flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 transition-colors hover:bg-slate-50 disabled:opacity-40"
-                                    >
-                                        ›
-                                    </button>
-                                </div>
-                            </div>
-                        )}
+                        <Pagination page={page} totalPages={totalPages} onPageChange={goTo} totalItems={filtered.length}
+                          pageSize={pageSize} onPageSizeChange={changePageSize} />
                     </Card>
                 </div>
 

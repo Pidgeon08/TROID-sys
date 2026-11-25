@@ -2,8 +2,6 @@ import { useMemo, useState, useEffect } from "react";
 import {
   Search,
   Download,
-  ChevronLeft,
-  ChevronRight,
   Bot,
   FileText,
   Settings,
@@ -15,6 +13,8 @@ import {
 } from "lucide-react";
 import api from '../../services/api';
 import { LIVE, useLiveVersion } from "../../hooks/useLiveUpdates";
+import { Pagination } from "../../components/ui/Pagination";
+import { pageKeepingPlace, usePageSize } from "../../hooks/usePageSize";
 
 const MODULES = [
   "All modules",
@@ -83,13 +83,19 @@ const MODULE_ICONS = {
   Requests: InboxIcon,
 };
 
-const PAGE_SIZE = 8;
+const DEFAULT_PAGE_SIZE = 10;
 
 const AuditLogs = () => {
   const [query, setQuery] = useState("");
   const [action, setAction] = useState("All actions");
   const [module, setModule] = useState("All modules");
   const [page, setPage] = useState(1);
+  // How many rows a page shows; each browser remembers its choice.
+  const [pageSize, setPageSize] = usePageSize("audit-logs", DEFAULT_PAGE_SIZE);
+  const changePageSize = (size) => {
+    setPage((p) => pageKeepingPlace(p, pageSize, size));
+    setPageSize(size);
+  };
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -127,8 +133,9 @@ const AuditLogs = () => {
     });
   }, [logs, query, action, module]);
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const pageRows = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const goTo = (p) => setPage(Math.max(1, Math.min(totalPages, p)));
+  const pageRows = filtered.slice((page - 1) * pageSize, page * pageSize);
 
   const stats = useMemo(
     () => ({
@@ -276,48 +283,9 @@ const AuditLogs = () => {
             </tbody>
           </table>
         </div>
+        <Pagination page={page} totalPages={totalPages} onPageChange={goTo} totalItems={filtered.length}
+          pageSize={pageSize} onPageSizeChange={changePageSize} />
       </div>
-
-      <div className="flex items-center justify-between mt-4 text-xs text-slate-500">
-        <span>
-          Showing {pageRows.length === 0 ? 0 : (page - 1) * PAGE_SIZE + 1}–
-          {Math.min(page * PAGE_SIZE, filtered.length)} of {filtered.length} entries
-        </span>
-        <div className="flex items-center gap-1">
-          <button
-            type="button"
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-            disabled={page === 1}
-            className="p-1.5 rounded-md border border-slate-200 bg-white text-slate-500 disabled:opacity-40 hover:bg-slate-50 transition-colors"
-            aria-label="Previous page"
-          >
-            <ChevronLeft size={14} />
-          </button>
-          {Array.from({ length: totalPages }, (_, i) => i + 1).map((n) => (
-            <button
-              key={n}
-              type="button"
-              onClick={() => setPage(n)}
-              className={`px-2.5 py-1.5 rounded-md text-xs border transition-colors ${
-                n === page
-                  ? "bg-[#1b4de4] text-white border-[#1b4de4]"
-                  : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
-              }`}
-            >
-              {n}
-            </button>
-          ))}
-          <button
-            type="button"
-            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            disabled={page === totalPages}
-            className="p-1.5 rounded-md border border-slate-200 bg-white text-slate-500 disabled:opacity-40 hover:bg-slate-50 transition-colors"
-            aria-label="Next page"
-          >
-            <ChevronRight size={14} />
-            </button>
-          </div>
-        </div>
       </>
       )}
     </div>

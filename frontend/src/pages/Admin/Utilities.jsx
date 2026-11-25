@@ -23,16 +23,20 @@ export default function Utilities() {
 
   return (
     <div className="animate-fade-in">
-      <div className="max-w-350 mx-auto flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl w-fit mb-2">
+      {/* The tabs wrap onto another row when the page is narrow, rather than squeezing their labels. */}
+      <div className="mx-auto mb-4 flex w-fit max-w-full flex-wrap items-center justify-center gap-1.5 rounded-xl bg-slate-100 p-1" role="tablist">
         {TABS.map((tab) => (
           <button
             key={tab.key}
+            type="button"
+            role="tab"
+            aria-selected={activeTab === tab.key}
             onClick={() => setActiveTab(tab.key)}
-            className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold cursor-pointer transition-all duration-200 ${
+            className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap px-4 py-2 rounded-lg text-sm font-semibold cursor-pointer transition-all duration-200 ${
               activeTab === tab.key ? "bg-[#1b4de4] text-white shadow-sm" : "text-slate-600 hover:text-slate-900"
             }`}
           >
-            <tab.icon className="w-4 h-4" />
+            <tab.icon className="w-4 h-4 shrink-0" />
             {tab.label}
           </button>
         ))}

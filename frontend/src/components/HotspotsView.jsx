@@ -9,6 +9,8 @@ import { Flame, History, Info, TrendingDown, TrendingUp } from "lucide-react";
 import api from "../services/api";
 import { TILE_ATTRIBUTION, TILE_URL } from "../services/mapTiles";
 import { BarangayOutline } from "./AreaDrawing";
+import { HeatmapLayer } from "./MapLayers";
+import { LEGEND_CLASSES } from "../constants/mapLayers";
 import { barangayBounds } from "../utils/barangayBoundaries";
 import { LIVE, useLiveVersion } from "../hooks/useLiveUpdates";
 
@@ -36,6 +38,28 @@ function FitTo({ fitKey, bounds }) {
   return null;
 }
 
+// A month's hotspots are the areas whose last 30 days (to the month's end) spiked: priority.WINDOW_DAYS.
+const WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+
+/** The 30 days that made a month's hotspots, as the heatmap's custom range. */
+function windowKey(month, barangay) {
+  if (!month) return "";
+  const end = new Date(month.as_of);
+  return [barangay || "", new Date(end.getTime() - WINDOW_MS).toISOString(), end.toISOString()].join("|");
+}
+
+/** The heatmap points (what TROID found) of cleanups sent to these areas ("CA-0001,CA-0002"). */
+function heatFor(detections, areaIds) {
+  const ids = new Set(areaIds.split(","));
+  return (detections || []).filter((d) => ids.has(d.collection_area)).map((d) => [d.latitude, d.longitude, d.weight || 0.5]);
+}
+
+/** That heatmap on the map: the heatmap's own colours (Waste Density) for this month's, gray ("Past Hotspots") for former ones. */
+function HotspotHeat({ detections, areaIds, type }) {
+  const points = useMemo(() => heatFor(detections, areaIds), [detections, areaIds]);
+  return points.length > 0 ? <HeatmapLayer points={points} type={type} /> : null;
+}
+
 function AreaShape({ hotspot, color, dashed, label }) {
   const area = hotspot.collection_area;
   const points = area.points || [];
@@ -43,7 +67,7 @@ function AreaShape({ hotspot, color, dashed, label }) {
   const pathOptions = { color, weight: dashed ? 2 : 3, ...(dashed ? { dashArray: "6 6" } : {}) };
   const tooltip = <Tooltip sticky>{area.name} · {label}</Tooltip>;
   return area.closed ? (
-    <Polygon positions={points} pathOptions={{ ...pathOptions, fillColor: color, fillOpacity: dashed ? 0.06 : 0.35 }}>{tooltip}</Polygon>
+    <Polygon positions={points} pathOptions={{ ...pathOptions, fillColor: color, fillOpacity: dashed ? 0.04 : 0.12 }}>{tooltip}</Polygon>
   ) : (
     <Polyline positions={points} pathOptions={pathOptions}>{tooltip}</Polyline>
   );
@@ -180,6 +204,28 @@ export default function HotspotsView({ barangay }) {
   // The month compared with: the reader's pick, or last month.
   const compared = months.find((m) => m.month === comparedMonth && !m.so_far) || earlier[earlier.length - 1] || null;
 
+  // The heatmap of each compared month: what TROID found in the 30 days that made its hotspots.
+  const [detections, setDetections] = useState({});
+  const nowKey = windowKey(current, barangay);
+  const thenKey = windowKey(compared, barangay);
+  useEffect(() => {
+    let cancelled = false;
+    for (const key of [nowKey, thenKey]) {
+      if (!key) continue;
+      const [place, start, end] = key.split("|");
+      api.getHeatmap({ time_filter: "custom", start, end, barangay: place || undefined })
+        .then((data) => { if (!cancelled) setDetections((prev) => ({ ...prev, [key]: Array.isArray(data) ? data : [] })); })
+        .catch((err) => console.error("Failed to load the hotspots' heatmap:", err));
+    }
+    return () => { cancelled = true; };
+  }, [nowKey, thenKey, live]);
+  const nowDetections = detections[nowKey];
+  const thenDetections = detections[thenKey];
+  const nowAreaIds = (current?.hotspots || []).map((h) => h.collection_area.area_id);
+  const goneAreaIds = (compared?.hotspots || []).map((h) => h.collection_area.area_id).filter((id) => !nowAreaIds.includes(id));
+  const nowAreas = nowAreaIds.join(",");
+  const goneAreas = goneAreaIds.join(",");
+
   // New this month, a hotspot in both months, and a hotspot in the compared month only.
   const nowIds = new Set((current?.hotspots || []).map((h) => h.collection_area.area_id));
   const thenIds = new Set((compared?.hotspots || []).map((h) => h.collection_area.area_id));
@@ -270,6 +316,9 @@ export default function HotspotsView({ barangay }) {
             <TileLayer url={TILE_URL} attribution={TILE_ATTRIBUTION} />
             <FitTo fitKey={fitKey} bounds={bounds} />
             {outlined && <BarangayOutline barangay={outlined} fit={false} />}
+            {/* The heatmap first (its usual colours this month, gray for former hotspots), with each area's outline over it. */}
+            <HotspotHeat detections={thenDetections} areaIds={goneAreas} type="Past Hotspots" />
+            <HotspotHeat detections={nowDetections} areaIds={nowAreas} type="Waste Density" />
             {gone.map((h) => <AreaShape key={`gone-${h.collection_area.area_id}`} hotspot={h} color={GONE} dashed label={`hotspot in ${thenName}, not now`} />)}
             {still.map((h) => <AreaShape key={`still-${h.collection_area.area_id}`} hotspot={h} color={HOT} label={`hotspot now and in ${thenName}`} />)}
             {added.map((h) => <AreaShape key={`new-${h.collection_area.area_id}`} hotspot={h} color={HOT} label="new hotspot this month" />)}
@@ -277,12 +326,12 @@ export default function HotspotsView({ barangay }) {
           </MapContainer>
           <div className="absolute bottom-3 left-3 z-[400] space-y-1.5 rounded-xl border border-slate-200 bg-white/95 px-3 py-2 text-xs text-slate-600 shadow-sm">
             <p className="flex items-center gap-2">
-              <span className="h-3 w-4 rounded-sm border-2" style={{ borderColor: HOT, backgroundColor: `${HOT}59` }} />
+              <span className={`h-3 w-4 rounded-sm border-2 ${LEGEND_CLASSES["Waste Density"]}`} style={{ borderColor: HOT }} />
               Hotspot this month
             </p>
             {compared && (
               <p className="flex items-center gap-2">
-                <span className="h-3 w-4 rounded-sm border-2 border-dashed" style={{ borderColor: GONE }} />
+                <span className={`h-3 w-4 rounded-sm border-2 border-dashed ${LEGEND_CLASSES["Past Hotspots"]}`} style={{ borderColor: GONE }} />
                 Hotspot in {thenName} only
               </p>
             )}

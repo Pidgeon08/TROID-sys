@@ -836,7 +836,7 @@ def get_heatmap_data(request):
         if not barangay:
             return Response([])
 
-    detections = DetectionEvent.objects.filter(is_verified=True).select_related('boat', 'request')
+    detections = DetectionEvent.objects.filter(is_verified=True).select_related('boat', 'request__collection_area')
 
     if barangay:
         detections = detections.filter(request__barangay__iexact=barangay)
@@ -878,6 +878,8 @@ def get_heatmap_data(request):
             'boat': d.boat.name,
             'boat_id': d.boat_id,
             'request': d.request.request_id if d.request else None,
+            # The area its cleanup was sent to (the Hotspots view shows each hotspot's own heat).
+            'collection_area': d.request.collection_area.area_id if d.request and d.request.collection_area else None,
             'confidence': d.confidence,
         })
     return Response(data)

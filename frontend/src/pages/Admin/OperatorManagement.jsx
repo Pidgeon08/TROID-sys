@@ -8,6 +8,8 @@ import { Card } from "../../components/ui/Card";
 import { SearchBar } from "../../components/ui/SearchBar";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { LIVE, useLiveVersion } from "../../hooks/useLiveUpdates";
+import { Pagination } from "../../components/ui/Pagination";
+import { pageKeepingPlace, usePageSize } from "../../hooks/usePageSize";
 
 const AVAILABILITY_STYLES = {
   Assigned: "bg-green-50 text-green-800",
@@ -19,7 +21,7 @@ const QUICK_ACTIONS = [
   { label: "Archive operator", action: "archiveOperator" },
 ];
 
-const PAGE_SIZE = 5;
+const DEFAULT_PAGE_SIZE = 5;
 
 function todayKey() {
   const d = new Date();
@@ -50,6 +52,12 @@ export default function OperatorManagement() {
   const [editConfirm, setEditConfirm] = useState(null);
   const [archiveConfirm, setArchiveConfirm] = useState(null);
   const [page, setPage] = useState(1);
+  // How many rows a page shows; each browser remembers its choice.
+  const [pageSize, setPageSize] = usePageSize("operators", DEFAULT_PAGE_SIZE);
+  const changePageSize = (size) => {
+    setPage((p) => pageKeepingPlace(p, pageSize, size));
+    setPageSize(size);
+  };
   const [addOperatorError, setAddOperatorError] = useState('');
 
   // Loaded again when this data changes anywhere, so the page stays current without a reload.
@@ -90,8 +98,8 @@ export default function OperatorManagement() {
     });
   }, [scopedOperators, search, availabilityFilter]);
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const paged = filtered.slice((page - 1) * pageSize, page * pageSize);
 
   const goTo = (p) => setPage(Math.max(1, Math.min(totalPages, p)));
 
@@ -372,41 +380,8 @@ export default function OperatorManagement() {
               </table>
             </div>
 
-            {filtered.length > 0 && (
-              <div className="mt-5 flex items-center justify-between text-xs text-slate-500">
-                <span>
-                  Showing {paged.length === 0 ? 0 : (page - 1) * PAGE_SIZE + 1}–
-                  {Math.min(page * PAGE_SIZE, filtered.length)} of {filtered.length} operators
-                </span>
-                <div className="flex gap-1">
-                  <button
-                    onClick={() => goTo(page - 1)}
-                    disabled={page === 1}
-                    className="flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 transition-colors hover:bg-slate-50 disabled:opacity-40"
-                  >
-                    ‹
-                  </button>
-                  {Array.from({ length: totalPages }, (_, i) => i + 1).map((n) => (
-                    <button
-                      key={n}
-                      onClick={() => goTo(n)}
-                      className={`flex h-7 w-7 items-center justify-center rounded-md text-xs font-medium transition-colors ${
-                        page === n ? "bg-[#1b4de4] text-white" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
-                      }`}
-                    >
-                      {n}
-                    </button>
-                  ))}
-                  <button
-                    onClick={() => goTo(page + 1)}
-                    disabled={page === totalPages}
-                    className="flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 transition-colors hover:bg-slate-50 disabled:opacity-40"
-                  >
-                    ›
-                  </button>
-                </div>
-              </div>
-            )}
+            <Pagination page={page} totalPages={totalPages} onPageChange={goTo} totalItems={filtered.length}
+              pageSize={pageSize} onPageSizeChange={changePageSize} />
           </Card>
         </div>
 

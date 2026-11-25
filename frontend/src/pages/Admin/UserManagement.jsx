@@ -8,6 +8,8 @@ import { SearchBar } from "../../components/ui/SearchBar";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { BARANGAYS } from "../../utils/barangayBoundaries";
 import { LIVE, useLiveVersion } from "../../hooks/useLiveUpdates";
+import { Pagination } from "../../components/ui/Pagination";
+import { pageKeepingPlace, usePageSize } from "../../hooks/usePageSize";
 
 const ROLE_STYLES = {
   Admin: "bg-blue-50 text-blue-700",
@@ -23,7 +25,7 @@ const STATUS_STYLES = {
   Archived: "bg-slate-100 text-slate-600",
 };
 
-const PAGE_SIZE = 5;
+const DEFAULT_PAGE_SIZE = 5;
 
 // The API client reports field errors as "field: message"; the message alone reads better here.
 function serverReason(err) {
@@ -42,6 +44,12 @@ export default function UserManagement({ currentUser }) {
   const [editConfirm, setEditConfirm] = useState(null);
   const [archiveConfirm, setArchiveConfirm] = useState(null);
   const [page, setPage] = useState(1);
+  // How many rows a page shows; each browser remembers its choice.
+  const [pageSize, setPageSize] = usePageSize("users", DEFAULT_PAGE_SIZE);
+  const changePageSize = (size) => {
+    setPage((p) => pageKeepingPlace(p, pageSize, size));
+    setPageSize(size);
+  };
   const [pendingApproval, setPendingApproval] = useState(0);
 
   // Loaded again when this data changes anywhere, so the page stays current without a reload.
@@ -66,8 +74,8 @@ export default function UserManagement({ currentUser }) {
     });
   }, [scopedUsers, search, roleFilter, statusFilter]);
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const paged = filtered.slice((page - 1) * pageSize, page * pageSize);
 
   const goTo = (p) => setPage(Math.max(1, Math.min(totalPages, p)));
 
@@ -337,41 +345,8 @@ export default function UserManagement({ currentUser }) {
               </table>
             </div>
 
-            {filtered.length > 0 && (
-              <div className="mt-5 flex items-center justify-between text-xs text-slate-500">
-                <span>
-                  Showing {paged.length === 0 ? 0 : (page - 1) * PAGE_SIZE + 1}–
-                  {Math.min(page * PAGE_SIZE, filtered.length)} of {filtered.length} accounts
-                </span>
-                <div className="flex gap-1">
-                  <button
-                    onClick={() => goTo(page - 1)}
-                    disabled={page === 1}
-                    className="flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 transition-colors hover:bg-slate-50 disabled:opacity-40"
-                  >
-                    ‹
-                  </button>
-                  {Array.from({ length: totalPages }, (_, i) => i + 1).map((n) => (
-                    <button
-                      key={n}
-                      onClick={() => goTo(n)}
-                      className={`flex h-7 w-7 items-center justify-center rounded-md text-xs font-medium transition-colors ${
-                        page === n ? "bg-[#1b4de4] text-white" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
-                      }`}
-                    >
-                      {n}
-                    </button>
-                  ))}
-                  <button
-                    onClick={() => goTo(page + 1)}
-                    disabled={page === totalPages}
-                    className="flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 transition-colors hover:bg-slate-50 disabled:opacity-40"
-                  >
-                    ›
-                  </button>
-                </div>
-              </div>
-            )}
+            <Pagination page={page} totalPages={totalPages} onPageChange={goTo} totalItems={filtered.length}
+              pageSize={pageSize} onPageSizeChange={changePageSize} />
           </Card>
         </div>
 

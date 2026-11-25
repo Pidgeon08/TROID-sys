@@ -57,13 +57,7 @@ export default function HotspotsCard({ title, barangay, moreTo, className = '', 
     return () => { cancelled = true; };
   }, [query, live]);
 
-  const heatPoints = useMemo(() => {
-    if (layer === 'Trash Collected') {
-      const most = Math.max(1, ...reports.map((r) => r.trash_count || 0));
-      return reports.map((r) => [r.latitude, r.longitude, (r.trash_count || 0) / most]);
-    }
-    return reports.map((r) => [r.latitude, r.longitude, r.weight || 0.5]);
-  }, [reports, layer]);
+  const heatPoints = useMemo(() => reports.map((r) => [r.latitude, r.longitude, r.weight || 0.5]), [reports]);
 
   const items = reports.reduce((sum, r) => sum + (r.trash_count || 0), 0);
 
