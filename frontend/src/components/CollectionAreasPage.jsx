@@ -446,8 +446,9 @@ export default function CollectionAreasPage({ side = "admin" }) {
 
   const editing = mode === "edit" ? editTarget : null;
   const barangayChanged = Boolean(editing && form.barangay !== editing.barangay);
-  // A new area is always drawn; an edited one keeps its shape unless it is redrawn or moved.
-  const reshaping = mode === "add" || draft.isDrafting || barangayChanged;
+  // A new area is always drawn; an edited one keeps its shape unless its points are moved, it is
+  // redrawn, or it is moved to another barangay.
+  const reshaping = mode === "add" || draft.dirty || barangayChanged;
   const shapeReady = !reshaping || draft.canSave;
   const canSave = Boolean(form.barangay && form.name.trim() && shapeReady && !saving);
 
@@ -568,8 +569,8 @@ export default function CollectionAreasPage({ side = "admin" }) {
   };
 
   const startEditing = (area) => {
-    draft.clear();
-    draft.stop();
+    // Its points can be dragged straight away.
+    draft.load(area.points, area.closed);
     setMode("edit");
     setEditTarget(area);
     setForm(formFromArea(area));
@@ -584,8 +585,7 @@ export default function CollectionAreasPage({ side = "admin" }) {
   };
 
   const keepCurrentShape = () => {
-    draft.clear();
-    draft.stop();
+    if (editing) draft.load(editing.points, editing.closed);
     if (editing) setForm((prev) => ({ ...prev, barangay: editing.barangay }));
   };
 
@@ -601,7 +601,7 @@ export default function CollectionAreasPage({ side = "admin" }) {
         setAreas((prev) => prev.map((a) => (a.id === editing.id ? updated : a)));
         setActiveId(updated.id);
         setFlyTo(centroid(updated.points));
-        const changes = [reshaping && "shape redrawn", barangayChanged && `moved to ${updated.barangay}`].filter(Boolean);
+        const changes = [reshaping && "shape changed", barangayChanged && `moved to ${updated.barangay}`].filter(Boolean);
         logAudit({
           currentUser,
           action: "Collection area edited",
@@ -642,8 +642,11 @@ export default function CollectionAreasPage({ side = "admin" }) {
     );
   }
 
-  const drawingHint = draft.isPolygon
-    ? { cls: "border-blue-100 text-[#1b4de4]", text: "Polygon created. Save it, or click Redraw to start the shape over." }
+  const drawingHint = mode && !draft.drawing && draft.points.length > 0
+    ? {
+        cls: "border-blue-100 text-[#1b4de4]",
+        text: "Drag a point to move it. Click a small white dot between two points to add one there; right-click a point to remove it. Redraw starts the shape over.",
+      }
     : draft.drawing
       ? {
           cls: "border-amber-200 text-amber-800",
@@ -712,7 +715,7 @@ export default function CollectionAreasPage({ side = "admin" }) {
       {/* Shape */}
       <div className="rounded-lg bg-slate-50 px-3 py-2.5 text-xs text-slate-500 space-y-2">
         <div className="flex items-center justify-between">
-          <span>{reshaping ? "Points drawn" : "Shape"}</span>
+          <span>{reshaping ? "Points" : "Shape"}</span>
           <span className="font-semibold text-slate-700">
             {reshaping
               ? `${draft.points.length}${draft.canSave ? ` · ${shapeSize({ closed: draft.isPolygon, points: draft.points })}` : ""}`
@@ -726,45 +729,34 @@ export default function CollectionAreasPage({ side = "admin" }) {
           </p>
         )}
         <div className="flex gap-2">
-          {editing && !reshaping ? (
+          <button
+            type="button"
+            onClick={draft.undo}
+            disabled={!draft.canUndo}
+            className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <Undo2 className="h-4 w-4" /> Undo
+          </button>
+          <button
+            type="button"
+            onClick={() => draft.start()}
+            disabled={draft.drawing && draft.points.length === 0}
+            title={draft.points.length ? "Clear the shape and draw it again" : undefined}
+            className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {draft.points.length === 0 && !draft.drawing
+              ? <><Pencil className="h-4 w-4" /> Draw</>
+              : <><Eraser className="h-4 w-4" /> Redraw</>}
+          </button>
+          {editing && reshaping && (
             <button
               type="button"
-              onClick={() => draft.start()}
+              onClick={keepCurrentShape}
+              title="Undo every change to the shape (and barangay)"
               className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors"
             >
-              <Pencil className="h-4 w-4" /> Redraw shape
+              <RotateCcw className="h-4 w-4" /> Keep old
             </button>
-          ) : (
-            <>
-              <button
-                type="button"
-                onClick={draft.undo}
-                disabled={draft.points.length === 0}
-                className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                <Undo2 className="h-4 w-4" /> Undo
-              </button>
-              <button
-                type="button"
-                onClick={() => draft.start()}
-                disabled={draft.drawing && draft.points.length === 0}
-                className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                {draft.points.length === 0 && !draft.drawing
-                  ? <><Pencil className="h-4 w-4" /> Draw</>
-                  : <><Eraser className="h-4 w-4" /> Redraw</>}
-              </button>
-              {editing && (
-                <button
-                  type="button"
-                  onClick={keepCurrentShape}
-                  title="Keep the shape (and barangay) it has now"
-                  className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors"
-                >
-                  <RotateCcw className="h-4 w-4" /> Keep old
-                </button>
-              )}
-            </>
           )}
         </div>
       </div>
@@ -999,13 +991,10 @@ export default function CollectionAreasPage({ side = "admin" }) {
                 )
               )}
               {heatPoints.length > 0 && <HeatmapLayer points={heatPoints} type="Waste Density" options={heatOptions} />}
-              {mode && <BarangayOutline barangay={form.barangay} fit={reshaping} />}
+              {mode && <BarangayOutline barangay={form.barangay} fit={mode === "add" || barangayChanged} />}
               {!mode && isBarangay && ownBarangay && <BarangayOutline barangay={ownBarangay} fit={areas.length === 0} />}
-              {editing && (
-                reshaping
-                  ? <AreaShape area={editing} color={OLD_SHAPE_COLOR} weight={2} dashed />
-                  : <AreaShape area={editing} color={form.color} weight={5} />
-              )}
+              {/* The shape it had, for reference once it changes; the shape being edited is the draft. */}
+              {editing && reshaping && <AreaShape area={editing} color={OLD_SHAPE_COLOR} weight={2} dashed />}
               {mode && <AreaDraftLayers draft={draft} barangay={form.barangay} color={form.color} />}
             </MapContainer>
 
