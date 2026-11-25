@@ -51,7 +51,7 @@ function windowKey(month, barangay) {
 /** The heatmap points (what TROID found) of cleanups sent to these areas ("CA-0001,CA-0002"). */
 function heatFor(detections, areaIds) {
   const ids = new Set(areaIds.split(","));
-  return (detections || []).filter((d) => ids.has(d.collection_area)).map((d) => [d.latitude, d.longitude, d.weight || 0.5]);
+  return (detections || []).filter((d) => ids.has(d.collection_area)).map((d) => [d.latitude, d.longitude, d.weight ?? 0.5]);
 }
 
 /** That heatmap on the map: the heatmap's own colours (Waste Density) for this month's, gray ("Past Hotspots") for former ones. */

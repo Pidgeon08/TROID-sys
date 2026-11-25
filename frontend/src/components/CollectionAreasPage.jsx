@@ -427,7 +427,7 @@ export default function CollectionAreasPage({ side = "admin" }) {
   }, [heatKey, liveDetections]);
   const heatLoaded = heatKey && heatData.key === heatKey ? heatData : null;
   const heatPoints = useMemo(
-    () => (heatLoaded?.reports || []).map((r) => [r.latitude, r.longitude, r.weight || 0.5]),
+    () => (heatLoaded?.reports || []).map((r) => [r.latitude, r.longitude, r.weight ?? 0.5]),
     [heatLoaded]
   );
   // One area holds many detections close together: tighter spots, and "hot" scaled to how many

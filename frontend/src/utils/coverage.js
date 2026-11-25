@@ -1,7 +1,10 @@
 // How much of a collection area TROID covered, worked out from the points the robot reported
 // (its detections). Each point counts as covering a circle of `radiusM` metres around it; the
 // area is sampled on a grid and the share of grid cells within reach of a point is the coverage.
-// Distances use a flat projection around the area, which is accurate at barangay scale.
+// Only the water inside the area counts (utils/water: the sea, rivers, creeks and ponds), since
+// that is all a boat can cover, and only points reported on the water. Distances use a flat
+// projection around the area, which is accurate at barangay scale.
+import { onWater, reportedOnWater } from './water';
 
 const M_PER_DEG_LAT = 111320;
 // Enough grid cells for a sub-percent answer while staying fast on every 5-second refresh.
@@ -54,17 +57,26 @@ export function ringAreaM2(latLngRing) {
  * @param radiusM     how far around each point counts as covered
  */
 export function areaCoverage(latLngRing, points, radiusM) {
-  const empty = { areaM2: 0, coveredM2: 0, coveredPct: 0, inside: 0, outside: 0, total: 0 };
+  const empty = {
+    areaM2: 0, outlineM2: 0, waterMapped: false, coveredM2: 0, coveredPct: 0, inside: 0, outside: 0, onLand: 0, total: 0,
+  };
   if (!Array.isArray(latLngRing) || latLngRing.length < 3) return empty;
 
-  const project = projector(latLngRing[0][0]);
+  const lat0 = latLngRing[0][0];
+  const project = projector(lat0);
+  const mPerDegLng = M_PER_DEG_LAT * Math.cos((lat0 * Math.PI) / 180);
+  const unproject = (x, y) => [y / M_PER_DEG_LAT, x / mPerDegLng];
   const ring = latLngRing.map(project);
-  const areaM2 = shoelaceM2(ring);
-  const pts = (points || []).filter((p) => Number.isFinite(p?.[0]) && Number.isFinite(p?.[1])).map(project);
+  const outlineM2 = shoelaceM2(ring);
+  const valid = (points || []).filter((p) => Number.isFinite(p?.[0]) && Number.isFinite(p?.[1]));
+  // Points on land (GPS gone astray, or a report from the shore) cover nothing a boat can clean.
+  const wet = valid.filter((p) => reportedOnWater(p));
+  const pts = wet.map(project);
 
-  const inside = pts.filter((p) => insideRing(p, ring)).length;
-  const result = { ...empty, areaM2, inside, outside: pts.length - inside, total: pts.length };
-  if (pts.length === 0 || areaM2 === 0 || !(radiusM > 0)) return result;
+  const inside = valid.filter((p) => insideRing(project(p), ring)).length;
+  const onLand = valid.length - wet.length;
+  const result = { ...empty, areaM2: outlineM2, outlineM2, inside, outside: valid.length - inside, onLand, total: valid.length };
+  if (outlineM2 === 0 || !(radiusM > 0)) return result;
 
   // Bucket the points by radius so each cell only checks its neighbours.
   const buckets = new Map();
@@ -75,6 +87,7 @@ export function areaCoverage(latLngRing, points, radiusM) {
   }
   const r2 = radiusM * radiusM;
   const reached = (x, y) => {
+    if (buckets.size === 0) return false;
     const bx = Math.floor(x / radiusM);
     const by = Math.floor(y / radiusM);
     for (let dx = -1; dx <= 1; dx++) {
@@ -91,18 +104,29 @@ export function areaCoverage(latLngRing, points, radiusM) {
   const [minX, maxX, minY, maxY] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
   const cell = Math.max(Math.sqrt(((maxX - minX) * (maxY - minY)) / MAX_CELLS), 0.25);
 
+  // Each cell of the outline, and whether it is water and within reach of a point.
   let cellsInArea = 0;
-  let cellsCovered = 0;
+  let wetCells = 0;
+  let wetCovered = 0;
+  let allCovered = 0;
   for (let x = minX + cell / 2; x < maxX; x += cell) {
     for (let y = minY + cell / 2; y < maxY; y += cell) {
       if (!insideRing([x, y], ring)) continue;
       cellsInArea += 1;
-      if (reached(x, y)) cellsCovered += 1;
+      const hit = reached(x, y);
+      if (hit) allCovered += 1;
+      if (onWater(unproject(x, y))) {
+        wetCells += 1;
+        if (hit) wetCovered += 1;
+      }
     }
   }
   if (cellsInArea === 0) return result;
-  const share = cellsCovered / cellsInArea;
-  return { ...result, coveredM2: share * areaM2, coveredPct: share * 100 };
+  // An area with no mapped water (a creek too small for the map) is measured on its whole outline.
+  const waterMapped = wetCells > 0;
+  const areaM2 = waterMapped ? (wetCells / cellsInArea) * outlineM2 : outlineM2;
+  const share = waterMapped ? wetCovered / wetCells : allCovered / cellsInArea;
+  return { ...result, areaM2, waterMapped, coveredM2: share * areaM2, coveredPct: share * 100 };
 }
 
 /** The points inside and outside an area, as given (so the map can colour them apart). */

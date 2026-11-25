@@ -61,8 +61,10 @@ const SAMPLE_AUDIT_LOGS = [
 
 const fakeAuditLogs = (page) => fake(page, 'GET', /\/api\/audit-logs\/?$/, SAMPLE_AUDIT_LOGS);
 
+// The Utilities page's tabs (Settings, User Manual, Audit Logs, Backup & Restore).
+const utilitiesTab = (page, name) => page.getByRole('tab', { name, exact: true }).first();
 const openUtilitiesTab = (name) => async (page) => {
-  await button(page, name).click();
+  await utilitiesTab(page, name).click();
   await settle(page);
 };
 
@@ -413,7 +415,7 @@ export const RECIPES = {
       'compare-with': {
         run: async (p) => {
           await button(p, '30 days', true).click();
-          await p.locator('select', { has: p.locator('option', { hasText: 'No collection area' }) }).first().selectOption({ index: 1 });
+          await p.locator('select', { has: p.locator('option', { hasText: 'No collection area' }) }).first().selectOption({ label: 'Lingsat Coastline' });
           await settle(p, 1200);
         },
         outline: (p) => card(p, 'Area covered'),
@@ -455,7 +457,7 @@ export const RECIPES = {
     'audit-logs': {
       tab: {
         run: async (p) => { await fakeAuditLogs(p); await openUtilitiesTab('Audit Logs')(p); },
-        outline: (p) => button(p, 'Audit Logs'),
+        outline: (p) => utilitiesTab(p, 'Audit Logs'),
       },
       search: {
         run: async (p) => { await fakeAuditLogs(p); await openUtilitiesTab('Audit Logs')(p); },

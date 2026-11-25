@@ -199,11 +199,17 @@ function CoveragePanel({ area, coverage, radiusM, onRadiusChange, showCoverage, 
         <div className="h-full rounded-full bg-emerald-500 transition-[width] duration-500" style={{ width: `${Math.min(coverage.coveredPct, 100)}%` }} />
       </div>
       <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3">
-        <Stat label="Area size" value={formatArea(coverage.areaM2)} />
+        <Stat label={coverage.waterMapped ? 'Water in area' : 'Area size'} value={formatArea(coverage.areaM2)} />
         <Stat label="Covered" value={formatArea(coverage.coveredM2)} tone="text-emerald-700" />
         <Stat label="Points inside" value={coverage.inside.toLocaleString()} />
         <Stat label="Points outside" value={coverage.outside.toLocaleString()} tone={coverage.outside > 0 ? 'text-amber-600' : 'text-slate-900'} />
       </dl>
+      <p className="mt-3 text-[11px] text-slate-500 leading-relaxed">
+        {coverage.waterMapped
+          ? `${formatArea(coverage.areaM2)} of its ${formatArea(coverage.outlineM2)} outline is water. Only the water counts, as that is all TROID can cover.`
+          : 'No mapped water lies inside this area, so its whole outline is measured.'}
+        {coverage.onLand > 0 && ` ${coverage.onLand.toLocaleString()} point${coverage.onLand === 1 ? ' was' : 's were'} reported on land and cover nothing.`}
+      </p>
       {coverage.total === 0 && (
         <p className="mt-4 text-xs text-slate-500">TROID hasn't reported any points for this view yet.</p>
       )}
@@ -212,7 +218,8 @@ function CoveragePanel({ area, coverage, radiusM, onRadiusChange, showCoverage, 
         Show covered ground on the map
       </label>
       <p className="mt-3 text-[11px] text-slate-400 leading-relaxed">
-        Each point TROID reported counts as covering {radiusM} m around it. Covered is the share of the area within that reach of a point.
+        Each point TROID reported on the water counts as covering {radiusM} m around it. Covered is the share of the area&apos;s
+        water within that reach of a point. Water is from OpenStreetMap.
       </p>
     </Panel>
   );
@@ -445,7 +452,7 @@ const HeatmapView = ({ barangay }) => {
   }, [selectedCategory, timeFilter, dateRange, realtimeNonce, barangay]);
 
   // ---- Live view ----
-  const heatPoints = useMemo(() => detections.map((p) => [p.latitude, p.longitude, p.weight || 0.5]), [detections]);
+  const heatPoints = useMemo(() => detections.map((p) => [p.latitude, p.longitude, p.weight ?? 0.5]), [detections]);
   const liveCategories = useMemo(() => {
     const cats = {};
     detections.forEach((p) => Object.entries(p.categories || {}).forEach(([c, n]) => { cats[c] = (cats[c] || 0) + n; }));
@@ -472,7 +479,7 @@ const HeatmapView = ({ barangay }) => {
     [comparisonScope]
   );
   const driveHeatPoints = useMemo(
-    () => driveDetections.map((e) => [e.latitude, e.longitude, Math.min((e.trash_count || 1) * 0.2, 1)]),
+    () => driveDetections.map((e) => [e.latitude, e.longitude, Math.min((e.trash_count ?? 1) * 0.2, 1)]),
     [driveDetections]
   );
   const driveArea = useMemo(

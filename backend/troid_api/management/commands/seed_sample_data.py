@@ -20,6 +20,7 @@ nothing else. It refuses to run against anything but a local SQLite database unl
 --allow-remote is given, because backend/.env may point at the live database.
 """
 import base64
+import json
 import math
 import random
 from datetime import datetime, time, timedelta
@@ -115,6 +116,26 @@ def letter_pdf(lines):
     out += ''.join(f'{offset:010d} 00000 n \n' for offset in offsets)
     out += f'trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n'
     return out.encode('latin-1')
+
+
+# The sample areas drawn over real water, and the path a robot sweeps in each (built from
+# OpenStreetMap by backend/tools/water_map/build_samples.py). Keyed by barangay for each one's main
+# area, and by name for the extra ones.
+SAMPLE_SHAPES = json.loads((boundaries.DATA_FILE.parent / 'sample_areas.json').read_text(encoding='utf-8'))
+# A position report every this many path nodes (they are about 6 m apart), as the robot moves.
+REPORT_EVERY = 2
+# The extra areas' water.
+EXTRA_WATER = {
+    'Poro Fish Port Basin': ('coast', 'Poro Point Bay'),
+    'Poro Seawall Outfall': ('coast', 'Poro Point Bay'),
+    'Catbangen Upper Riverbank': ('river', 'Catbangen River'),
+}
+
+
+def sample_points(rng, key, barangay):
+    """The area's outline over real water, or a made-up one if there is none for it."""
+    shape = SAMPLE_SHAPES.get(key)
+    return shape['points'] if shape else area_polygon(rng, barangay)
 
 
 def inside(point, ring):
@@ -270,7 +291,7 @@ class Command(BaseCommand):
             reviewed = self.now - timedelta(days=days + rng.randint(25, 50))
             area = CollectionArea.objects.create(
                 name=info['area'], barangay=name, submitted_by=SUBMITTER,
-                points=area_polygon(rng, name), closed=True,
+                points=sample_points(rng, name, name), closed=True,
                 color=rng.choice(['#1b4de4', '#0ea5e9', '#16a34a', '#d97706', '#9333ea']),
                 description=f'Stretch of {water_name} where trash collects after heavy rain.',
                 water_body_type=water_type, water_body_name=water_name,
@@ -286,13 +307,14 @@ class Command(BaseCommand):
             ('Catbangen', 'Catbangen Upper Riverbank', 'declined',
              'Part of this stretch is private property. Redraw it along the public easement.'),
         ):
+            water_type, water_name = EXTRA_WATER[name]
             CollectionArea.objects.create(
-                name=name, barangay=barangay, submitted_by=SUBMITTER, points=area_polygon(rng, barangay),
+                name=name, barangay=barangay, submitted_by=SUBMITTER, points=sample_points(rng, name, barangay),
                 closed=True, status=area_status, decline_reason=reason,
                 reviewed_by='Sample CENRO Admin' if area_status != 'pending' else '',
                 date_reviewed=self.now - timedelta(days=1 if area_status == 'approved' else 4)
                 if area_status != 'pending' else None,
-                description='Submitted for review.', water_body_type='river', water_body_name=f'{barangay} River',
+                description='Submitted for review.', water_body_type=water_type, water_body_name=water_name,
             )
 
     # --- what to create --------------------------------------------------------------
@@ -432,7 +454,8 @@ class Command(BaseCommand):
                 'Monthly cleanup requested by the barangay council.',
                 'Clogged section is causing flooding in the nearby purok.',
             ]),
-            collection_area=self.areas[barangay] if troid or rng.random() < 0.7 else None,
+            # Manual cleanups name the area they were in too, so they count toward its priority.
+            collection_area=self.areas[barangay],
             archived=spec.get('archived', False),
             decline_reason=spec.get('reason', ''),
             parked_from_status=spec.get('parked_from', ''),
@@ -646,7 +669,49 @@ class Command(BaseCommand):
                 'non_usable_kg': round(weight - recyclable, 1), 'categories': categories, 'items': counted}
 
     def detections(self, req, boat, items, start, finished):
-        """What the robot counted along the drive: close to the filed report, spread over the area."""
+        """What the robot reported along the drive: its position every few metres as it sweeps the
+        area (SAMPLE_SHAPES), with the trash it counted there, close to the filed report and bunched
+        where trash gathers. Some drives are cut short, so they cover less of the area."""
+        rng = self.rng
+        shape = SAMPLE_SHAPES.get(req.barangay)
+        if not shape:
+            return self.scattered_detections(req, boat, items, start, finished)
+        path = shape['path']
+        share = rng.choice([1.0, 1.0, rng.uniform(0.85, 1.0), rng.uniform(0.5, 0.85)])
+        length = max(2, round(len(path) * share))
+        begin = rng.randint(0, len(path) - length)
+        nodes = path[begin:begin + length:REPORT_EVERY]
+
+        def pull(i):
+            """How much trash gathers at the i-th report: a little everywhere, a lot at the pockets."""
+            where = (begin + i * REPORT_EVERY) / max(len(path) - 1, 1)
+            return 0.03 + sum(strength * math.exp(-((where - at) / 0.035) ** 2) for at, strength in shape["pockets"])
+
+        weights = [pull(i) for i in range(len(nodes))]
+        found = [{} for _ in nodes]
+        for name, total in items.items():
+            label = ROBOT_LABEL.get(name, name)
+            for i in rng.choices(range(len(nodes)), weights=weights, k=round(total * rng.uniform(0.85, 1.05))):
+                found[i][label] = found[i].get(label, 0) + 1
+
+        drift = 1.5 / 111320  # a metre or two of GPS wander
+        events = DetectionEvent.objects.bulk_create([
+            DetectionEvent(
+                boat=boat, request=req, trash_count=sum(counts.values()), categories=counts,
+                latitude=round(lat + rng.uniform(-drift, drift), 6), longitude=round(lng + rng.uniform(-drift, drift), 6),
+                confidence=round(rng.uniform(0.72, 0.97), 2), is_verified=True,
+            )
+            for (lat, lng), counts in zip(nodes, found)
+        ])
+        step = (finished - start) / max(len(events) - 1, 1)
+        for i, event in enumerate(events):
+            event.timestamp = start + step * i
+        DetectionEvent.objects.bulk_update(events, ['timestamp'], batch_size=500)
+        last = events[-1]
+        Boat.objects.filter(pk=boat.pk).update(last_latitude=last.latitude, last_longitude=last.longitude)
+
+    def scattered_detections(self, req, boat, items, start, finished):
+        """For an area with no sweep path: what the robot counted, spread over the area."""
         rng = self.rng
         polygon = self.areas[req.barangay].points
         stops = rng.randint(8, 14)
