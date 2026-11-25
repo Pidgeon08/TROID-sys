@@ -765,6 +765,18 @@ class BackupRestoreTests(TestCase):
         for feature in backup.FEATURES:
             self.assertTrue(set(feature['needs']) <= set(backup.FEATURE_KEYS))
 
+    def test_disposal_records_are_never_backed_up_or_restored(self):
+        self.assertNotIn('waste_records', backup.FEATURE_KEYS)
+        for label in ('troid_api.landfillrecord', 'troid_api.recyclingrecord', 'troid_api.segregationrecord'):
+            self.assertIn(label, backup.NOT_BACKED_UP)
+        # A backup made while they were a part still restores: the part is skipped.
+        features, _ = backup.read_backup({
+            'format': backup.FORMAT, 'version': 2, 'features': ['collection_areas', 'waste_records'], 'records': [
+                {'model': 'troid_api.landfillrecord', 'pk': 1, 'fields': {}},
+            ],
+        })
+        self.assertEqual(features, ['collection_areas'])
+
     def test_a_backup_has_the_chosen_features_and_what_they_need(self):
         Notification.objects.create(recipient=self.admin, notif_type='approved', title='Hi')
 

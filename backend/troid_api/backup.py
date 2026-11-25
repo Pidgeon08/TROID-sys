@@ -36,7 +36,11 @@ READABLE_VERSIONS = (1, 2)
 APP = 'troid_api'
 SESSION_FIELDS = {'troid_api.user': ('session_token', 'companion_session_token')}
 # Never backed up, and never replaced by a restore.
-NOT_BACKED_UP = {'troid_api.auditlog', 'troid_api.liveversion', 'troid_api.systempause'}
+NOT_BACKED_UP = {
+    'troid_api.auditlog', 'troid_api.liveversion', 'troid_api.systempause',
+    # Disposal & recycling records aren't part of the system's backups.
+    'troid_api.landfillrecord', 'troid_api.recyclingrecord', 'troid_api.segregationrecord',
+}
 
 FEATURES = [
     {'key': 'accounts', 'label': 'User accounts',
@@ -61,12 +65,10 @@ FEATURES = [
     {'key': 'notifications', 'label': 'Notifications',
      'description': 'The notifications sent to every account.',
      'models': ['troid_api.notification'], 'needs': ['accounts', 'requests', 'collection_areas']},
-    {'key': 'waste_records', 'label': 'Disposal & recycling records',
-     'description': 'Landfill, recycling and segregation records.',
-     'models': ['troid_api.landfillrecord', 'troid_api.recyclingrecord', 'troid_api.segregationrecord'],
-     'needs': ['fleet']},
 ]
 FEATURE_KEYS = [f['key'] for f in FEATURES]
+# Parts older backups may list that are no longer backed up; a restore skips them.
+RETIRED_FEATURES = {'waste_records'}
 # How each table's records are called on the Backup & Restore page.
 RECORD_NAMES = {
     'troid_api.user': 'accounts', 'troid_api.boat': 'robots', 'troid_api.operator': 'operators',
@@ -74,8 +76,6 @@ RECORD_NAMES = {
     'troid_api.photo': 'photos', 'troid_api.statushistory': 'status updates',
     'troid_api.deploymentschedule': 'schedule entries', 'troid_api.detectionevent': 'detections',
     'troid_api.heatmapdata': 'heatmap points', 'troid_api.notification': 'notifications',
-    'troid_api.landfillrecord': 'landfill records', 'troid_api.recyclingrecord': 'recycling records',
-    'troid_api.segregationrecord': 'segregation records',
 }
 
 
@@ -184,6 +184,8 @@ def read_backup(payload):
         features = list(FEATURE_KEYS)  # a version 1 backup holds the whole database
     else:
         features = payload.get('features')
+        if isinstance(features, list):
+            features = [key for key in features if key not in RETIRED_FEATURES]
         if not isinstance(features, list) or not features:
             raise BackupError('The backup file is damaged: it does not say what it holds.')
         try:

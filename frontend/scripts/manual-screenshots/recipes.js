@@ -480,16 +480,11 @@ export const RECIPES = {
           await settle(p, 1500);
         },
       },
-      choose: {
-        run: async (p) => { await startBackupFlow(p); await button(p, 'Proceed').click(); await settle(p); },
-      },
       overview: {
         run: async (p) => {
           await startBackupFlow(p);
           await button(p, 'Proceed').click();
           await settle(p);
-          await p.getByRole('button', { name: 'Review', exact: true }).last().click();
-          await settle(p, 300);
         },
         outline: (p) => button(p, 'Create backup'),
       },

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   AlertTriangle, CheckCircle2, DatabaseBackup, Download, FileJson, Loader2, PauseCircle, RotateCcw, Upload, X,
@@ -6,9 +6,8 @@ import {
 import api from "../../services/api";
 import { UNAUTHORIZED_EVENT } from "../../services/session";
 import { formatFileSize } from "../../constants/requests";
-import FeatureChecklist from "../../components/FeatureChecklist";
 import { setPauseRunningHere } from "../../hooks/useSystemPause";
-import { countsInFile, featuresInFile, withNeeds } from "../../utils/backupFeatures";
+import { featuresInFile, withNeeds } from "../../utils/backupFeatures";
 
 const CONFIRM_WORD = "RESTORE";
 const HEARTBEAT_MS = 15000;
@@ -80,7 +79,7 @@ const partsText = (feature, counts = null) => feature.parts
   .join(" · ");
 
 export default function BackupRestore() {
-  // flow: null, "backup" or "restore"; step: "confirm", "choose", "overview" or "done".
+  // flow: null, "backup" or "restore"; step: "confirm", "overview" or "done".
   const [flow, setFlow] = useState(null);
   const [step, setStep] = useState(null);
   const [holding, setHolding] = useState(false); // this tab has the system paused
@@ -88,7 +87,8 @@ export default function BackupRestore() {
   const [error, setError] = useState("");
   const [features, setFeatures] = useState([]);
   const [notIncluded, setNotIncluded] = useState([]);
-  const [explicit, setExplicit] = useState(new Set());
+  // Everything is backed up; a restore puts back every part in the file (and what those need).
+  const [chosen, setChosen] = useState([]);
   const [made, setMade] = useState(null); // the backup just made: { data, url, fileName, size }
   const [file, setFile] = useState(null); // the backup file chosen to restore
   const [fileError, setFileError] = useState("");
@@ -96,10 +96,7 @@ export default function BackupRestore() {
   const [confirmText, setConfirmText] = useState("");
   const [restored, setRestored] = useState(null);
 
-  const chosen = useMemo(() => withNeeds([...explicit], features), [explicit, features]);
   const chosenFeatures = features.filter((f) => chosen.includes(f.key));
-  const fileFeatures = useMemo(() => (file && features.length ? new Set(featuresInFile(file.backup, features)) : null), [file, features]);
-  const fileCounts = useMemo(() => (file && features.length ? countsInFile(file.backup, features) : {}), [file, features]);
 
   // While this tab holds the pause: keep it alive, keep this tab clear of the "paused" screen,
   // warn before leaving, and resume the system if the page goes away mid-way.
@@ -158,44 +155,38 @@ export default function BackupRestore() {
     setError("");
   };
 
-  // Step 1 → 2: pause the system, then list the features to choose from.
+  // Step 1 → 2: pause the system, then show the overview (for a restore, what it would change).
   const proceed = async () => {
     setBusy(true);
     setError("");
+    let paused = false;
     try {
       await api.startPause(flow);
+      paused = true;
       setHolding(true);
       const list = await api.backupFeatures();
-      setFeatures(list.features || []);
+      const all = list.features || [];
+      setFeatures(all);
       setNotIncluded(list.not_included || []);
-      const keys = (list.features || []).map((f) => f.key);
-      const inFile = flow === "restore" ? new Set(featuresInFile(file.backup, list.features || [])) : null;
-      setExplicit(new Set(inFile ? keys.filter((k) => inFile.has(k)) : keys));
-      setStep("choose");
+      const keys = flow === "restore" ? withNeeds(featuresInFile(file.backup, all), all) : all.map((f) => f.key);
+      setChosen(keys);
+      if (flow === "restore") {
+        setPreview(await api.previewRestore(file.text, keys));
+        setConfirmText("");
+      }
+      setStep("overview");
     } catch (err) {
-      setError(err.message || "The system couldn't be paused. Try again.");
+      if (paused) {
+        // Nothing to confirm (e.g. the file can't be restored): resume the system straight away.
+        await api.endPause().catch(() => {});
+        setHolding(false);
+        setError(err.message || "The backup couldn't be checked. The system has resumed.");
+      } else {
+        setError(err.message || "The system couldn't be paused. Try again.");
+      }
     } finally {
       setBusy(false);
     }
-  };
-
-  // Step 2 → 3: the overview (for a restore, what it would change).
-  const review = async () => {
-    setError("");
-    if (flow === "restore") {
-      setBusy(true);
-      try {
-        setPreview(await api.previewRestore(file.text, chosen));
-        setConfirmText("");
-        setStep("overview");
-      } catch (err) {
-        setError(err.message || "The backup couldn't be checked.");
-      } finally {
-        setBusy(false);
-      }
-      return;
-    }
-    setStep("overview");
   };
 
   const createBackup = async () => {
@@ -260,10 +251,9 @@ export default function BackupRestore() {
   const restoreChanges = preview ? Object.values(preview.changes || {}) : [];
   const restoredTables = restoreChanges.filter((c) => c.restored);
   const alsoRemoved = restoreChanges.filter((c) => !c.restored && c.removed);
-  const leftOut = features.filter((f) => !chosen.includes(f.key));
+  const leftOut = features.filter((f) => !chosen.includes(f.key)); // a restore: parts not in the file
   const totalRecords = chosenFeatures.reduce((sum, f) => sum + f.records, 0);
   const restoring = flow === "restore";
-  const word = restoring ? "restore" : "back up";
 
   return (
     <div className="max-w-350 mx-auto grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
@@ -275,8 +265,8 @@ export default function BackupRestore() {
           <h2 className="text-[17px] font-bold text-slate-900">Back up</h2>
         </div>
         <p className="text-sm text-slate-600 mb-3">
-          Saves the parts of the system you choose (accounts, robots and operators, collection areas, requests,
-          schedules, detections, notifications, disposal records) as one file.
+          Saves everything in the system (accounts, robots and operators, collection areas, requests, schedules,
+          detections and notifications) as one file.
         </p>
         <ul className="text-xs text-slate-500 space-y-1 mb-5 list-disc pl-4">
           <li>The system is paused for everyone else until you finish or cancel.</li>
@@ -305,8 +295,8 @@ export default function BackupRestore() {
         </div>
         <div className="mb-4">
           <Notice>
-            Restoring puts the parts you choose back as they were in the backup: anything added to them since is removed.
-            Other parts and the audit log are left as they are. Make a backup of the current data first.
+            Restoring puts everything in the backup back as it was: anything added since is removed. The audit log is
+            left as it is. Make a backup of the current data first.
           </Notice>
         </div>
 
@@ -354,7 +344,7 @@ export default function BackupRestore() {
         <Modal
           icon={PauseCircle}
           tone={restoring ? "red" : "blue"}
-          step="Step 1 of 3"
+          step="Step 1 of 2"
           title={restoring ? "Restore from this backup?" : "Back up the current data?"}
           onClose={busy ? undefined : cancel}
           footer={(
@@ -377,55 +367,21 @@ export default function BackupRestore() {
               Companion app, and the robots' reports wait, until you finish or cancel. It is noted in the audit log.
             </Notice>
           </div>
-          <p className="mt-3 text-xs text-slate-500">Next you choose which parts of the system to {word}.</p>
+          <p className="mt-3 text-xs text-slate-500">Next you see an overview of what is {restoring ? "restored" : "backed up"} before confirming.</p>
           <ErrorNote message={error} />
         </Modal>
       )}
 
-      {/* Step 2: choose the features */}
-      {flow && step === "choose" && (
-        <Modal
-          icon={restoring ? RotateCcw : DatabaseBackup}
-          tone={restoring ? "red" : "blue"}
-          step={`Step 2 of 3 · System paused`}
-          title={restoring ? "Choose what to restore" : "Choose what to back up"}
-          wide
-          footer={(
-            <>
-              <button type="button" onClick={cancel} disabled={busy} className={SECONDARY}>Cancel {word}</button>
-              <button type="button" onClick={review} disabled={busy || chosen.length === 0} className={`${BUTTON} bg-[#1b4de4] text-white hover:bg-[#153eb8]`}>
-                {busy && <Loader2 size={16} className="animate-spin" />} Review
-              </button>
-            </>
-          )}
-        >
-          <FeatureChecklist
-            features={features}
-            explicit={explicit}
-            onChange={setExplicit}
-            available={restoring ? fileFeatures : null}
-            detail={(f) => (restoring
-              ? `In the backup: ${plural(fileCounts[f.key] || 0, "record")} · now: ${plural(f.records, "record")}`
-              : partsText(f))}
-          />
-          <p className="mt-3 text-xs text-slate-500">
-            Never included: {notIncluded.join(", ").toLowerCase() || "audit log"}.
-          </p>
-          <ErrorNote message={error} />
-        </Modal>
-      )}
-
-      {/* Step 3: overview to confirm */}
+      {/* Step 2: overview to confirm */}
       {flow === "backup" && step === "overview" && (
         <Modal
           icon={DatabaseBackup}
-          step="Step 3 of 3 · System paused"
+          step="Step 2 of 2 · System paused"
           title="Confirm the backup"
           wide
           footer={(
             <>
               <button type="button" onClick={cancel} disabled={busy} className={SECONDARY}>Cancel backup</button>
-              <button type="button" onClick={() => setStep("choose")} disabled={busy} className={SECONDARY}>Back</button>
               <button type="button" onClick={createBackup} disabled={busy} className={`${BUTTON} bg-[#1b4de4] text-white hover:bg-[#153eb8]`}>
                 {busy ? <Loader2 size={16} className="animate-spin" /> : <DatabaseBackup size={16} />} Create backup
               </button>
@@ -446,7 +402,7 @@ export default function BackupRestore() {
           </ul>
           <p className="mt-3">
             <span className="font-semibold text-slate-800">Not included: </span>
-            {[...notIncluded, ...leftOut.map((f) => f.label)].join(", ")}.
+            {notIncluded.join(", ") || "the audit log"}.
           </p>
           {(chosen.includes("accounts") || chosen.includes("fleet")) && (
             <div className="mt-3"><Notice>Keep the file private: it holds password hashes and the robots' device keys.</Notice></div>
@@ -460,13 +416,12 @@ export default function BackupRestore() {
         <Modal
           icon={RotateCcw}
           tone="red"
-          step="Step 3 of 3 · System paused"
+          step="Step 2 of 2 · System paused"
           title="Confirm the restore"
           wide
           footer={(
             <>
               <button type="button" onClick={cancel} disabled={busy} className={SECONDARY}>Cancel restore</button>
-              <button type="button" onClick={() => setStep("choose")} disabled={busy} className={SECONDARY}>Back</button>
               <button type="button" onClick={restore} disabled={busy || confirmText !== CONFIRM_WORD} className={`${BUTTON} bg-red-600 text-white hover:bg-red-700`}>
                 {busy ? <Loader2 size={16} className="animate-spin" /> : <RotateCcw size={16} />} Restore
               </button>
