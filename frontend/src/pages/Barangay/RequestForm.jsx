@@ -399,7 +399,7 @@ function RequestForm({ currentUser, forCenro = false }) {
         email: currentUser?.email || `${barangayName.toLowerCase().replace(/\s+/g, '')}@barangay.gov.ph`,
         cleanup_type: formData.cleanupType,
         location_name: formData.location.trim(),
-        collection_area: isTroid ? formData.collectionAreaId : null,
+        collection_area: formData.collectionAreaId || null,
         barangay: requestBarangay,
         municipality: "",
         province: "",
@@ -509,9 +509,12 @@ function RequestForm({ currentUser, forCenro = false }) {
               </div>
             )}
 
-            {isTroid && (
+            {/* Required for a TROID-supported cleanup; optional for a manual one, whose trash then
+                counts toward the area's priority and hotspots. */}
             <div>
-              <label className="block text-xs font-semibold text-slate-500 mb-1.5">Collection Area</label>
+              <label className="block text-xs font-semibold text-slate-500 mb-1.5">
+                {isTroid ? "Collection Area" : "Collection Area (Optional)"}
+              </label>
               <div className="relative">
                 <Layers size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
                 <select
@@ -520,7 +523,7 @@ function RequestForm({ currentUser, forCenro = false }) {
                   onChange={handleChange}
                   disabled={forCenro && !formData.barangay}
                   className="w-full appearance-none rounded-lg border border-slate-200 bg-white py-2.5 pl-9 pr-9 text-sm text-slate-700 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30 disabled:bg-slate-50 disabled:text-slate-400"
-                  required
+                  required={isTroid}
                 >
                   <option value="">
                     {collectionAreasLoading
@@ -529,7 +532,11 @@ function RequestForm({ currentUser, forCenro = false }) {
                         ? "No approved areas yet"
                         : forCenro && !formData.barangay
                           ? "Select a barangay first"
-                          : "Select a collection area"}
+                          : isTroid
+                            ? "Select a collection area"
+                            : areaOptions.length === 0
+                              ? "No approved areas in this barangay"
+                              : "Not in a collection area"}
                   </option>
                   {areaOptions.map((a) => (
                     <option key={a.id} value={a.id}>{a.name}</option>
@@ -537,7 +544,12 @@ function RequestForm({ currentUser, forCenro = false }) {
                 </select>
                 <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
               </div>
-              {!collectionAreasLoading && collectionAreas.length === 0 && (
+              {!isTroid && (
+                <p className="text-[11px] text-slate-400 mt-1.5">
+                  If the cleanup is in a collection area, choose it so its trash counts toward that area&apos;s priority and hotspots.
+                </p>
+              )}
+              {isTroid && !collectionAreasLoading && collectionAreas.length === 0 && (
                 <p className="text-[11px] text-amber-600 mt-1.5">
                   {forCenro ? "There are no approved collection areas yet." : "You don't have any approved collection areas yet."}{" "}
                   <button type="button" onClick={() => navigate(areasPath)} className="underline font-medium">
@@ -546,7 +558,6 @@ function RequestForm({ currentUser, forCenro = false }) {
                 </p>
               )}
             </div>
-            )}
 
             <div>
               <label htmlFor="request-location" className="block text-xs font-semibold text-slate-500 mb-1.5">
@@ -715,19 +726,15 @@ function RequestForm({ currentUser, forCenro = false }) {
               </li>
               <li className="flex gap-3">
                 <span className="w-5 h-5 rounded-full bg-[#1b4de4] text-white text-xs font-bold flex items-center justify-center shrink-0">3</span>
-                <span className="text-slate-600">CENRO schedules deployment and assigns TROID bots and operators</span>
+                <span className="text-slate-600">CENRO approves the request and schedules the cleanup, with a TROID bot and operator for a TROID-supported one</span>
               </li>
               <li className="flex gap-3">
                 <span className="w-5 h-5 rounded-full bg-[#1b4de4] text-white text-xs font-bold flex items-center justify-center shrink-0">4</span>
-                <span className="text-slate-600">TROID bots collect trash from your area and gather data</span>
+                <span className="text-slate-600">The cleanup is done; a TROID bot counts the trash it collects</span>
               </li>
               <li className="flex gap-3">
                 <span className="w-5 h-5 rounded-full bg-emerald-500 text-white text-xs font-bold flex items-center justify-center shrink-0">5</span>
-                <span className="text-slate-600">Barangay performs segregation by bag, weight, and trash type</span>
-              </li>
-              <li className="flex gap-3">
-                <span className="w-5 h-5 rounded-full bg-emerald-500 text-white text-xs font-bold flex items-center justify-center shrink-0">6</span>
-                <span className="text-slate-600">Non-usable waste goes to landfill; recyclables go to recycling center</span>
+                <span className="text-slate-600">The trash collection report is filed and the request is Completed; it counts toward its collection area&apos;s priority and hotspots</span>
               </li>
             </ol>
           </div>

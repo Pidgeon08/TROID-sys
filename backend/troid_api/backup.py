@@ -238,6 +238,11 @@ def _apply(models, records):
             gone = sorted(before[label] - keep.get(label, set()))
             for start in range(0, len(gone), 500):
                 model._base_manager.filter(pk__in=gone[start:start + 500]).delete()
+        retired = set(apps.get_model('troid_api', 'Request').RETIRED_STATUSES)
+        for record in records:
+            fields = record.get('fields') or {}
+            if record.get('model') == 'troid_api.request' and fields.get('status') in retired:
+                fields['status'] = 'completed'
         with connection.constraint_checks_disabled():
             for obj in serializers.deserialize('python', records):
                 obj.save()

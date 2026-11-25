@@ -261,16 +261,20 @@ class RequestCleanupTypeTests(TestCase):
         self.assertEqual(response.json()['cleanup_type'], 'troid_supported')
         self.assertEqual(response.json()['collection_area'], self.area.id)
 
-    def test_an_unsupported_cleanup_only_asks_for_its_location(self):
+    def test_an_unsupported_cleanup_asks_for_its_location_and_may_name_its_area(self):
         response = self.submit(cleanup_type='unsupported', location_name='   ')
         self.assertEqual(response.status_code, 400)
         self.assertIn('location_name', response.json())
 
-        response = self.submit(cleanup_type='unsupported', location_name=' Beside the bridge ', collection_area=self.area.id)
-
+        response = self.submit(cleanup_type='unsupported', location_name=' Beside the bridge ')
         self.assertEqual(response.status_code, 201)
         req = Request.objects.get()
         self.assertEqual((req.cleanup_type, req.location_name, req.collection_area), ('unsupported', 'Beside the bridge', None))
+
+        # The area it is in, so its trash counts toward that area's priority.
+        response = self.submit(cleanup_type='unsupported', location_name='Under the bridge', collection_area=self.area.id)
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(Request.objects.get(location_name='Under the bridge').collection_area, self.area)
 
     def test_status_changes_are_not_held_to_the_rule(self):
         req = Request.objects.create(status='pending_admin_approval', barangay='Poro')
@@ -655,8 +659,8 @@ class CollectionAreaEditTests(TestCase):
 
     def test_the_number_of_cleanups_sent_to_an_area_is_listed(self):
         Request.objects.create(collection_area=self.area, status='approved')
-        Request.objects.create(collection_area=self.area, status='verified')
-        Request.objects.create(collection_area=self.area, status='verified', archived=True)
+        Request.objects.create(collection_area=self.area, status='completed')
+        Request.objects.create(collection_area=self.area, status='completed', archived=True)
 
         areas = self.client.get('/api/collection-areas/', **session_header(self.admin)).json()
 
@@ -665,7 +669,7 @@ class CollectionAreaEditTests(TestCase):
     def test_the_requests_sent_to_an_area_can_be_listed(self):
         other = CollectionArea.objects.create(name='Other', barangay='Catbangen', points=around(*IN_CATBANGEN))
         here = Request.objects.create(collection_area=self.area, status='approved')
-        Request.objects.create(collection_area=self.area, status='verified', archived=True)
+        Request.objects.create(collection_area=self.area, status='completed', archived=True)
         Request.objects.create(collection_area=other, status='approved')
         Request.objects.create(cleanup_type='unsupported', location_name='Market', status='approved')
 
@@ -879,6 +883,17 @@ class BackupRestoreTests(TestCase):
         self.assertEqual(self.actions()[-3:], ['Restore started', 'Restore completed', 'Restore finished'])
         self.assertFalse(SystemPause.objects.exists())
         self.assertEqual(self.client.get('/api/requests/', **session_header(self.admin)).status_code, 200)
+
+    def test_retired_statuses_restore_as_completed(self):
+        data = self.download()
+        for record in data['records']:
+            if record['model'] == 'troid_api.request':
+                record['fields']['status'] = 'verified'
+
+        response = self.restore(data)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(Request.objects.get().status, 'completed')
 
     def test_restoring_one_feature_leaves_the_others_alone(self):
         data = self.download(['collection_areas', 'schedules'])
@@ -3005,6 +3020,16 @@ class PriorityAreaTests(TestCase):
         self.assertEqual(poro['current'], {'cleanups': 2, 'bags': 21, 'average': 10.5})
         self.assertEqual(poro['previous'], {'cleanups': 2, 'bags': 16, 'average': 8.0})
         self.assertEqual(poro['change_pct'], 31.2)
+
+    def test_unsupported_cleanups_in_an_area_count_too(self):
+        self.cleanup(self.poro, 8, 40)
+        self.cleanup(self.poro, 15, 5, cleanup_type='unsupported', location_name='Beside the pier')
+
+        poro = self.areas()['Poro Shore']
+
+        self.assertTrue(poro['is_priority'])
+        self.assertEqual(poro['current'], {'cleanups': 1, 'bags': 15, 'average': 15.0})
+        self.assertIn(self.poro.id, [h['collection_area']['id'] for h in priority.hotspot_history(months=1)[-1]['hotspots']])
 
     def test_fewer_or_the_same_bags_per_cleanup_is_fine(self):
         self.cleanup(self.poro, 10, 40)

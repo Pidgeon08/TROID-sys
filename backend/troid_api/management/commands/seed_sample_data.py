@@ -219,7 +219,7 @@ class Command(BaseCommand):
         self.merge(created, 'merge-done-main', ['merge-done-a'])
         notes = self.make_notifications(created)
 
-        finished = sum(1 for s in specs if s['status'] in ('completed', 'segregated', 'verified'))
+        finished = sum(1 for s in specs if s['status'] == 'completed')
         upcoming = DeploymentSchedule.objects.filter(
             request_id__in=[r.request_id for r in created.values()], day__gt=self.today.isoformat(),
         ).count()
@@ -323,12 +323,8 @@ class Command(BaseCommand):
                 day = self.today - timedelta(days=back)
                 info = self.pick_barangay(recency)
                 troid = rng.random() < 0.8
-                if back > 14:
-                    status = rng.choices(['verified', 'segregated', 'completed'], weights=[75, 15, 10])[0]
-                else:
-                    status = rng.choices(['verified', 'segregated', 'completed'], weights=[20, 30, 50])[0]
                 specs.append({
-                    'key': f'done-{len(specs)}', 'status': status, 'barangay': info, 'troid': troid,
+                    'key': f'done-{len(specs)}', 'status': 'completed', 'barangay': info, 'troid': troid,
                     'drive_day': day, 'submitted': manila(day, 9) - timedelta(days=rng.randint(6, 18), hours=rng.randint(0, 8)),
                 })
         # A finished cleanup another request was merged into, to show a merged request's results.
@@ -436,7 +432,7 @@ class Command(BaseCommand):
                 'Monthly cleanup requested by the barangay council.',
                 'Clogged section is causing flooding in the nearby purok.',
             ]),
-            collection_area=self.areas[barangay] if troid else None,
+            collection_area=self.areas[barangay] if troid or rng.random() < 0.7 else None,
             archived=spec.get('archived', False),
             decline_reason=spec.get('reason', ''),
             parked_from_status=spec.get('parked_from', ''),
@@ -467,10 +463,10 @@ class Command(BaseCommand):
         approved_city = submitted + timedelta(days=rng.uniform(0.5, 3))
         approved_cenro = approved_city + timedelta(days=rng.uniform(0.3, 2))
 
-        if status in ('pending_admin_approval', 'approved', 'ongoing', 'completed', 'segregated', 'verified') or \
+        if status in ('pending_admin_approval', 'approved', 'ongoing', 'completed') or \
                 spec.get('parked_from') == 'pending_admin_approval':
             step('Approved by City Admin', approved_city, city, 'City Admin')
-        if status in ('approved', 'ongoing', 'completed', 'segregated', 'verified'):
+        if status in ('approved', 'ongoing', 'completed'):
             step('Approved by Admin', approved_cenro, cenro, 'Admin')
         if status == 'parked':
             step('Parked', approved_city + timedelta(days=2), cenro, 'Admin', spec['reason'])
@@ -530,11 +526,6 @@ class Command(BaseCommand):
                      rng.choice(['', 'Mostly plastic bottles and wrappers.', 'Heavy load near the outfall.']))
                 if troid:
                     self.detections(req, boat, report['items'], start, finished)
-                if status == 'verified':
-                    verified_at = finished + timedelta(days=rng.uniform(1, 4))
-                    req.verified_categories = {c: max(0, n + rng.randint(-2, 2)) for c, n in report['categories'].items()}
-                    fields['verified_at'] = verified_at
-                    step('Detection Verified by CENRO', verified_at, cenro, 'Admin')
             req.save()
 
         for i, (label, when, actor, role, details) in enumerate(history):
@@ -585,7 +576,7 @@ class Command(BaseCommand):
             if req.status in ('approved', 'ongoing'):
                 note(user, when, 'approved', 'Your cleanup request has been approved',
                      f'Your request {req.request_id} has been approved by CENRO.', req)
-            elif req.status in ('completed', 'segregated', 'verified'):
+            elif req.status == 'completed':
                 note(user, when, 'report_filed', 'Your cleanup request has been completed',
                      f'CENRO has filed the trash collection report for request {req.request_id}.', req)
             else:

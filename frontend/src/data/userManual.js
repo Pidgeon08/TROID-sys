@@ -70,7 +70,7 @@ export const USER_MANUALS = {
       description: 'Review barangay cleanup requests, send your own, and file trash reports.',
       keywords: ['cleanup request', 'approve', 'verify', 'trash report', 'data card', 'coastal cleanup', 'entangled animals', 'pending', 'send request', 'merge', 'unmerge', 'change area', 'redirect', 'letter preview'],
       steps: [
-        { text: 'Click "Send Request" to request a cleanup yourself. It is the same form barangays use: choose TROID Supported (pick the barangay and one of its approved collection areas) or Unsupported (pick the barangay and type the location), pick a date from the bot timetable (at least 7 days ahead) and a time, and attach the letter of request.', shot: 'send-request' },
+        { text: 'Click "Send Request" to request a cleanup yourself. It is the same form barangays use: choose TROID Supported (pick the barangay and one of its approved collection areas) or Unsupported (pick the barangay, type the location and, if it is in one, choose its collection area so its trash counts toward that area\'s priority and hotspots), pick a date from the bot timetable (at least 7 days ahead) and a time, and attach the letter of request.', shot: 'send-request' },
         { text: 'Use the filter bar above the list: search by ID, requester, barangay or area; pick one or more statuses (each shows how many requests it has); filter by date submitted or preferred cleanup date (Today, Last/Next 7 or 30 days, This month, or a custom range); and narrow by cleanup type, barangay, collection area, requester, or whether an approved request is scheduled yet. Sort by submitted or preferred date. Remove a filter by clicking its chip, or click Clear all. Filters stay when you open a request and come back. Under the list, choose how many requests a page shows (Show … per page).', shot: 'filters' },
         { text: 'The letter of request is shown on the request page exactly as it was sent, and can be downloaded. PDF and Word (.docx) letters can be read there; older .doc files must be downloaded. Older requests sent without a file show what was typed instead, under "Notes from the request".', shot: 'letter' },
         { text: 'On a request page, click the collection area\'s name under Location of Concern to see where it is on a map without leaving the page. Close the map with Close, Esc, or by clicking outside it; "Open in Collection Areas" goes to that area\'s page.', shot: 'area-preview' },
@@ -301,7 +301,7 @@ export const USER_MANUALS = {
       title: 'Requests',
       path: '/barangay/requests',
       description: 'Submit cleanup requests and track every one, from approval through completion.',
-      keywords: ['status', 'track', 'pending', 'completed', 'verified'],
+      keywords: ['status', 'track', 'pending', 'completed'],
       steps: [
         { text: 'Open Requests in the sidebar. Click "Submit Request" at the top of the page to file a new one (see Submit Request); the bell beside it holds your notifications.', shot: 'submit-button' },
         { text: 'Use the filter bar to search your requests, pick one or more statuses, filter by date submitted or preferred cleanup date, and narrow by cleanup type or collection area. Sort by submitted or preferred date, and remove a filter by clicking its chip. Under the list, choose how many requests a page shows (Show … per page).', shot: 'filters' },
@@ -320,7 +320,7 @@ export const USER_MANUALS = {
       keywords: ['new request', 'submit', 'send request', 'cleanup'],
       steps: [
         'Open Requests in the sidebar and click "Submit Request" at the top of the page.',
-        { text: 'Choose the Cleanup Type. TROID Supported sends a TROID bot to one of your approved collection areas (the landmark is optional). Unsupported is a manual cleanup with no bot: type its location instead.', shot: 'cleanup-type' },
+        { text: 'Choose the Cleanup Type. TROID Supported sends a TROID bot to one of your approved collection areas (the landmark is optional). Unsupported is a manual cleanup with no bot: type its location instead. If it is in one of your collection areas, choose it too (optional), so the trash it collects counts toward that area\'s priority and hotspots.', shot: 'cleanup-type' },
         { text: 'Pick a preferred date from the bot timetable and a time, and attach the letter of request.', shot: 'timetable' },
         { text: 'In the Review Request Overview, click "Preview" beside the letter to check it is the right file (PDF and .docx only).', shot: 'preview' },
         { text: 'Submit it; it first goes to the City Admin for approval, then to CENRO for scheduling.', shot: 'submit' },

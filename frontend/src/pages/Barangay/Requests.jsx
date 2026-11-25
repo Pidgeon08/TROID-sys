@@ -95,7 +95,7 @@ export default function BarangayRequests({ currentUser }) {
         <SummaryCard icon={FileText} label="Total Requests" value={requests.length} sub="All submitted" />
         <SummaryCard icon={Clock} label="Pending" value={requests.filter((r) => r.status === "Pending City Admin Approval" || r.status === "Pending").length} sub="Awaiting approval" />
         <SummaryCard icon={CheckCircle2} label="Approved" value={requests.filter((r) => r.status === "Approved" || r.status === "Pending Admin Approval").length} sub="Ready for deployment" />
-        <SummaryCard icon={Recycle} label="Completed" value={requests.filter((r) => r.status === "Completed" || r.status === "Segregated").length} sub="Including segregation" />
+        <SummaryCard icon={Recycle} label="Completed" value={requests.filter((r) => r.status === "Completed").length} sub="Trash report filed" />
       </div>
 
       <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)]">

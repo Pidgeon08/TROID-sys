@@ -27,9 +27,7 @@ BARANGAY_CENTERS = {
 # Weighted so most demo requests land in the statuses Reports.jsx actually counts
 # (anything with a filed trash report), with a handful still in-flight for variety.
 STATUS_WEIGHTS = [
-    ('verified', 55),
-    ('completed', 15),
-    ('segregated', 10),
+    ('completed', 80),
     ('approved', 12),
     ('pending_mayor_approval', 8),
 ]
@@ -94,7 +92,7 @@ class Command(BaseCommand):
         operators = list(Operator.objects.all())
         now = timezone.now()
 
-        # One approved collection area per barangay, so completed/verified demo requests have
+        # One approved collection area per barangay, so completed demo requests have
         # a real polygon to carry — this is what HeatmapView draws on the post-cleanup map.
         areas_by_barangay = {}
         for barangay, (lat, lng) in BARANGAY_CENTERS.items():
@@ -129,20 +127,13 @@ class Command(BaseCommand):
         for _ in range(count):
             barangay = random.choice(list(BARANGAY_CENTERS.keys()))
             status = weighted_status()
-            has_report = status in ('verified', 'completed', 'segregated')
+            has_report = status == 'completed'
 
             trash_categories = random_trash_categories() if has_report else {}
             bags = sum(trash_categories.values()) if trash_categories else None
             weight_kg = round(bags * random.uniform(3.0, 6.5), 1) if bags else None
             non_usable_kg = round(weight_kg * random.uniform(0.3, 0.5), 1) if weight_kg else None
             recyclable_kg = round(weight_kg - non_usable_kg, 1) if weight_kg and non_usable_kg else None
-
-            verified_categories = {}
-            if status == 'verified':
-                verified_categories = {
-                    cat: max(0, count_ + random.randint(-2, 2))
-                    for cat, count_ in trash_categories.items()
-                }
 
             bot = random.choice(boats) if boats and has_report else None
             lat, lng = BARANGAY_CENTERS[barangay]
@@ -167,7 +158,6 @@ class Command(BaseCommand):
                 non_usable_kg=non_usable_kg,
                 recyclable_kg=recyclable_kg,
                 trash_categories=trash_categories,
-                verified_categories=verified_categories,
             )
 
             # A bot that worked this request should be sitting somewhere near its collection
@@ -189,8 +179,6 @@ class Command(BaseCommand):
             update_fields = {'date_submitted': submitted_at}
             if has_report:
                 update_fields['session_completed_at'] = submitted_at + timedelta(hours=random.randint(1, 4))
-            if status == 'verified':
-                update_fields['verified_at'] = update_fields['session_completed_at'] + timedelta(hours=random.randint(1, 24))
 
             Request.objects.filter(pk=req.pk).update(**update_fields)
             created.append(req.request_id)

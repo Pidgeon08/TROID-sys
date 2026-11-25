@@ -504,9 +504,8 @@ const Reports = () => {
     const RED = [220, 38, 38];
 
     const statusColors = {
-      Approved: GREEN, Verified: SLATE_500, Completed: GREEN,
-      Segregated: [147, 51, 234], Declined: RED, Parked: [147, 51, 234],
-      Ongoing: [2, 132, 199], Processing: [2, 132, 199], 'Pending Verification': [234, 88, 12],
+      Approved: GREEN, Completed: GREEN, Declined: RED, Parked: [147, 51, 234],
+      Ongoing: [2, 132, 199], Processing: [2, 132, 199],
       'Pending City Admin Approval': [217, 119, 6], 'Pending Admin Approval': [37, 99, 235],
       Pending: [217, 119, 6],
     };

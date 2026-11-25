@@ -240,8 +240,9 @@ class RequestSerializer(serializers.ModelSerializer):
         }
 
     def validate(self, attrs):
-        # TROID-supported cleanups are sent to a collection area; unsupported (manual) ones only
-        # give their location. Checked on new requests and whenever either choice changes.
+        # TROID-supported cleanups are sent to a collection area; unsupported (manual) ones give
+        # their location, and may name the area they are in (it then counts toward its priority).
+        # Checked on new requests and whenever either choice changes.
         if self.instance is not None and not {'cleanup_type', 'collection_area', 'location_name'} & attrs.keys():
             return attrs
         current = self.instance
@@ -253,7 +254,6 @@ class RequestSerializer(serializers.ModelSerializer):
         if cleanup_type == 'unsupported':
             if not location:
                 raise serializers.ValidationError({'location_name': 'Enter where the cleanup will take place.'})
-            attrs['collection_area'] = None
         elif area is None:
             raise serializers.ValidationError(
                 {'collection_area': 'Choose a collection area. TROID-supported cleanups are sent to one.'}

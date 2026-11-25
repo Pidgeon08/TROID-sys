@@ -1542,7 +1542,7 @@ class RequestViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
         and only TROID-supported drives carry a collection area to compare coverage with.
         Barangay and NGO accounts only get their own barangay's drives."""
         reqs = Request.objects.filter(
-            archived=False, status__in=['completed', 'segregated', 'verified']
+            archived=False, status='completed'
         ).exclude(trash_categories={}).select_related('collection_area', 'bot_id').prefetch_related('detection_events')
         if getattr(request.user, 'role', None) in REQUESTERS:
             barangay = own_barangay(request.user)

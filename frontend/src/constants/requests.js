@@ -8,9 +8,6 @@ export const REQUEST_STATUS_STYLES = {
   "Pending Admin Approval": "bg-blue-50 text-blue-700",
   Processing: "bg-sky-50 text-sky-700",
   Completed: "bg-emerald-50 text-emerald-700",
-  Segregated: "bg-purple-50 text-purple-700",
-  "Pending Verification": "bg-orange-50 text-orange-700",
-  Verified: "bg-slate-100 text-slate-600",
   Merged: "bg-indigo-50 text-indigo-700",
 };
 
