@@ -42,7 +42,7 @@ from .serializers import (
 from . import backup, boundaries, maintenance
 from .authentication import INACTIVE_STATUSES, CompanionTokenAuthentication, is_app_operator
 from .permissions import ADMIN, ANY_ROLE, MAYOR, PUBLIC, REQUESTERS, STAFF, HasRole, RoleViewSetMixin, require
-from .drives import active_drive, class_totals, scheduled_request_ids, troid_counts
+from .drives import TROID_CLASSES, active_drive, class_counts, class_totals, scheduled_request_ids, troid_counts
 from .realtime import broadcast_after_commit, notifications_changed
 from . import live
 from .priority import WINDOW_DAYS, area_history, end_of_day, evaluate_priority_areas, hotspot_history
@@ -846,7 +846,9 @@ def get_heatmap_data(request):
     if collection_area:
         detections = detections.filter(request__collection_area__area_id=collection_area)
 
-    if category:
+    # A TROID class (Plastic, Metal, ...) is matched below, from each detection's labels; any other
+    # value is one of the robot's own labels.
+    if category and category not in TROID_CLASSES:
         detections = detections.filter(categories__has_key=category)
 
     if time_filter == 'today':
@@ -866,14 +868,21 @@ def get_heatmap_data(request):
                 detections = detections.filter(**{lookup: value})
 
     data = []
-    for d in detections.order_by('timestamp'):
+    # In the order they were reported (by id when two share a time), so a path joins them in sequence.
+    for d in detections.order_by('timestamp', 'id'):
+        # The robot's own labels ("Crisp packet", "Drink can") as the TROID classes they belong to.
+        classes = class_counts(d.categories)
+        if category in TROID_CLASSES and not classes.get(category):
+            continue
         weight = min(d.trash_count * 0.2, 1.0)
         data.append({
+            'id': d.id,
             'latitude': d.latitude,
             'longitude': d.longitude,
             'weight': weight,
             'trash_count': d.trash_count,
-            'categories': d.categories or {},
+            'categories': classes,
+            'labels': d.categories or {},
             'timestamp': d.timestamp,
             'boat': d.boat.name,
             'boat_id': d.boat_id,
@@ -1867,7 +1876,7 @@ class CollectionAreaViewSet(RoleViewSetMixin, viewsets.ModelViewSet):
     serializer_class = CollectionAreaSerializer
     lookup_field = 'area_id'
     action_roles = {
-        # An area's hotspot history and condition report are CENRO's (on Report Generation).
+        # An area's hotspot history and condition report are CENRO's (over the Collection Areas map).
         'history': ADMIN,
         'create': ADMIN + REQUESTERS,
         'partial_update': ADMIN + REQUESTERS,

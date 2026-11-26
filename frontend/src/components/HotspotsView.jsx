@@ -1,7 +1,7 @@
 // The Heatmap page's Hotspots view. A hotspot is a priority collection area: its bags per cleanup
 // over the last 30 days spiked above its average for the 30 days before (backend priority.py).
-// It marks this month's hotspots on the map, compares them with a month the reader picks, and
-// shows how many hotspots there were each month.
+// It marks a month's hotspots on the map (this month, or one the reader picks) and compares them
+// with the month before it; a chart floating over the map shows how many there were each month.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { MapContainer, Polygon, Polyline, TileLayer, Tooltip, ZoomControl, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
@@ -13,6 +13,7 @@ import { HeatmapLayer } from "./MapLayers";
 import { LEGEND_CLASSES } from "../constants/mapLayers";
 import { barangayBounds } from "../utils/barangayBoundaries";
 import { LIVE, useLiveVersion } from "../hooks/useLiveUpdates";
+import { AreaOutlines, ShowAreasSwitch } from "./AreaOutlines";
 
 const CENTER = [16.6195, 120.314];
 const SELECT = "rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 outline-none hover:border-slate-300 focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30";
@@ -20,6 +21,9 @@ const HOT = "#e34948";
 const GONE = "#64748b";
 const BAR = "#2a78d6";
 const BAR_MUTED = "#cde2fb";
+const BAR_NOW = "#1b4de4";
+// The months the chart and the month picker offer.
+const MONTHS_SHOWN = 12;
 
 const monthName = (month, style = "long") =>
   new Date(`${month}-01T00:00:00`).toLocaleDateString("en-US", { month: style, year: "numeric" });
@@ -33,7 +37,8 @@ function FitTo({ fitKey, bounds }) {
   useEffect(() => {
     if (!bounds?.length || fitted.current === fitKey) return;
     fitted.current = fitKey;
-    map.fitBounds(bounds, { padding: [40, 40], maxZoom: 15 });
+    // Clear of the chart floating over the bottom of the map.
+    map.fitBounds(bounds, { paddingTopLeft: [40, 40], paddingBottomRight: [60, 200], maxZoom: 15 });
   }, [map, fitKey, bounds]);
   return null;
 }
@@ -60,16 +65,23 @@ function HotspotHeat({ detections, areaIds, type }) {
   return points.length > 0 ? <HeatmapLayer points={points} type={type} /> : null;
 }
 
-function AreaShape({ hotspot, color, dashed, label }) {
+/** A hotspot's outline. `onSelect(area)`, when given, opens its monthly hotspots on a click. */
+function AreaShape({ hotspot, color, dashed, label, onSelect }) {
   const area = hotspot.collection_area;
   const points = area.points || [];
   if (points.length < (area.closed ? 3 : 2)) return null;
   const pathOptions = { color, weight: dashed ? 2 : 3, ...(dashed ? { dashArray: "6 6" } : {}) };
-  const tooltip = <Tooltip sticky>{area.name} · {label}</Tooltip>;
+  const handlers = onSelect ? { click: () => onSelect({ id: area.area_id }) } : undefined;
+  const tooltip = (
+    <Tooltip sticky>
+      {area.name} · {label}
+      {onSelect && <span className="block text-[10px] text-slate-500">Click for its monthly hotspots</span>}
+    </Tooltip>
+  );
   return area.closed ? (
-    <Polygon positions={points} pathOptions={{ ...pathOptions, fillColor: color, fillOpacity: dashed ? 0.04 : 0.12 }}>{tooltip}</Polygon>
+    <Polygon positions={points} eventHandlers={handlers} pathOptions={{ ...pathOptions, fillColor: color, fillOpacity: dashed ? 0.04 : 0.12 }}>{tooltip}</Polygon>
   ) : (
-    <Polyline positions={points} pathOptions={pathOptions}>{tooltip}</Polyline>
+    <Polyline positions={points} eventHandlers={handlers} pathOptions={pathOptions}>{tooltip}</Polyline>
   );
 }
 
@@ -110,61 +122,83 @@ function AreaList({ title, tone, items, note, showBarangay, onFocus, empty }) {
   );
 }
 
-/** Hotspots per month: one bar each, the two compared months in full colour. Click one to compare with it. */
-function HistoryChart({ months, current, compared, onPick }) {
+/**
+ * Hotspots per month, floating over the bottom of the map: one bar each, the month shown and
+ * the month before it in full colour. Click a month to see it against the month before.
+ * `legend` (the map's) sits under it.
+ */
+function HistoryChart({ months, selected, previous, onPick, legend }) {
   const [hover, setHover] = useState(null);
   const max = Math.max(1, ...months.map((m) => m.count));
-  const shown = hover || months.find((m) => m.month === compared) || current;
+  const shown = hover || selected;
   return (
-    <div>
-      <p className="mb-3 h-4 text-xs text-slate-500">
-        {shown && (
-          <>
-            <span className="font-semibold text-slate-800">{monthName(shown.month)}{shown.so_far ? " (so far)" : ""}:</span>{" "}
-            {plural(shown.count, "hotspot")}
-          </>
-        )}
-      </p>
-      <div className="flex h-32 items-end gap-1.5" role="list" aria-label="Hotspots per month">
+    <div className="absolute bottom-6 left-3 right-3 z-[400] rounded-2xl border border-slate-200 bg-white/95 px-3 py-2.5 shadow-lg backdrop-blur-sm">
+      <div className="mb-1.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+        <h2 className="flex items-center gap-1.5 text-xs font-semibold text-slate-800">
+          <History className="h-3.5 w-3.5 text-slate-400" /> Hotspots per month
+        </h2>
+        <p className="text-[11px] text-slate-500">
+          {shown && (
+            <>
+              <span className="font-semibold text-slate-800">{monthName(shown.month)}{shown.so_far ? " (so far)" : ""}:</span>{" "}
+              {plural(shown.count, "hotspot")}
+            </>
+          )}
+          <span className="text-slate-400"> · click a month to compare it with the month before</span>
+        </p>
+      </div>
+      <div className="flex h-16 items-end gap-1" role="list" aria-label="Hotspots per month">
         {months.map((m) => {
-          const highlighted = m.month === current?.month || m.month === compared;
+          const isSelected = m.month === selected?.month;
+          const isPrevious = m.month === previous?.month;
           return (
             <button
               key={m.month}
               type="button"
               role="listitem"
-              onClick={() => !m.so_far && onPick(m.month)}
+              aria-pressed={isSelected}
+              onClick={() => onPick(m.month)}
               onMouseEnter={() => setHover(m)}
               onMouseLeave={() => setHover(null)}
               onFocus={() => setHover(m)}
               onBlur={() => setHover(null)}
-              aria-label={`${monthName(m.month)}: ${plural(m.count, "hotspot")}`}
-              className={`group flex h-full min-w-0 flex-1 flex-col items-center justify-end gap-1 ${m.so_far ? "cursor-default" : "cursor-pointer"}`}
+              aria-label={`${monthName(m.month)}: ${plural(m.count, "hotspot")}${isSelected ? ", shown" : isPrevious ? ", compared" : ""}`}
+              className="group flex h-full min-w-0 flex-1 cursor-pointer flex-col items-center justify-end gap-0.5"
             >
-              <span className={`text-[10px] tabular-nums ${highlighted ? "font-semibold text-slate-700" : "text-slate-400"}`}>{m.count}</span>
+              <span className={`text-[10px] tabular-nums ${isSelected || isPrevious ? "font-semibold text-slate-700" : "text-slate-400"}`}>{m.count}</span>
               <span
                 className="w-full rounded-t-[4px] transition-opacity group-hover:opacity-80"
-                style={{ height: `${Math.max(2, (m.count / max) * 100)}%`, backgroundColor: highlighted ? BAR : BAR_MUTED }}
+                style={{ height: `${Math.max(2, (m.count / max) * 100)}%`, backgroundColor: isSelected ? BAR_NOW : isPrevious ? BAR : BAR_MUTED }}
               />
             </button>
           );
         })}
       </div>
-      <div className="mt-1 flex gap-1.5 border-t border-slate-200 pt-1">
+      <div className="mt-0.5 flex gap-1 border-t border-slate-200 pt-0.5">
         {months.map((m) => (
-          <span key={m.month} className="min-w-0 flex-1 truncate text-center text-[10px] text-slate-400">{shortMonth(m.month)}</span>
+          <span
+            key={m.month}
+            className={`min-w-0 flex-1 truncate text-center text-[10px] ${m.month === selected?.month ? "font-semibold text-[#1b4de4]" : m.month === previous?.month ? "font-semibold text-slate-600" : "text-slate-400"}`}
+          >
+            {shortMonth(m.month)}
+          </span>
         ))}
       </div>
-      <p className="mt-2 text-[11px] text-slate-400">Click a month to compare it with this month.</p>
+      {legend && <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-slate-100 pt-1.5 text-[11px] text-slate-600">{legend}</div>}
     </div>
   );
 }
 
-/** `barangay`: a barangay or NGO account's own page; CENRO sees every barangay. */
-export default function HotspotsView({ barangay }) {
+/**
+ * `barangay`: a barangay or NGO account's own page; CENRO sees every barangay. `areas` are the
+ * collection areas "Show collection areas" outlines (`showAreas`, `onShowAreas`); `onSelectArea`
+ * (CENRO) opens an area's monthly hotspots when it is clicked on the map.
+ */
+export default function HotspotsView({ barangay, areas = [], showAreas = false, onShowAreas, onSelectArea }) {
   const [history, setHistory] = useState(null);
   const [failed, setFailed] = useState(false);
-  const [comparedMonth, setComparedMonth] = useState("");
+  // The month shown (compared with the month before it); empty for this month.
+  const [pickedMonth, setPickedMonth] = useState("");
   const [focus, setFocus] = useState(null);
   // Filters: a barangay (CENRO only; a barangay account already sees just its own) and an area.
   const [barangayFilter, setBarangayFilter] = useState("");
@@ -174,7 +208,8 @@ export default function HotspotsView({ barangay }) {
   const live = useLiveVersion(LIVE.requests, LIVE.areas);
   useEffect(() => {
     let cancelled = false;
-    api.hotspots({ months: 12, barangay: barangay || undefined })
+    // One more month than shown, so the first month shown has one before it to compare with.
+    api.hotspots({ months: MONTHS_SHOWN + 1, barangay: barangay || undefined })
       .then((data) => { if (!cancelled) { setHistory(data?.months || []); setFailed(false); } })
       .catch((err) => {
         console.error("Failed to load hotspots:", err);
@@ -192,17 +227,22 @@ export default function HotspotsView({ barangay }) {
   const barangayOptions = useMemo(() => [...new Set(knownAreas.map((a) => a.barangay).filter(Boolean))].sort(), [knownAreas]);
   const areaOptions = knownAreas.filter((a) => !barangayFilter || a.barangay === barangayFilter);
   // Whether an area is a hotspot doesn't depend on any other area, so filtering keeps the counts right.
-  const months = useMemo(() => (history || []).map((m) => {
+  const allMonths = useMemo(() => (history || []).map((m) => {
     const hotspots = m.hotspots.filter((h) =>
       (!barangayFilter || h.collection_area.barangay === barangayFilter) && (!areaFilter || h.collection_area.area_id === areaFilter));
     return { ...m, hotspots, count: hotspots.length };
   }), [history, barangayFilter, areaFilter]);
+  const months = allMonths.slice(-MONTHS_SHOWN);
   const filtering = Boolean(barangayFilter || areaFilter);
   const outlined = barangay || barangayFilter;
-  const current = months[months.length - 1] || null;
-  const earlier = months.slice(0, -1);
-  // The month compared with: the reader's pick, or last month.
-  const compared = months.find((m) => m.month === comparedMonth && !m.so_far) || earlier[earlier.length - 1] || null;
+  // The month shown: the reader's pick, or this month; compared with the month before it.
+  const current = months.find((m) => m.month === pickedMonth) || months[months.length - 1] || null;
+  const index = current ? allMonths.indexOf(current) : -1;
+  const compared = index > 0 ? allMonths[index - 1] : null;
+  const pickMonth = (month) => {
+    setPickedMonth(month);
+    setFocus(null);
+  };
 
   // The heatmap of each compared month: what TROID found in the 30 days that made its hotspots.
   const [detections, setDetections] = useState({});
@@ -221,10 +261,6 @@ export default function HotspotsView({ barangay }) {
   }, [nowKey, thenKey, live]);
   const nowDetections = detections[nowKey];
   const thenDetections = detections[thenKey];
-  const nowAreaIds = (current?.hotspots || []).map((h) => h.collection_area.area_id);
-  const goneAreaIds = (compared?.hotspots || []).map((h) => h.collection_area.area_id).filter((id) => !nowAreaIds.includes(id));
-  const nowAreas = nowAreaIds.join(",");
-  const goneAreas = goneAreaIds.join(",");
 
   // New this month, a hotspot in both months, and a hotspot in the compared month only.
   const nowIds = new Set((current?.hotspots || []).map((h) => h.collection_area.area_id));
@@ -232,6 +268,8 @@ export default function HotspotsView({ barangay }) {
   const added = (current?.hotspots || []).filter((h) => !thenIds.has(h.collection_area.area_id));
   const still = (current?.hotspots || []).filter((h) => thenIds.has(h.collection_area.area_id));
   const gone = (compared?.hotspots || []).filter((h) => !nowIds.has(h.collection_area.area_id));
+  const nowAreas = [...nowIds].join(",");
+  const goneAreas = gone.map((h) => h.collection_area.area_id).join(",");
 
   const shapes = [...added, ...still, ...gone].flatMap((h) => h.collection_area.points || []);
   const bounds = focus ? focus.collection_area.points : shapes.length ? shapes : outlined ? barangayBounds(outlined) : null;
@@ -255,6 +293,7 @@ export default function HotspotsView({ barangay }) {
 
   const difference = current && compared ? current.count - compared.count : 0;
   const thenName = compared ? monthName(compared.month) : "";
+  const nowName = current ? `${monthName(current.month)}${current.so_far ? " (so far)" : ""}` : "This month";
 
   return (
     <div className="space-y-4">
@@ -295,94 +334,105 @@ export default function HotspotsView({ barangay }) {
               Clear filters
             </button>
           )}
-        <label className="flex items-center gap-2 lg:ml-auto">
-          <span className="text-xs font-semibold text-slate-500">Compare this month with</span>
-          <select
-            value={compared?.month || ""}
-            onChange={(e) => { setComparedMonth(e.target.value); setFocus(null); }}
-            className={SELECT}
-          >
-            {[...earlier].reverse().map((m) => (
-              <option key={m.month} value={m.month}>{monthName(m.month)} ({plural(m.count, "hotspot")})</option>
-            ))}
-          </select>
-        </label>
+          {onShowAreas && (
+            <ShowAreasSwitch
+              on={showAreas}
+              onChange={onShowAreas}
+              title={onSelectArea ? "Outline every collection area; click one for its monthly hotspots" : "Outline every collection area"}
+            />
+          )}
+          <label className="flex items-center gap-2 lg:ml-auto">
+            <span className="text-xs font-semibold text-slate-500">Month</span>
+            <select value={current?.month || ""} onChange={(e) => pickMonth(e.target.value)} className={SELECT}>
+              {[...months].reverse().map((m) => (
+                <option key={m.month} value={m.month}>{monthName(m.month)}{m.so_far ? " (so far)" : ""} ({plural(m.count, "hotspot")})</option>
+              ))}
+            </select>
+            <span className="text-xs text-slate-400">vs {thenName || "no earlier month"}</span>
+          </label>
         </div>
       </div>
 
       <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
-        <div className="relative h-[460px] overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 lg:h-[600px]">
+        <div className="relative h-[520px] overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 lg:h-[600px]">
           <MapContainer center={CENTER} zoom={14} zoomControl={false} style={{ height: "100%", width: "100%", position: "absolute", inset: 0 }}>
             <TileLayer url={TILE_URL} attribution={TILE_ATTRIBUTION} />
             <FitTo fitKey={fitKey} bounds={bounds} />
             {outlined && <BarangayOutline barangay={outlined} fit={false} />}
+            {/* Every other collection area, under the hotspots, when "Show collection areas" is on. */}
+            {showAreas && (
+              <AreaOutlines
+                areas={areas.filter((a) => !nowIds.has(a.id) && !thenIds.has(a.id) && (!outlined || a.barangay === outlined))}
+                onSelect={onSelectArea}
+                hint={() => (onSelectArea ? "Click for its monthly hotspots" : null)}
+              />
+            )}
             {/* The heatmap first (its usual colours this month, gray for former hotspots), with each area's outline over it. */}
             <HotspotHeat detections={thenDetections} areaIds={goneAreas} type="Past Hotspots" />
             <HotspotHeat detections={nowDetections} areaIds={nowAreas} type="Waste Density" />
-            {gone.map((h) => <AreaShape key={`gone-${h.collection_area.area_id}`} hotspot={h} color={GONE} dashed label={`hotspot in ${thenName}, not now`} />)}
-            {still.map((h) => <AreaShape key={`still-${h.collection_area.area_id}`} hotspot={h} color={HOT} label={`hotspot now and in ${thenName}`} />)}
-            {added.map((h) => <AreaShape key={`new-${h.collection_area.area_id}`} hotspot={h} color={HOT} label="new hotspot this month" />)}
-            <ZoomControl position="bottomright" />
+            {gone.map((h) => <AreaShape key={`gone-${h.collection_area.area_id}`} hotspot={h} color={GONE} dashed label={`hotspot in ${thenName}, not in ${nowName}`} onSelect={onSelectArea} />)}
+            {still.map((h) => <AreaShape key={`still-${h.collection_area.area_id}`} hotspot={h} color={HOT} label={`hotspot in ${nowName} and ${thenName}`} onSelect={onSelectArea} />)}
+            {added.map((h) => <AreaShape key={`new-${h.collection_area.area_id}`} hotspot={h} color={HOT} label={`new hotspot in ${nowName}`} onSelect={onSelectArea} />)}
+            <ZoomControl position="topright" />
           </MapContainer>
-          <div className="absolute bottom-3 left-3 z-[400] space-y-1.5 rounded-xl border border-slate-200 bg-white/95 px-3 py-2 text-xs text-slate-600 shadow-sm">
-            <p className="flex items-center gap-2">
-              <span className={`h-3 w-4 rounded-sm border-2 ${LEGEND_CLASSES["Waste Density"]}`} style={{ borderColor: HOT }} />
-              Hotspot this month
-            </p>
-            {compared && (
-              <p className="flex items-center gap-2">
-                <span className={`h-3 w-4 rounded-sm border-2 border-dashed ${LEGEND_CLASSES["Past Hotspots"]}`} style={{ borderColor: GONE }} />
-                Hotspot in {thenName} only
-              </p>
-            )}
-          </div>
           {shapes.length === 0 && (
             <div className="absolute left-1/2 top-3 z-[400] -translate-x-1/2 rounded-full border border-slate-200 bg-white/95 px-3 py-1.5 text-xs font-medium text-slate-600 shadow-sm">
-              No hotspots this month{compared ? ` or in ${thenName}` : ""}{filtering ? " for these filters" : ""}
+              No hotspots in {nowName}{compared ? ` or ${thenName}` : ""}{filtering ? " for these filters" : ""}
             </div>
           )}
-        </div>
-
-        <div className="flex flex-col gap-4">
-          <section className="rounded-2xl border border-slate-200 bg-white p-5">
-            <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold text-slate-800">
-              <Flame className="h-4 w-4 text-slate-400" /> This month vs {thenName || "earlier"}
-            </h2>
-            <dl className="grid grid-cols-2 gap-3">
-              <div className="rounded-xl bg-slate-50 px-3 py-2.5">
-                <dt className="text-[11px] font-medium text-slate-500">{current ? monthName(current.month) : "This month"} (so far)</dt>
-                <dd className="mt-0.5 text-2xl font-bold tabular-nums text-slate-900">{current?.count ?? 0}</dd>
-              </div>
-              <div className="rounded-xl bg-slate-50 px-3 py-2.5">
-                <dt className="text-[11px] font-medium text-slate-500">{thenName || "—"}</dt>
-                <dd className="mt-0.5 text-2xl font-bold tabular-nums text-slate-900">{compared?.count ?? "—"}</dd>
-              </div>
-            </dl>
-            {compared && (
-              <p className="mt-2 flex items-center gap-1.5 text-xs text-slate-600">
-                {difference > 0 ? <TrendingUp className="h-3.5 w-3.5 text-red-600" /> : difference < 0 ? <TrendingDown className="h-3.5 w-3.5 text-emerald-600" /> : null}
-                {difference === 0
-                  ? `The same number as ${thenName}.`
-                  : `${plural(Math.abs(difference), "hotspot")} ${difference > 0 ? "more" : "fewer"} than ${thenName}.`}
-              </p>
+          <HistoryChart
+            months={months}
+            selected={current}
+            previous={compared}
+            onPick={pickMonth}
+            legend={(
+              <>
+                <span className="flex items-center gap-2">
+                  <span className={`h-3 w-4 rounded-sm border-2 ${LEGEND_CLASSES["Waste Density"]}`} style={{ borderColor: HOT }} />
+                  Hotspot in {nowName}
+                </span>
+                {compared && (
+                  <span className="flex items-center gap-2">
+                    <span className={`h-3 w-4 rounded-sm border-2 border-dashed ${LEGEND_CLASSES["Past Hotspots"]}`} style={{ borderColor: GONE }} />
+                    Hotspot in {thenName} only
+                  </span>
+                )}
+              </>
             )}
-            <div className="mt-4 space-y-4 border-t border-slate-100 pt-4">
-              <AreaList title="New this month" tone={HOT} items={added} note={spikeText} showBarangay={!barangay} onFocus={focusOn}
-                empty={`No area became a hotspot since ${thenName || "last month"}.`} />
-              <AreaList title="Still a hotspot" tone={HOT} items={still} note={spikeText} showBarangay={!barangay} onFocus={focusOn}
-                empty={`None was a hotspot in ${thenName || "both months"} too.`} />
-              <AreaList title="No longer a hotspot" tone={GONE} items={gone} note={(h) => `In ${thenName}: ${spikeText(h)}`} showBarangay={!barangay}
-                onFocus={focusOn} empty={`Every hotspot of ${thenName || "that month"} still is one.`} />
-            </div>
-          </section>
-
-          <section className="rounded-2xl border border-slate-200 bg-white p-5">
-            <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-800">
-              <History className="h-4 w-4 text-slate-400" /> Hotspots per month
-            </h2>
-            <HistoryChart months={months} current={current} compared={compared?.month} onPick={(m) => { setComparedMonth(m); setFocus(null); }} />
-          </section>
+          />
         </div>
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 lg:h-[600px] lg:overflow-y-auto">
+          <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold text-slate-800">
+            <Flame className="h-4 w-4 shrink-0 text-slate-400" /> {nowName} vs {thenName || "the month before"}
+          </h2>
+          <dl className="grid grid-cols-2 gap-3">
+            <div className="rounded-xl bg-slate-50 px-3 py-2.5">
+              <dt className="text-[11px] font-medium text-slate-500">{nowName}</dt>
+              <dd className="mt-0.5 text-2xl font-bold tabular-nums text-slate-900">{current?.count ?? 0}</dd>
+            </div>
+            <div className="rounded-xl bg-slate-50 px-3 py-2.5">
+              <dt className="text-[11px] font-medium text-slate-500">{thenName || "—"}</dt>
+              <dd className="mt-0.5 text-2xl font-bold tabular-nums text-slate-900">{compared?.count ?? "—"}</dd>
+            </div>
+          </dl>
+          {compared && (
+            <p className="mt-2 flex items-center gap-1.5 text-xs text-slate-600">
+              {difference > 0 ? <TrendingUp className="h-3.5 w-3.5 text-red-600" /> : difference < 0 ? <TrendingDown className="h-3.5 w-3.5 text-emerald-600" /> : null}
+              {difference === 0
+                ? `The same number as ${thenName}.`
+                : `${plural(Math.abs(difference), "hotspot")} ${difference > 0 ? "more" : "fewer"} than ${thenName}.`}
+            </p>
+          )}
+          <div className="mt-4 space-y-4 border-t border-slate-100 pt-4">
+            <AreaList title={`New in ${current ? monthName(current.month, "short") : "this month"}`} tone={HOT} items={added} note={spikeText}
+              showBarangay={!barangay} onFocus={focusOn} empty={`No area became a hotspot since ${thenName || "the month before"}.`} />
+            <AreaList title="Still a hotspot" tone={HOT} items={still} note={spikeText} showBarangay={!barangay} onFocus={focusOn}
+              empty={`None was a hotspot in ${thenName || "the month before"} too.`} />
+            <AreaList title="No longer a hotspot" tone={GONE} items={gone} note={(h) => `In ${thenName}: ${spikeText(h)}`} showBarangay={!barangay}
+              onFocus={focusOn} empty={`Every hotspot of ${thenName || "the month before"} still is one.`} />
+          </div>
+        </section>
       </div>
     </div>
   );

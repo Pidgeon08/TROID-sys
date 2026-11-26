@@ -4,7 +4,8 @@ import {
   FileText,
   Clock,
   CheckCircle2,
-  XCircle,
+  AlertTriangle,
+  Send,
   Eye,
   ShieldCheck,
   Signature,
@@ -12,7 +13,7 @@ import {
 import api from "../../services/api";
 import { useUnreadNotifications } from "../../hooks/useUnreadNotifications";
 import { UnreadDot } from "../../components/ui/UnreadDot";
-import { formatDate, formatTime12h, mapRequest } from "../../constants/requests";
+import { CITY_ADMIN_OVERDUE_DAYS, CITY_ADMIN_STATUSES, cityAdminStatus, formatDate, formatTime12h, mapRequest } from "../../constants/requests";
 import { SummaryCard } from "../../components/ui/SummaryCard";
 import { Pagination } from "../../components/ui/Pagination";
 import NotificationBell from "../../components/NotificationBell";
@@ -48,7 +49,8 @@ export default function Requests() {
       try {
       const all = await api.requests();
       if (!cancelled) {
-        setRequests(all.map(mapRequest));
+        // Only the requests that reached the City Admin, each as awaiting, overdue or approved.
+        setRequests(all.map((raw) => ({ ...mapRequest(raw), status: cityAdminStatus(raw) })).filter((r) => r.status));
       }
       } catch (err) {
         console.error("Failed to load requests", err);
@@ -84,16 +86,22 @@ export default function Requests() {
             </div>
             <h1 className="text-[28px] font-bold text-slate-900 tracking-tight leading-none">Requests</h1>
           </div>
-          <p className="text-slate-500 text-sm mt-1.5 font-medium">Review and approve or decline barangay requests for TROID bot deployment.</p>
+          <p className="text-slate-500 text-sm mt-1.5 font-medium">Review and approve barangay requests for TROID bot deployment.</p>
         </div>
         <NotificationBell currentUser={currentUser} userType="mayorsoffice" />
       </header>
 
-      <div className="mb-6 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         <SummaryCard icon={FileText} label="Total Requests" value={requests.length} sub="All time" />
-        <SummaryCard icon={Clock} label="Pending Approval" value={requests.filter((r) => r.status === "Pending City Admin Approval").length} sub="Awaiting your decision" />
-        <SummaryCard icon={CheckCircle2} label="Approved" value={requests.filter((r) => r.status === "Approved" || r.status === "Pending Admin Approval").length} sub="Sent to CENRO" />
-        <SummaryCard icon={XCircle} label="Declined" value={requests.filter((r) => r.status === "Declined").length} sub="Declined requests" />
+        <SummaryCard icon={Clock} label="Awaiting Approval" value={requests.filter((r) => r.status === "Awaiting City Admin Approval").length} sub={`Waiting under ${CITY_ADMIN_OVERDUE_DAYS} days`} />
+        <SummaryCard
+          icon={AlertTriangle}
+          label="Overdue"
+          value={requests.filter((r) => r.status === "Overdue").length}
+          sub={`Waiting on you ${CITY_ADMIN_OVERDUE_DAYS} days or more`}
+        />
+        <SummaryCard icon={Send} label="Awaiting CENRO" value={requests.filter((r) => r.status === "Awaiting CENRO Approval").length} sub="Approved by you, with CENRO" />
+        <SummaryCard icon={CheckCircle2} label="Approved" value={requests.filter((r) => r.status === "Approved").length} sub="Approved by you and CENRO" />
       </div>
 
       <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] overflow-hidden">
@@ -103,6 +111,7 @@ export default function Requests() {
           onClear={clearFilters}
           requests={requests}
           shown={filtered.length}
+          statusOrder={CITY_ADMIN_STATUSES}
         />
 
         <div className="overflow-x-auto">
@@ -140,7 +149,7 @@ export default function Requests() {
                   </td>
                    <td className="px-5 py-3.5">
                      <div className="flex items-center justify-end gap-2">
-                       {req.status === "Pending City Admin Approval" ? (
+                       {req.status === "Awaiting City Admin Approval" || req.status === "Overdue" ? (
                          <button
                            onClick={() => navigate(`/mayorsoffice/requests/${req.id}`)}
                            className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-[#1b4de4] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#153eb8]"

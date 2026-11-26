@@ -171,7 +171,6 @@ function App() {
             <Route path="/mayorsoffice/dashboard" element={<CityHallDashboard />} />
             <Route path="/mayorsoffice/requests" element={<CityHallRequests />} />
             <Route path="/mayorsoffice/requests/:id" element={<CityHallViewRequest />} />
-            <Route path="/mayorsoffice/reports" element={<Reports side="mayorsoffice" />} />
             <Route path="/mayorsoffice/settings" element={<Settings />} />
             <Route path="/mayorsoffice/utilities" element={<Utilities />} />
           </Route>
@@ -185,7 +184,6 @@ function App() {
             <Route path="/barangay/requests" element={<BarangayRequests currentUser={currentUser} />} />
             <Route path="/barangay/requests/:id" element={<BarangayViewRequest />} />
             <Route path="/barangay/areas" element={<BarangayAreas />} />
-            <Route path="/barangay/reports" element={<Reports side="barangay" />} />
             <Route path="/barangay/settings" element={<Settings />} />
             <Route path="/barangay/utilities" element={<Utilities />} />
           </Route>

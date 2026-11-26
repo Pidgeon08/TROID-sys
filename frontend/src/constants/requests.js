@@ -9,7 +9,40 @@ export const REQUEST_STATUS_STYLES = {
   Processing: "bg-sky-50 text-sky-700",
   Completed: "bg-emerald-50 text-emerald-700",
   Merged: "bg-indigo-50 text-indigo-700",
+  "Awaiting City Admin Approval": "bg-amber-50 text-amber-700",
+  Overdue: "bg-red-50 text-red-700",
+  "Awaiting CENRO Approval": "bg-blue-50 text-blue-700",
 };
+
+// A request waiting on the City Admin this long is overdue; its requester can resend it then
+// (Request.RESEND_AFTER_DAYS).
+export const CITY_ADMIN_OVERDUE_DAYS = 7;
+
+/** Whole days since `iso` (0 for today or no date). */
+export const daysWaiting = (iso) => (iso ? Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 86400000)) : 0);
+
+// The only statuses the City Admin sees: waiting on them, waiting on CENRO after they approved
+// it, and approved by both. What CENRO does with it after that (scheduling, parking, declining,
+// the cleanup) isn't theirs to follow.
+export const CITY_ADMIN_STATUSES = ["Awaiting City Admin Approval", "Overdue", "Awaiting CENRO Approval", "Approved"];
+
+/**
+ * A request's status as the City Admin sees it, from the API's request: waiting on them (overdue
+ * after CITY_ADMIN_OVERDUE_DAYS); approved by them and waiting on CENRO (parked by CENRO counts as
+ * still waiting); or approved by CENRO as well. Null when it never reached them (CENRO's own, or
+ * parked, declined or merged before they decided) or CENRO declined it, and their pages leave it out.
+ */
+export function cityAdminStatus(raw) {
+  if (!raw || raw.archived) return null;
+  if (raw.status === "pending_mayor_approval") {
+    return daysWaiting(raw.date_submitted) >= CITY_ADMIN_OVERDUE_DAYS ? "Overdue" : "Awaiting City Admin Approval";
+  }
+  const approved = (raw.status_history || []).some((step) => cityAdminWording(step.label) === "Approved by City Admin");
+  if (!approved || raw.status === "declined") return null;
+  const atCenro = raw.status === "pending_admin_approval"
+    || (raw.status === "parked" && raw.parked_from_status === "pending_admin_approval");
+  return atCenro ? "Awaiting CENRO Approval" : "Approved";
+}
 
 // Before the cleanup starts: when CENRO can still change a request's area or merge it.
 export const OPEN_STATUSES = ["Pending City Admin Approval", "Pending Admin Approval", "Approved", "Parked"];

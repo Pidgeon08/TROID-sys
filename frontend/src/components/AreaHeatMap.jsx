@@ -1,5 +1,5 @@
 // One collection area on a map with the heatmap of what the robots found there in a period, and
-// optionally a second period's heat in gray beneath it. Used by the area's history page and its report.
+// optionally a second period's heat in gray beneath it. Used by the area's condition report.
 import { useEffect, useMemo } from "react";
 import { MapContainer, Polygon, Polyline, TileLayer, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";

@@ -10,7 +10,6 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
   CheckCircle2,
-  RotateCcw,
 } from "lucide-react";
 import api from "../../services/api";
 import LetterAttachment from "../../components/LetterAttachment";
@@ -18,7 +17,7 @@ import { AreaPreviewButton } from "../../components/AreaPreviewModal";
 import TrashReportSummary from "../../components/TrashReportSummary";
 import { Card } from "../../components/ui/Card";
 import { useMarkRequestRead } from "../../hooks/useUnreadNotifications";
-import { REQUEST_STATUS_STYLES, mapRequest, getDeploymentStatus, formatTime12h, toStatusLabel } from "../../constants/requests";
+import { REQUEST_STATUS_STYLES, cityAdminStatus, mapRequest, getDeploymentStatus, formatTime12h } from "../../constants/requests";
 import { MergedIntoCard, MergedRequestsCard } from "../../components/MergedRequestPanels";
 import { LIVE, useLiveVersion } from "../../hooks/useLiveUpdates";
 
@@ -51,7 +50,12 @@ export default function CityHallViewRequest() {
       try {
         const [res, schedulesData] = await Promise.all([api.requestDetail(id), api.deploymentSchedules()]);
         if (cancelled) return;
+        // The City Admin sees only their own statuses (awaiting, overdue, approved), and none of
+        // CENRO's parking or declining in the history.
         const mapped = mapRequest(res);
+        mapped.status = cityAdminStatus(res) || "Not with the City Admin";
+        const hidden = ["declined", "parked", "unparked"];
+        mapped.statusHistory = mapped.statusHistory.filter((step) => !hidden.includes((step.label || "").trim().toLowerCase()));
         setRequest(mapped);
         // A merged request's cleanup is the main request's, so its schedule is shown.
         const scheduledAs = mapped.mergedInto?.id || mapped.id;
@@ -71,24 +75,10 @@ export default function CityHallViewRequest() {
     setSubmitting(true);
     try {
       await api.mayorApproveRequest(request.id);
-      setRequest(prev => ({ ...prev, status: 'Pending Admin Approval' }));
+      setRequest(prev => ({ ...prev, status: 'Awaiting CENRO Approval' }));
     } catch (err) {
       console.error('Failed to approve request:', err);
       alert('Failed to approve request. Please try again.');
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleUnpark = async () => {
-    setSubmitting(true);
-    try {
-      const res = await api.unparkRequest(request.id);
-      const restoredStatus = toStatusLabel(res.status);
-      setRequest(prev => ({ ...prev, status: restoredStatus, declineReason: '' }));
-    } catch (err) {
-      console.error('Failed to unpark request:', err);
-      alert('Failed to unpark request. Please try again.');
     } finally {
       setSubmitting(false);
     }
@@ -335,7 +325,7 @@ export default function CityHallViewRequest() {
                     </div>
                    </Card>
 
-                   {request.status === "Pending City Admin Approval" && (
+                   {(request.status === "Awaiting City Admin Approval" || request.status === "Overdue") && (
                    <Card title="Decision">
                      <div className="flex flex-col gap-4">
                        <p className="text-xs text-slate-500">
@@ -355,28 +345,6 @@ export default function CityHallViewRequest() {
                    </Card>
                    )}
 
-                   {request.status === "Parked" && (
-                   <Card title="Parked">
-                     <div className="flex flex-col gap-4">
-                       <p className="text-xs text-slate-500">
-                         This request is parked and not yet accepted. Unpark it to return it to review, where it can still be approved later.
-                       </p>
-                       {request.declineReason && (
-                         <p className="text-xs text-purple-700 bg-purple-50 border border-purple-100 rounded-lg px-3 py-2">
-                           {request.declineReason}
-                         </p>
-                       )}
-                       <button
-                         onClick={() => setConfirmAction('unpark')}
-                         disabled={submitting}
-                         className="flex items-center justify-center gap-2 rounded-lg bg-[#1b4de4] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#153eb8] transition-colors disabled:opacity-50"
-                       >
-                         <RotateCcw size={16} />
-                         Unpark
-                       </button>
-                     </div>
-                   </Card>
-                   )}
                  </div>
                </div>
 
@@ -385,12 +353,10 @@ export default function CityHallViewRequest() {
           <div className="w-full max-w-sm bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden">
             <div className="p-6 border-b border-slate-100">
               <h3 className="text-lg font-bold text-slate-900">
-                {confirmAction === 'approve' ? 'Approve Request' : 'Unpark Request'}
+                Approve Request
               </h3>
               <p className="text-xs text-slate-500 mt-1">
-                {confirmAction === 'approve'
-                  ? 'This request will be forwarded to CENRO for final approval.'
-                  : 'This request will be returned to review, where it can be approved again.'}
+                This request will be forwarded to CENRO for final approval.
               </p>
             </div>
             <div className="p-6 flex gap-3">
@@ -403,13 +369,11 @@ export default function CityHallViewRequest() {
               </button>
               <button
                 onClick={async () => {
-                  const action = confirmAction;
-                  if (action === 'approve') await handleApprove();
-                  else await handleUnpark();
+                  await handleApprove();
                   setConfirmAction(null);
                 }}
                 disabled={submitting}
-                className={`flex-1 flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${confirmAction === 'approve' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-[#1b4de4] hover:bg-[#153eb8]'}`}
+                className={`flex-1 flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed bg-emerald-600 hover:bg-emerald-700`}
               >
                 {submitting && (
                   <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
@@ -417,9 +381,7 @@ export default function CityHallViewRequest() {
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                   </svg>
                 )}
-                {submitting
-                  ? (confirmAction === 'approve' ? 'Approving...' : 'Unparking...')
-                  : (confirmAction === 'approve' ? 'Approve' : 'Unpark')}
+                {submitting ? 'Approving...' : 'Approve'}
               </button>
             </div>
           </div>

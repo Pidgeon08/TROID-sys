@@ -10,8 +10,6 @@ import { nearWater, onWater, reportedOnWater } from './water';
 const M_PER_DEG_LAT = 111320;
 // Enough grid cells for a sub-percent answer while staying fast on every 5-second refresh.
 const MAX_CELLS = 40000;
-// Two reports further apart than this are treated as separate runs when measuring the trail.
-export const TRAIL_GAP_MS = 15 * 60 * 1000;
 // How far either side of its travel path the robot clears.
 export const TRAVEL_REACH_M = 5;
 
@@ -130,7 +128,7 @@ function segmentDistance2(x, y, [ax, ay], [bx, by]) {
 
 /**
  * The robot's travel path, as [[lat, lng], ...] lines: its points on the water joined in the
- * order they were reported, one line per robot per run (trailRuns).
+ * order they were reported, one line per cleanup request per robot per day (trailRuns).
  * @param reports  [{ latitude, longitude, timestamp, boat? }, ...]
  */
 export function travelLines(reports) {
@@ -253,8 +251,8 @@ export function pathLengthM(latLngs) {
 }
 
 /**
- * Distance and time along the robot's trail, from its reports in time order, per robot.
- * Gaps longer than TRAIL_GAP_MS start a new run, so separate drives aren't joined up.
+ * Distance and time along the robot's trail, from its reports in time order, per cleanup run
+ * (trailRuns), so separate cleanups and days aren't joined up.
  * @param reports  [{ latitude, longitude, timestamp, boat? }, ...]
  */
 export function trailStats(reports) {
@@ -276,34 +274,32 @@ export function trailStats(reports) {
   return { distanceM, activeMs, first, last, robots: new Set(runs.map((r) => r.boat)).size };
 }
 
+// Days are Manila's, like the cleanups' schedules.
+const dayOf = (time) => new Date(time).toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
+
 /**
- * The robot's reports as runs to draw as a path: per robot, in time order, split where
- * two reports are more than TRAIL_GAP_MS apart.
- * @returns [{ boat, nodes: [{ at: [lat, lng], time, report }] }]
+ * The robot's reports as runs to draw as a path: one per cleanup request, per robot, per day, its
+ * points in the order they were reported (by id when two share a time). Runs never join each
+ * other, so one robot's back-to-back cleanups stay apart. A report with no request is a run of its
+ * own (a lone point, joined to nothing).
+ * @returns [{ boat, request, day, nodes: [{ at: [lat, lng], time, report }] }]
  */
 export function trailRuns(reports) {
-  const byBoat = new Map();
-  for (const report of reports || []) {
+  const groups = new Map();
+  (reports || []).forEach((report, index) => {
     const time = new Date(report.timestamp).getTime();
-    if (!Number.isFinite(report.latitude) || !Number.isFinite(report.longitude) || !Number.isFinite(time)) continue;
-    const key = report.boat ?? '';
-    if (!byBoat.has(key)) byBoat.set(key, []);
-    byBoat.get(key).push({ at: [report.latitude, report.longitude], time, report });
-  }
+    if (!Number.isFinite(report.latitude) || !Number.isFinite(report.longitude) || !Number.isFinite(time)) return;
+    const boat = report.boat ?? '';
+    const request = report.request ?? null;
+    const day = dayOf(time);
+    const key = request ? `${request}|${boat}|${day}` : `none|${report.id ?? index}`;
+    if (!groups.has(key)) groups.set(key, { boat, request, day, nodes: [] });
+    groups.get(key).nodes.push({ at: [report.latitude, report.longitude], time, report, order: report.id ?? index });
+  });
 
-  const runs = [];
-  for (const [boat, list] of byBoat) {
-    list.sort((a, b) => a.time - b.time);
-    let run = null;
-    for (const node of list) {
-      if (!run || node.time - run.nodes[run.nodes.length - 1].time > TRAIL_GAP_MS) {
-        run = { boat, nodes: [] };
-        runs.push(run);
-      }
-      run.nodes.push(node);
-    }
-  }
-  return runs;
+  const runs = [...groups.values()];
+  for (const run of runs) run.nodes.sort((a, b) => a.time - b.time || a.order - b.order);
+  return runs.sort((a, b) => a.nodes[0].time - b.nodes[0].time);
 }
 
 export function formatArea(m2) {

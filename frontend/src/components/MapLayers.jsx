@@ -82,30 +82,32 @@ export function HeatmapLayer({ points, type, options }) {
   return null;
 }
 
+// A point no cleanup request claims: drawn on its own, joined to nothing.
+const UNLINKED = '#94a3b8';
+
 /**
- * Bot Pathing: each point the robot reported is a node, joined in time order, one colour per robot.
- * A run starts with a green node and ends with a larger node; hover a node for its time and count.
+ * Bot Pathing: each point the robot reported is a node. A cleanup request's points, per robot and
+ * day, are joined in the order they were reported, one colour per such run; runs are never joined
+ * to each other, and a point with no request stands alone in gray. A run starts with a green node
+ * and ends with a larger node; hover a node for its request, time and count.
  */
 export function PathLayer({ reports }) {
-  const runs = useMemo(() => trailRuns(reports), [reports]);
-  const colorOf = useMemo(() => {
-    const boats = [...new Set(runs.map((r) => r.boat))];
-    return (boat) => PATH_COLORS[boats.indexOf(boat) % PATH_COLORS.length];
-  }, [runs]);
-
-  return runs.map((run, r) => {
-    const color = colorOf(run.boat);
-    const last = run.nodes.length - 1;
-    return (
-      <PathRun key={`${run.boat}-${run.nodes[0].time}-${r}`} run={run} color={color} last={last} />
-    );
+  const runs = useMemo(() => {
+    let linked = 0;
+    return trailRuns(reports).map((run) => ({ run, color: run.request ? PATH_COLORS[linked++ % PATH_COLORS.length] : UNLINKED }));
+  }, [reports]);
+  return runs.map(({ run, color }) => {
+    const key = run.request ? `${run.request}-${run.boat}-${run.day}` : `none-${run.nodes[0].order}`;
+    return <PathRun key={key} run={run} color={color} />;
   });
 }
 
-function PathRun({ run, color, last }) {
+function PathRun({ run, color }) {
+  const last = run.nodes.length - 1;
+  const linked = Boolean(run.request);
   return (
     <>
-      {run.nodes.length > 1 && (
+      {linked && run.nodes.length > 1 && (
         <Polyline
           positions={run.nodes.map((n) => n.at)}
           pathOptions={{ color, weight: 3, opacity: 0.6, lineJoin: 'round' }}
@@ -113,27 +115,31 @@ function PathRun({ run, color, last }) {
         />
       )}
       {run.nodes.map((node, i) => {
-        const isStart = i === 0;
-        const isEnd = i === last && last > 0;
+        const isStart = linked && i === 0;
+        const isEnd = linked && i === last && last > 0;
         const items = node.report.trash_count || 0;
         return (
           <CircleMarker
-            key={`${node.time}-${i}`}
+            key={`${node.order}-${i}`}
             center={node.at}
             radius={isStart || isEnd ? 7 : 5}
             pathOptions={{
               color: isStart ? PATH_START : color,
               weight: 2,
-              fillColor: isStart ? PATH_START : isEnd ? color : '#ffffff',
+              fillColor: isStart ? PATH_START : isEnd || !linked ? color : '#ffffff',
               fillOpacity: 1,
             }}
           >
             <Tooltip direction="top" offset={[0, -6]}>
               <div className="text-[11px] leading-snug">
                 <div className="font-semibold">
-                  {run.boat ? `${run.boat} · ` : ''}Point {i + 1} of {run.nodes.length}
-                  {isStart ? ' (start)' : isEnd ? ' (latest)' : ''}
+                  {linked ? `${run.request} · ` : 'No request · '}{run.boat || 'Robot'}
                 </div>
+                {linked && (
+                  <div>
+                    Point {i + 1} of {run.nodes.length}{isStart ? ' (start)' : isEnd ? ' (latest)' : ''}
+                  </div>
+                )}
                 <div>{formatClock(node.time)}</div>
                 <div>{items} item{items === 1 ? '' : 's'} detected</div>
               </div>

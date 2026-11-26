@@ -62,24 +62,24 @@ export default function HotspotsCard({ title, barangay, moreTo, className = '', 
   const items = reports.reduce((sum, r) => sum + (r.trash_count || 0), 0);
 
   return (
-    <div className={`bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-6 flex flex-col gap-4 ${className}`}>
-      <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
+    <div className={`bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-4 flex flex-col gap-3 ${className}`}>
+      <div className="flex flex-wrap justify-between items-center gap-x-3 gap-y-2">
         <div>
-          <h2 className="text-[17px] font-bold text-slate-900">{title}</h2>
+          <h2 className="text-[15px] font-bold text-slate-900">{title}</h2>
           <p className="text-xs text-slate-500 mt-0.5">
             {loading ? 'Loading…' : `${reports.length} detection${reports.length === 1 ? '' : 's'} · ${items} item${items === 1 ? '' : 's'}`}
             {barangay ? ` in ${barangay}` : ''}
           </p>
         </div>
-        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 w-full sm:w-auto">
-          <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-lg">
             {PERIODS.map(({ label, filter }) => (
               <button
                 key={filter}
                 type="button"
                 onClick={() => setPeriod(filter)}
                 aria-pressed={period === filter}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition-all duration-200 ${
+                className={`px-2.5 py-1 rounded-lg text-xs font-semibold cursor-pointer transition-all duration-200 ${
                   period === filter ? 'bg-[#1b4de4] text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
@@ -91,14 +91,14 @@ export default function HotspotsCard({ title, barangay, moreTo, className = '', 
             value={layer}
             onChange={(e) => setLayer(e.target.value)}
             aria-label="Map layer"
-            className="px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer border border-slate-200 bg-white text-slate-700 hover:border-slate-300 transition-all duration-200 outline-none"
+            className="px-2.5 py-1 rounded-lg text-xs font-semibold cursor-pointer border border-slate-200 bg-white text-slate-700 hover:border-slate-300 transition-all duration-200 outline-none"
           >
             {MAP_LAYERS.map((t) => <option key={t} value={t}>{t}</option>)}
           </select>
           {moreTo && (
             <Link
               to={moreTo}
-              className="inline-flex items-center gap-1 whitespace-nowrap rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-[#1b4de4] transition-all duration-200 hover:border-blue-200 hover:bg-blue-50"
+              className="inline-flex items-center gap-1 whitespace-nowrap rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-[#1b4de4] transition-all duration-200 hover:border-blue-200 hover:bg-blue-50"
             >
               View more <ArrowUpRight className="w-3.5 h-3.5" />
             </Link>
@@ -136,7 +136,7 @@ export default function HotspotsCard({ title, barangay, moreTo, className = '', 
           <span className="inline-flex items-center gap-1.5">
             <span className="w-3 h-3 rounded-full" style={{ background: PATH_COLORS[0] }} /> Latest point
           </span>
-          <span>One colour per bot</span>
+          <span>One colour per cleanup; gray points have no request</span>
         </div>
       ) : (
         <div className="flex items-center justify-between gap-4">

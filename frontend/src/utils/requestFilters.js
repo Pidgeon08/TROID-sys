@@ -219,8 +219,11 @@ export function sortRequests(requests, sort) {
   }
 }
 
-/** The barangays, collection areas, requester roles and statuses that occur in the requests. */
-export function filterOptions(requests) {
+/**
+ * The barangays, collection areas, requester roles and statuses that occur in the requests.
+ * `statusOrder` is every status the list offers, in order (the City Admin has only their own).
+ */
+export function filterOptions(requests, statusOrder = STATUS_ORDER) {
   const barangays = new Set();
   const areas = new Map();
   const roles = new Map();
@@ -237,7 +240,7 @@ export function filterOptions(requests) {
     areas: [...areas.values()].sort((a, b) => a.name.localeCompare(b.name)),
     roles: [...roles.values()].sort((a, b) => a.localeCompare(b)),
     // Every status, so a filter can be set up before any request reaches it; older ones last.
-    statuses: [...STATUS_ORDER, ...[...statuses].filter((s) => !STATUS_ORDER.includes(s)).sort()],
+    statuses: [...statusOrder, ...[...statuses].filter((s) => !statusOrder.includes(s)).sort()],
   };
 }
 

@@ -16,7 +16,7 @@ from django.test import SimpleTestCase, TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from . import backup, bot_auth, drives, live, mqtt_client, priority, views, water
+from . import backup, bot_auth, boundaries, drives, live, mqtt_client, priority, views, water
 from .drives import TRASH_ITEMS
 from .models import (
     AuditLog, Boat, CollectionArea, DeploymentSchedule, DetectionEvent, LetterFile, Notification, Operator,
@@ -520,6 +520,22 @@ class CollectionAreaBoundaryTests(TestCase):
         response = self.add(self.admin, barangay='Poro', points=big)
 
         self.assertEqual(response.status_code, 201, response.content)
+
+    def test_an_area_half_the_barangay_or_larger_is_refused(self):
+        # The whole barangay as one area.
+        response = self.add(self.admin, barangay='Poro', points=boundaries._ring('Poro'))
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('Keep it under half the barangay', response.json()['points'][0])
+        self.assertFalse(CollectionArea.objects.exists())
+        self.assertIsNone(boundaries.check_area_size(around(*IN_PORO), 'Poro'))
+
+    def test_the_size_limit_is_under_half_the_barangay(self):
+        whole = boundaries.area_m2(boundaries._ring('Poro'))
+        with patch.object(boundaries, 'area_m2', side_effect=[whole, whole * 0.5]):
+            self.assertIn('50% of Poro', boundaries.check_area_size([], 'Poro'))
+        with patch.object(boundaries, 'area_m2', side_effect=[whole, whole * 0.49]):
+            self.assertIsNone(boundaries.check_area_size([], 'Poro'))
 
     def test_reshaping_onto_dry_land_is_refused(self):
         area = CollectionArea.objects.create(name='River', barangay='Poro', points=around(*IN_PORO), status='approved')

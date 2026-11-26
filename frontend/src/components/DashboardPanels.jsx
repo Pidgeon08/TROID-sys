@@ -8,11 +8,14 @@ import { REQUEST_STATUS_STYLES, requestArea, toStatusLabel } from '../constants/
 export const DASHBOARD_CARD = 'bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)]';
 const PANEL_BUTTON = 'text-xs font-semibold text-slate-500 hover:text-[#1b4de4] border border-slate-200 rounded-lg px-2.5 py-1 transition-all cursor-pointer';
 
-/** A side panel: a title (with an optional icon), an optional button, and its content. */
-export function Panel({ title, icon: Icon, iconClassName = 'text-amber-500', action, children }) {
+/**
+ * A side panel: a title (with an optional icon), an optional button, and its content. With `fill`,
+ * it takes the height it is given and its content scrolls inside it.
+ */
+export function Panel({ title, icon: Icon, iconClassName = 'text-amber-500', action, fill = false, className = '', children }) {
   return (
-    <div className={`${DASHBOARD_CARD} p-5 shrink-0`}>
-      <div className="flex justify-between items-center mb-4">
+    <div className={`${DASHBOARD_CARD} p-4 ${fill ? 'flex min-h-0 flex-col' : 'shrink-0'} ${className}`}>
+      <div className="flex shrink-0 justify-between items-center mb-3">
         <h2 className="text-[15px] font-bold text-slate-900 flex items-center gap-1.5">
           {Icon && <Icon className={`w-4 h-4 ${iconClassName}`} />}
           {title}
@@ -23,7 +26,7 @@ export function Panel({ title, icon: Icon, iconClassName = 'text-amber-500', act
           </button>
         )}
       </div>
-      {children}
+      {fill ? <div className="-mx-2 min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-2">{children}</div> : children}
     </div>
   );
 }

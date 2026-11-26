@@ -22,6 +22,9 @@ DATA_FILE = Path(__file__).resolve().parent / 'data' / 'san_fernando_boundaries.
 BORDER_SLACK_M = 30
 # How far out on the water from the barangay a point may sit.
 WATER_REACH_M = 1000
+# A collection area (a filled shape) must be smaller than this share of its barangay: a zone the
+# robots clean, not the barangay itself.
+MAX_AREA_SHARE = 0.5
 
 _M_PER_DEG_LAT = 110_540
 _M_PER_DEG_LNG_EQUATOR = 111_320
@@ -96,6 +99,31 @@ def place_point(point, barangay):
     if town:
         return f'is in {town}, outside San Fernando'
     return None if near <= WATER_REACH_M else f'is more than {WATER_REACH_M:,} m out from {barangay}'
+
+
+def area_m2(ring):
+    """The area of a [[lat, lng], ...] outline in square metres (flat, around its first point)."""
+    if len(ring) < 3:
+        return 0.0
+    lat0 = ring[0][0]
+    kx = _M_PER_DEG_LNG_EQUATOR * math.cos(math.radians(lat0))
+    pts = [((lng - ring[0][1]) * kx, (lat - lat0) * _M_PER_DEG_LAT) for lat, lng in ring]
+    twice = sum(pts[i - 1][0] * pts[i][1] - pts[i][0] * pts[i - 1][1] for i in range(len(pts)))
+    return abs(twice) / 2
+
+
+def _hectares(m2):
+    return f'{m2 / 10_000:,.2f} ha'
+
+
+def check_area_size(points, barangay):
+    """None when a filled area is under MAX_AREA_SHARE of its barangay, else the reason it is too large."""
+    whole = area_m2(_ring(barangay))
+    size = area_m2(points)
+    if not whole or size < whole * MAX_AREA_SHARE:
+        return None
+    return (f'This area is {_hectares(size)}, {round(size / whole * 100)}% of {barangay} ({_hectares(whole)}). '
+            f'Keep it under half the barangay, below {_hectares(whole * MAX_AREA_SHARE)}.')
 
 
 def check_area(points, barangay):

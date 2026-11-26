@@ -399,7 +399,7 @@ class CollectionAreaSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({'points': 'Points must be [latitude, longitude] pairs.'})
         if len(points) < (3 if closed else 2):
             raise serializers.ValidationError({'points': 'Draw at least 3 points for an area, or 2 for a line.'})
-        problem = boundaries.check_area(points, official)
+        problem = boundaries.check_area(points, official) or (closed and boundaries.check_area_size(points, official))
         if problem:
             raise serializers.ValidationError({'points': problem})
         # A boat can only clean the waterway, so an area needs some inside it. One that is mostly

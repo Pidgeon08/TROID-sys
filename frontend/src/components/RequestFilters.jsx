@@ -131,14 +131,15 @@ function SelectFilter({ value, onChange, allLabel, options, label }) {
  * used for the options and counts; `shown` is how many pass the filters. Pass
  * `scheduledIds` to offer the schedule filter, `mergeable` to offer the Mergeable one (CENRO's list,
  * since CENRO merges), and `fields` to choose which other filters appear (a barangay account only
- * sees its own barangay, so it has no use for that one).
+ * sees its own barangay, so it has no use for that one). `statusOrder` replaces the statuses
+ * offered (the City Admin's own three).
  */
 export default function RequestFilters({
-  filters, onChange, onClear, requests, shown, scheduledIds, mergeable = false,
+  filters, onChange, onClear, requests, shown, scheduledIds, mergeable = false, statusOrder,
   fields = { barangay: true, area: true, role: true, type: true },
   searchPlaceholder = "Search ID, requester, barangay, area...",
 }) {
-  const options = useMemo(() => filterOptions(requests), [requests]);
+  const options = useMemo(() => filterOptions(requests, statusOrder), [requests, statusOrder]);
   const statusCounts = useMemo(() => {
     const counts = {};
     filterRequests(requests, filters, { scheduledIds, except: "status" }).forEach((req) => {

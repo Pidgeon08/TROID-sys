@@ -34,8 +34,6 @@ import {
 import { LIVE, useLiveVersion } from "../../hooks/useLiveUpdates";
 import { CURRENT_COLOR, PREVIOUS_COLOR, Change, CompareBarChart, DonutChart, TrendChart } from "../../components/charts/CompareCharts";
 import { canonicalBarangay } from "../../utils/barangayBoundaries";
-import { mapArea } from "../../utils/collectionAreaInfo";
-import AreaHotspotHistory from "../../components/AreaHotspotHistory";
 
 const CARD = "bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] print:shadow-none print:border-slate-300 print:break-inside-avoid";
 
@@ -62,7 +60,6 @@ const CHART_NAMES = {
   cleanups: "Cleanups Finished Over Time",
   waste: "Waste Collection Distribution",
   places: "Bags by Barangay or Collection Area",
-  hotspots: "Collection Area Hotspot History",
 };
 
 const sameFilter = (a, b) => (Array.isArray(a) ? a.join("|") === b.join("|") : a === b);
@@ -83,27 +80,11 @@ const Reports = ({ side = "admin" }) => {
   const [draft, setDraft] = useState(() => defaultFilters(params, lockedBarangay));
   const [applied, setApplied] = useState(() => defaultFilters(params, lockedBarangay));
   // The chart a dashboard sent the reader to: scrolled to and outlined until they dismiss it.
-  // (The hotspot history is CENRO's only.)
   const [focus, setFocus] = useState(() => {
     const chart = params.get("chart");
-    return CHART_NAMES[chart] && (chart !== "hotspots" || side === "admin") ? chart : "";
+    return CHART_NAMES[chart] ? chart : "";
   });
   const [outlined, setOutlined] = useState(Boolean(focus));
-  // CENRO's hotspot history of one collection area (?area=, from "View more" on its card).
-  const [hotspotArea, setHotspotArea] = useState(() => (side === "admin" ? params.get("area") || "" : ""));
-  const [areaList, setAreaList] = useState([]);
-  useEffect(() => {
-    if (side !== "admin") return undefined;
-    let cancelled = false;
-    api.collectionAreas()
-      .then((list) => {
-        if (!cancelled && Array.isArray(list)) {
-          setAreaList(list.map(mapArea).filter((a) => a.status !== "pending").sort((a, b) => a.name.localeCompare(b.name)));
-        }
-      })
-      .catch((err) => console.error("Failed to load collection areas:", err));
-    return () => { cancelled = true; };
-  }, [side]);
   const [trendGranularity, setTrendGranularity] = useState("Daily");
   // The history table: calendar months or Monday–Sunday weeks, and how many of them.
   const [history, setHistory] = useState({ unit: "month", count: 6 });
@@ -242,11 +223,6 @@ const Reports = ({ side = "admin" }) => {
     const timer = setTimeout(() => setOutlined(false), 6000);
     return () => clearTimeout(timer);
   }, [loading, focus]);
-  // The areas to choose from: the report's barangay's, when one is chosen (and the chosen area anyway).
-  const hotspotAreas = useMemo(
-    () => areaList.filter((a) => !selectedBarangay || a.barangay === selectedBarangay || a.id === hotspotArea),
-    [areaList, selectedBarangay, hotspotArea]
-  );
   const chartFrame = (id) => (outlined && focus === id ? "ring-4 ring-blue-400/70 ring-offset-2 transition-shadow" : "transition-shadow");
 
   const filteredCollections = useMemo(() => {
@@ -722,17 +698,10 @@ const Reports = ({ side = "admin" }) => {
       {focus && (
         <div className="mb-4 flex flex-wrap items-center gap-2 rounded-xl border border-blue-100 bg-blue-50 px-4 py-2.5 text-sm text-blue-900 print:hidden" role="status">
           <LayoutDashboard size={16} className="shrink-0 text-blue-600" />
-          {focus === "hotspots" ? (
-            <span className="flex-1">
-              From Collection Areas: <span className="font-semibold">{CHART_NAMES[focus]}</span>
-              {areaList.find((a) => a.id === hotspotArea) ? ` of ${areaList.find((a) => a.id === hotspotArea).name}` : ""}, month by month for the last year.
-            </span>
-          ) : (
-            <span className="flex-1">
-              From the dashboard: <span className="font-semibold">{CHART_NAMES[focus]}</span>, for {period.label}
-              {comparing ? ` against ${period.previous.label}` : ""}.
-            </span>
-          )}
+          <span className="flex-1">
+            From the dashboard: <span className="font-semibold">{CHART_NAMES[focus]}</span>, for {period.label}
+            {comparing ? ` against ${period.previous.label}` : ""}.
+          </span>
           <button
             type="button"
             onClick={() => {
@@ -894,19 +863,6 @@ const Reports = ({ side = "admin" }) => {
         </div>
         <CompareBarChart data={trend} comparing={comparing} height={220} />
       </div>
-
-      {/* CENRO: one collection area's hotspot history and condition report */}
-      {side === "admin" && (
-        <div data-report-chart="hotspots" className={`${CARD} p-6 mb-6 min-h-[260px] scroll-mt-24 ${chartFrame("hotspots")}`}>
-          <AreaHotspotHistory
-            areas={hotspotAreas}
-            areaId={hotspotArea}
-            onAreaChange={setHotspotArea}
-            initialMonth={params.get("month") || ""}
-            currentUser={currentUser}
-          />
-        </div>
-      )}
 
       {/* Bottom section: collection summary table + report overview / export actions */}
       <div className="grid grid-cols-1 lg:grid-cols-[1.6fr_1fr] gap-5 mb-6">

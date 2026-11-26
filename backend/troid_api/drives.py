@@ -54,14 +54,21 @@ def report_category(label):
     return next((cls for pattern, cls in _COMPILED if pattern.search(label)), OTHER)
 
 
+def class_counts(categories, counts=None):
+    """One detection's pieces per TROID class, from the robot's own labels (added into `counts`)."""
+    counts = {} if counts is None else counts
+    for label, count in (categories or {}).items():
+        if isinstance(count, int) and not isinstance(count, bool) and count > 0:
+            category = report_category(label)
+            counts[category] = counts.get(category, 0) + count
+    return counts
+
+
 def troid_counts(detections):
     """Pieces counted per TROID class, from a request's detection events."""
     counts = {}
     for detection in detections:
-        for label, count in (detection.categories or {}).items():
-            if isinstance(count, int) and not isinstance(count, bool) and count > 0:
-                category = report_category(label)
-                counts[category] = counts.get(category, 0) + count
+        class_counts(detection.categories, counts)
     return counts
 
 

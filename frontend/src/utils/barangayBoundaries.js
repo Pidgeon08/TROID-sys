@@ -13,6 +13,9 @@ import data from "../data/sanFernandoBoundaries.json";
 export const BORDER_SLACK_M = 30;
 // How far out on the water from the barangay a point may sit.
 export const WATER_REACH_M = 1000;
+// A collection area (a filled shape) must be smaller than this share of its barangay: a zone the
+// robots clean, not the barangay itself.
+export const MAX_AREA_SHARE = 0.5;
 
 const M_PER_DEG_LAT = 110540;
 const M_PER_DEG_LNG_EQUATOR = 111320;
@@ -80,6 +83,28 @@ export function placePoint(point, barangay) {
   const town = data.neighbors.find((m) => inside(point, m.ring))?.name;
   if (town) return `That spot is in ${town}, outside San Fernando`;
   return near <= WATER_REACH_M ? null : `That spot is more than ${WATER_REACH_M.toLocaleString("en-US")} m out from ${barangay}`;
+}
+
+/** The area of a [[lat, lng], ...] outline in square metres (flat, around its first point). */
+export function areaM2(ring) {
+  if (!ring || ring.length < 3) return 0;
+  const lat0 = ring[0][0];
+  const kx = M_PER_DEG_LNG_EQUATOR * Math.cos((lat0 * Math.PI) / 180);
+  const pts = ring.map(([lat, lng]) => [(lng - ring[0][1]) * kx, (lat - lat0) * M_PER_DEG_LAT]);
+  let twice = 0;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) twice += pts[j][0] * pts[i][1] - pts[i][0] * pts[j][1];
+  return Math.abs(twice) / 2;
+}
+
+const hectares = (m2) => `${(m2 / 10000).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ha`;
+
+/** null when a filled area is under MAX_AREA_SHARE of its barangay, else why it is too large. */
+export function areaSizeProblem(points, barangay) {
+  const whole = areaM2(barangayRing(barangay));
+  const size = areaM2(points);
+  if (!whole || size < whole * MAX_AREA_SHARE) return null;
+  return `This area is ${hectares(size)}, ${Math.round((size / whole) * 100)}% of ${barangay} (${hectares(whole)}). `
+    + `Keep it under half the barangay, below ${hectares(whole * MAX_AREA_SHARE)}.`;
 }
 
 /** The [[south, west], [north, east]] box around a barangay, for fitting the map to it. */

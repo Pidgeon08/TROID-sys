@@ -11,7 +11,7 @@ export const LEGEND_CLASSES = {
   'Waste Density': 'bg-gradient-to-r from-blue-500 via-cyan-400 via-emerald-400 via-yellow-400 to-red-500',
   'Past Hotspots': 'bg-gradient-to-r from-slate-200 via-slate-400 to-slate-600',
 };
-// One colour per robot on the Bot Pathing layer.
+// One colour per cleanup run (request, robot and day) on the Bot Pathing layer.
 export const PATH_COLORS = ['#1b4de4', '#7c3aed', '#db2777', '#0891b2', '#ea580c', '#4d7c0f'];
 export const PATH_START = '#10b981';
 

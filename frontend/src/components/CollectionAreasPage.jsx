@@ -28,7 +28,7 @@ import api from "../services/api";
 import { logAudit } from "../services/auditLog";
 import { AreaDraftLayers, BarangayOutline, WaterwaysLayer } from "./AreaDrawing";
 import { useAreaDraft } from "../hooks/useAreaDraft";
-import { BARANGAYS, canonicalBarangay } from "../utils/barangayBoundaries";
+import { BARANGAYS, areaSizeProblem, canonicalBarangay } from "../utils/barangayBoundaries";
 import { MOSTLY_LAND_RATIO, areaWater, formatArea, formatDistance } from "../utils/coverage";
 import {
   EMPTY_AREA_DETAILS,
@@ -253,10 +253,10 @@ function AreaCard({ area, side, busy, heat, onToggleHeat, onHeatPeriod, onClose,
           <button
             type="button"
             onClick={onViewMore}
-            title="Its hotspot history month by month, its heatmap and a report comparing it with before, on Report Generation"
+            title="On the Heatmap page: its heatmap month by month, whether it was a hotspot each month, and a comparison with the month before"
             className={`${CARD_BUTTON} w-full border border-blue-200 text-blue-700 hover:bg-blue-50`}
           >
-            <History size={14} /> View more: hotspot history
+            <History size={14} /> View more: monthly heatmap &amp; hotspots
           </button>
         )}
         <div className="flex gap-2">
@@ -402,7 +402,12 @@ export default function CollectionAreasPage({ side = "admin" }) {
     () => (reshaping && draft.canSave ? areaWater(draft.points, draft.isPolygon) : null),
     [reshaping, draft.canSave, draft.points, draft.isPolygon]
   );
-  const shapeReady = !reshaping || (draft.canSave && shapeWater?.status !== "none");
+  // A filled area must stay under half its barangay (the server refuses it too).
+  const sizeProblem = useMemo(
+    () => (reshaping && draft.canSave && draft.isPolygon ? areaSizeProblem(draft.points, form.barangay) : null),
+    [reshaping, draft.canSave, draft.isPolygon, draft.points, form.barangay]
+  );
+  const shapeReady = !reshaping || (draft.canSave && shapeWater?.status !== "none" && !sizeProblem);
   const canSave = Boolean(form.barangay && form.name.trim() && shapeReady && !saving);
 
   const setField = (field) => (e) => setForm((prev) => ({ ...prev, [field]: e.target.value }));
@@ -679,6 +684,11 @@ export default function CollectionAreasPage({ side = "admin" }) {
               : `${editing.closed ? "Polygon" : "Line"} · ${shapeSize(editing) || `${editing.points.length} pts`}`}
           </span>
         </div>
+        {sizeProblem && (
+          <p className="rounded-md border border-red-100 bg-red-50 px-2.5 py-2 text-red-700" role="alert">
+            Too large: {sizeProblem} It can&apos;t be saved until it&apos;s smaller.
+          </p>
+        )}
         {shapeWater && <WaterNote water={shapeWater} />}
         {editing && reshaping && editing.requestCount > 0 && (
           <p className="text-amber-700">
@@ -1004,11 +1014,9 @@ export default function CollectionAreasPage({ side = "admin" }) {
                 onToggleHeat={() => setHeatOn((on) => !on)}
                 onHeatPeriod={setHeatPeriod}
                 onClose={() => setActiveId(null)}
-                // CENRO's: the area's hotspot history on Report Generation. Barangay and NGO
-                // accounts compare hotspots on their Bot Tracking page instead.
-                onViewMore={side === "admin"
-                  ? () => navigate(`/admin/reports?area=${encodeURIComponent(selectedArea.id)}&chart=hotspots`)
-                  : undefined}
+                // CENRO's: the area's heatmap month by month and its hotspot history, on the Heatmap
+                // page. Barangay and NGO accounts compare hotspots on their Bot Tracking page instead.
+                onViewMore={side === "admin" ? () => navigate(`/admin/heatmap?area=${encodeURIComponent(selectedArea.id)}`) : undefined}
                 onEdit={() => startEditing(selectedArea)}
                 onRequests={() => setRequestsArea(selectedArea)}
                 onApprove={() => setApproveTarget(selectedArea)}

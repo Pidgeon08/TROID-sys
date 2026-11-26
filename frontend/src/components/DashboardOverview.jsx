@@ -1,6 +1,8 @@
 // The parts every dashboard is built from (CENRO, City Admin, barangay/NGO): the header with the
 // notification bell and a way to Reports, the KPI cards, and the charts. Each compares this month
-// so far with the same dates last month, and each chart can open the Reports page on that chart.
+// so far with the same dates last month, and each chart can open the Reports page on that chart
+// (barangay and NGO accounts have no Reports page, so theirs open nothing).
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ArrowUpRight, FileBarChart2 } from "lucide-react";
 import NotificationBell from "./NotificationBell";
@@ -22,11 +24,11 @@ export function PeriodNote({ period, className = "" }) {
   );
 }
 
-/** The page title, a line under it, and the bell and Reports button every side has. */
+/** The page title, a line under it, the bell, and a button to Reports (when `reportsPath` is given). */
 export function DashboardHeader({ title = "Dashboard", subtitle, currentUser, userType, reportsPath, period }) {
   const navigate = useNavigate();
   return (
-    <header className="mb-6 flex flex-wrap items-start justify-between gap-3">
+    <header className="mb-4 flex shrink-0 flex-wrap items-start justify-between gap-3">
       <div className="min-w-0">
         <h1 className="text-[28px] font-bold leading-none tracking-tight text-slate-900">{title}</h1>
         {subtitle && <p className="mt-1.5 text-sm font-medium text-slate-500">{subtitle}</p>}
@@ -34,13 +36,15 @@ export function DashboardHeader({ title = "Dashboard", subtitle, currentUser, us
       </div>
       <div className="flex items-center gap-2.5">
         <NotificationBell currentUser={currentUser} userType={userType} />
-        <button
-          type="button"
-          onClick={() => navigate(period ? reportsLink(reportsPath, period) : reportsPath)}
-          className="flex items-center gap-2 rounded-lg bg-[#1b4de4] px-3.5 py-2 text-sm font-medium text-white hover:bg-[#153eb8]"
-        >
-          <FileBarChart2 size={15} /> Open Reports
-        </button>
+        {reportsPath && (
+          <button
+            type="button"
+            onClick={() => navigate(period ? reportsLink(reportsPath, period) : reportsPath)}
+            className="flex items-center gap-2 rounded-lg bg-[#1b4de4] px-3.5 py-2 text-sm font-medium text-white hover:bg-[#153eb8]"
+          >
+            <FileBarChart2 size={15} /> Open Reports
+          </button>
+        )}
       </div>
     </header>
   );
@@ -54,64 +58,39 @@ export function KpiCard({ icon: Icon, tint, label, value, unit, previous, change
   const navigate = useNavigate();
   const body = (
     <>
-      <div className="flex items-start justify-between gap-3">
-        <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${tint}`}>
-          <Icon size={19} />
+      <div className="flex items-center gap-3">
+        <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${tint}`}>
+          <Icon size={17} />
         </div>
-        {to && <ArrowUpRight size={15} className="text-slate-300 transition-colors group-hover:text-[#1b4de4]" />}
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-xs font-semibold text-slate-500">{label}</p>
+          <p className="mt-0.5 text-[22px] font-bold leading-none tracking-tight text-slate-950">
+            {formatMetric(value)}
+            {unit && <span className="ml-1 text-xs font-semibold text-slate-400">{unit}</span>}
+          </p>
+        </div>
+        {to && <ArrowUpRight size={15} className="shrink-0 self-start text-slate-300 transition-colors group-hover:text-[#1b4de4]" />}
       </div>
-      <p className="mt-3 text-xs font-semibold text-slate-500">{label}</p>
-      <p className="mt-1 text-[26px] font-bold leading-none tracking-tight text-slate-950">
-        {formatMetric(value)}
-        {unit && <span className="ml-1.5 text-sm font-semibold text-slate-400">{unit}</span>}
-      </p>
       {change !== undefined ? (
-        <p className="mt-2 flex flex-wrap items-center gap-x-1.5 text-xs">
+        <p className="mt-2 flex flex-wrap items-center gap-x-1.5 text-[11px]">
           <Change change={change} />
           <span className="font-medium text-slate-400">vs {formatMetric(previous)} {comparedLabel}</span>
         </p>
       ) : (
-        <p className="mt-2 text-xs font-medium text-slate-400">{hint}</p>
+        <p className="mt-2 truncate text-[11px] font-medium text-slate-400">{hint}</p>
       )}
     </>
   );
-  if (!to) return <div className={`${DASHBOARD_CARD} p-5`}>{body}</div>;
+  if (!to) return <div className={`${DASHBOARD_CARD} px-4 py-3.5`}>{body}</div>;
   return (
     <button
       type="button"
       onClick={() => navigate(to)}
       title={hint || "Open in Reports"}
-      className={`${DASHBOARD_CARD} group p-5 text-left transition-shadow hover:shadow-[0_6px_24px_rgba(0,0,0,0.07)]`}
+      className={`${DASHBOARD_CARD} group px-4 py-3.5 text-left transition-shadow hover:shadow-[0_6px_24px_rgba(0,0,0,0.07)]`}
     >
       {body}
     </button>
-  );
-}
-
-/** A chart card: title, this month against last, its totals, and a button to the same chart in Reports. */
-export function ChartCard({ title, period, summary, legend, reportTo, children, className = "" }) {
-  const navigate = useNavigate();
-  return (
-    <section className={`${DASHBOARD_CARD} flex flex-col p-5 ${className}`}>
-      <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
-        <div className="min-w-0">
-          <h2 className="text-[15px] font-bold text-slate-900">{title}</h2>
-          {period && <p className="mt-0.5 text-[11px] text-slate-400">{period.label} vs {period.previous.label}</p>}
-        </div>
-        {reportTo && (
-          <button type="button" onClick={() => navigate(reportTo)} className={REPORT_BUTTON} title="Open this chart in Reports">
-            View in Reports <ArrowUpRight size={13} />
-          </button>
-        )}
-      </div>
-      {(summary || legend) && (
-        <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
-          {legend}
-          {summary && <span className="ml-auto">{summary}</span>}
-        </div>
-      )}
-      <div className="min-h-0 flex-1">{children}</div>
-    </section>
   );
 }
 
@@ -128,44 +107,12 @@ const barLegend = (
   </>
 );
 
-/** Bags collected each day this month, last month's same days dashed behind it. */
-export function BagsChartCard({ summary, reportTo }) {
-  const { now, before } = summary;
-  return (
-    <ChartCard
-      title="Bags Collected"
-      period={summary.period}
-      legend={lineLegend}
-      summary={<>{formatMetric(now.bags)} vs {formatMetric(before.bags)} bags <Change change={summary.change.bags} className="ml-1" /></>}
-      reportTo={reportTo}
-    >
-      <TrendChart data={summary.trend} comparing height={220} emptyText="No bags collected this month or the same days last month." />
-    </ChartCard>
-  );
-}
-
-/** Cleanups finished each day this month, beside last month's same days. */
-export function CleanupsChartCard({ summary, reportTo }) {
-  const { now, before } = summary;
-  return (
-    <ChartCard
-      title="Cleanups Finished"
-      period={summary.period}
-      legend={barLegend}
-      summary={<>{formatMetric(now.drives)} vs {formatMetric(before.drives)} cleanups <Change change={summary.change.drives} className="ml-1" /></>}
-      reportTo={reportTo}
-    >
-      <CompareBarChart data={summary.trend} comparing height={220} emptyText="No cleanups finished this month or the same days last month." />
-    </ChartCard>
-  );
-}
-
 /** Two bars per row, this month over last month's, scaled to the largest of all. */
-function PairedBars({ rows, unit, empty }) {
+export function PairedBars({ rows, unit, empty }) {
   if (rows.length === 0) return <p className="py-6 text-center text-sm text-slate-400">{empty}</p>;
   const top = Math.max(1, ...rows.map((r) => Math.max(r.now, r.before)));
   return (
-    <ul className="space-y-3">
+    <ul className="space-y-2.5">
       {rows.map((r) => (
         <li key={r.name} className="text-xs">
           <div className="flex items-center gap-2">
@@ -189,24 +136,111 @@ function PairedBars({ rows, unit, empty }) {
   );
 }
 
-/** Trash items by type (the TROID classes) this month against last. */
-export function WasteChartCard({ summary, reportTo }) {
-  const rows = summary.waste.map((w) => ({ name: w.name, now: w.value, before: w.previous || 0, change: w.change, color: w.color }));
-  return (
-    <ChartCard title="Trash by Type" period={summary.period} legend={<span>Pieces counted in the trash reports; the thin bar is last month</span>} reportTo={reportTo}>
-      <PairedBars rows={rows} unit="pcs" empty="No trash reports filed this month or the same days last month." />
-    </ChartCard>
-  );
+/** The height of an element, kept current as it resizes (for charts that fill their card). */
+function useHeight() {
+  const ref = useRef(null);
+  const [height, setHeight] = useState(0);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return undefined;
+    const observer = new ResizeObserver(([entry]) => setHeight(Math.floor(entry.contentRect.height)));
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+  return [ref, height];
 }
 
-/** Bags by barangay (or by collection area, inside one barangay) this month against last. */
-export function PlacesChartCard({ summary, title, reportTo, limit = 6 }) {
-  const rows = summary.groups.slice(0, limit).map((g) => ({ name: g.name, now: g.current, before: g.previous, change: g.change }));
-  const more = summary.groups.length - rows.length;
+/**
+ * This month against the same dates last month in one card, a tab per chart: bags and cleanups day
+ * by day, trash by type, and bags by place (`placesLabel`: by barangay, or by collection area inside
+ * one). `reportsLink(chart)`, when given, opens the shown chart in Reports. The chart fills the card.
+ */
+export function TrendsCard({ summary, placesLabel, reportsLink: linkTo, className = "" }) {
+  const navigate = useNavigate();
+  const [tab, setTab] = useState("bags");
+  const [ref, height] = useHeight();
+  const { now, before, change, period } = summary;
+  const chartHeight = Math.max(160, height);
+
+  const tabs = [
+    {
+      id: "bags",
+      label: "Bags",
+      legend: lineLegend,
+      total: <>{formatMetric(now.bags)} vs {formatMetric(before.bags)} bags <Change change={change.bags} className="ml-1" /></>,
+      body: <TrendChart data={summary.trend} comparing height={chartHeight} emptyText="No bags collected this month or the same days last month." />,
+    },
+    {
+      id: "cleanups",
+      label: "Cleanups",
+      legend: barLegend,
+      total: <>{formatMetric(now.drives)} vs {formatMetric(before.drives)} cleanups <Change change={change.drives} className="ml-1" /></>,
+      body: <CompareBarChart data={summary.trend} comparing height={chartHeight} emptyText="No cleanups finished this month or the same days last month." />,
+    },
+    {
+      id: "waste",
+      label: "Trash by type",
+      legend: <span>Pieces in the trash reports; the thin bar is last month</span>,
+      body: (
+        <PairedBars
+          rows={summary.waste.map((w) => ({ name: w.name, now: w.value, before: w.previous || 0, change: w.change, color: w.color }))}
+          unit="pcs"
+          empty="No trash reports filed this month or the same days last month."
+        />
+      ),
+    },
+    {
+      id: "places",
+      label: placesLabel,
+      legend: <span>Bags; the thin bar is last month</span>,
+      body: (
+        <PairedBars
+          rows={summary.groups.map((g) => ({ name: g.name, now: g.current, before: g.previous, change: g.change }))}
+          unit="bags"
+          empty="No bags collected this month or the same days last month."
+        />
+      ),
+    },
+  ];
+  const shown = tabs.find((t) => t.id === tab);
+  const isChart = tab === "bags" || tab === "cleanups";
+
   return (
-    <ChartCard title={title} period={summary.period} legend={<span>Bags; the thin bar is last month</span>} reportTo={reportTo}>
-      <PairedBars rows={rows} unit="bags" empty="No bags collected this month or the same days last month." />
-      {more > 0 && <p className="mt-3 text-[11px] text-slate-400">And {more} more in Reports.</p>}
-    </ChartCard>
+    <section className={`${DASHBOARD_CARD} flex flex-col p-4 ${className}`}>
+      <div className="mb-2 flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <h2 className="text-[15px] font-bold text-slate-900">This Month vs Last</h2>
+          <p className="mt-0.5 text-[11px] text-slate-400">{period.label} vs {period.previous.label}</p>
+        </div>
+        {linkTo && (
+          <button type="button" onClick={() => navigate(linkTo(tab))} className={REPORT_BUTTON} title="Open this chart in Reports">
+            Reports <ArrowUpRight size={13} />
+          </button>
+        )}
+      </div>
+      <div className="mb-2 flex gap-1 rounded-lg bg-slate-100 p-0.5" role="tablist" aria-label="Chart">
+        {tabs.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            role="tab"
+            aria-selected={tab === t.id}
+            onClick={() => setTab(t.id)}
+            className={`flex-1 truncate rounded-md px-2 py-1 text-[11px] font-semibold transition-colors ${
+              tab === t.id ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-800"
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+      <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-slate-500">
+        {shown.legend}
+        {shown.total && <span className="ml-auto">{shown.total}</span>}
+      </div>
+      <div ref={ref} className={`min-h-[160px] flex-1 ${isChart ? "overflow-hidden" : "overflow-y-auto pr-1"}`}>
+        {shown.body}
+      </div>
+    </section>
   );
 }
